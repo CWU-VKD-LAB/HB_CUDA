@@ -9,4 +9,4 @@ when compared to Black-Box models.
 
 Compile:
 
-nvcc -o a .\HyperBlocks.cpp
+nvcc -o a .\Host.cpp

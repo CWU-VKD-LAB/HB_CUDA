@@ -1,0 +1,4 @@
+1. Implement Min-Max normalization
+2. Reorganize structure to make this more maintainable
+3. Translate all host code from DV code
+4. Fix the block syncing errors in cuda functions that are NOT the generation one.

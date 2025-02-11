@@ -6,6 +6,7 @@
 #include <iostream>
 #include <sstream>
 #include <cuda_runtime.h>
+#include <limits>
 
 using namespace std;
 
@@ -122,7 +123,41 @@ void saveHyperBlocksToFile(const string& filepath, const vector<vector<vector<fl
 }
 
 
+void minMaxNormalization(vector<vector<float>>& dataset) {
+    if (dataset.empty()) return;
 
+    int num_classes = dataset.size();
+
+    // Min and max values for each attribute
+    vector<float> min_vals(FIELD_LENGTH, numeric_limits<float>::max());
+    vector<float> max_vals(FIELD_LENGTH, numeric_limits<float>::lowest());
+
+    // Step 1: Find min and max for each attribute
+    for (const auto& class_data : dataset) {
+        for (size_t j = 0; j < class_data.size(); j += FIELD_LENGTH) {
+            for (int k = 0; k < FIELD_LENGTH; k++) {
+                float val = class_data[j + k];
+                min_vals[k] = min(min_vals[k], val);
+                max_vals[k] = max(max_vals[k], val);
+            }
+        }
+    }
+
+    // Step 2: Apply Min-Max normalization
+    for (auto& class_data : dataset) {
+        for (size_t j = 0; j < class_data.size(); j += FIELD_LENGTH) {
+            for (int k = 0; k < FIELD_LENGTH; k++) {
+                float& val = class_data[j + k];
+                if (max_vals[k] != min_vals[k]) {  // Avoid division by zero
+                    val = (val - min_vals[k]) / (max_vals[k] - min_vals[k]);
+                } else {
+                    cout << "Column found with useless values" << endl;
+                    val = 0.5f;  // If all values are the same, set to 0
+                }
+            }
+        }
+    }
+}
 
 // WE WILL ASSUME WE DONT HAVE A ID COLUMN.
 // WE WILL ASSSUME THE LAST COLUMN IS A CLASS COLUMN
@@ -135,6 +170,11 @@ int main() {
     cout << "NUM ATTRIBUTES : " << FIELD_LENGTH << endl;
     cout << "NUM CLASSES    : " << NUM_CLASSES << endl;
     print2DVector(data);
+    minMaxNormalization(data);
+    print2DVector(data);
+
+
+
     return 0;
 }
 

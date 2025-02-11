@@ -14,27 +14,35 @@ int NUM_CLASSES;   // Number of classes in the dataset
 int NUM_POINTS;    // Total number of points in the dataset
 int FIELD_LENGTH;  // Number of attributes in the dataset
 
-void print2DVector(const vector<vector<float>>& vec) {
-    for (const auto& row : vec) {
-        cout << "[";
-        for (const auto& val : row) {
-            cout << val << ", ";
+void print3DVector(const vector<vector<vector<float>>>& vec) {
+    for (size_t i = 0; i < vec.size(); i++) {
+        cout << "Class " << i << ":" << endl;
+        for (const auto& row : vec[i]) {
+            cout << "  [";
+            for (size_t j = 0; j < row.size(); j++) {
+                cout << row[j];
+                if (j < row.size() - 1) cout << ", ";
+            }
+            cout << "]" << endl;
         }
-        cout << "]" << endl;
+        cout << endl;  // Add spacing between classes
     }
 }
 
-/*  Returns a flattened version of the dataset
- *  each inner list is flattened dataset for ONE class
+/*  Returns a class seperated version of the dataset
+ *  Each class has an entry in the outer vector with a 2-d vector of its points
  */
-vector<vector<float>> dataSetup(const string& filepath) {
-    vector<vector<float>> data;
-    // Assign a string to int index in the data vector.
+vector<vector<vector<float>>> dataSetup(const string& filepath) {
+    // 3D vector: data[class][point][attribute]
+    vector<vector<vector<float>>> data;
+
+    // Map class labels to indices in `data`
     map<string, int> classMap;
 
     ifstream file(filepath);
-    if(!file.is_open()) {
+    if (!file.is_open()) {
         cerr << "Failed to open file " << filepath << endl;
+        return data;
     }
 
     int classNum = 0;
@@ -43,42 +51,52 @@ vector<vector<float>> dataSetup(const string& filepath) {
     // Ignore the header, can use later if needed
     getline(file, line);
 
-
     // Read through all rows of CSV
-    while(getline(file, line)) {
+    while (getline(file, line)) {
         stringstream ss(line);
         string cell;
         vector<string> row;
 
-        while(getline(ss, cell, ',')) {
+        // Read the entire row, splitting by commas
+        while (getline(ss, cell, ',')) {
             row.push_back(cell);
         }
 
-        string s = row.back();
-        // if we dont yet have the current class
-        if(classMap.count(s) == 0) {
-            classMap[s] = classNum;
+        // Skip empty lines
+        if (row.empty()) continue;
+
+        string classLabel = row.back();
+        row.pop_back();
+
+        // Check if class exists, else create new entry
+        if (classMap.count(classLabel) == 0) {
+            classMap[classLabel] = classNum;
             data.emplace_back();
             classNum++;
         }
 
-        // Iterate through the columns except the last one (the class)
-        for (int i = 0; i < row.size() - 1; i++) {
+        int classIndex = classMap[classLabel];
+
+        vector<float> point;
+        for (const string& val : row) {
             try {
-                // Try to convert string to float
-                float value = stof(row.at(i));
-                data[classMap[s]].push_back(value);
-            } catch (const invalid_argument& e) {
-                cerr << "Invalid value '" << row.at(i) << "' at row " << classNum << endl;
+                point.push_back(stof(val));  // Convert to float and add to the point
+            } catch (const invalid_argument&) {
+                cerr << "Invalid value '" << val << "' in CSV" << endl;
+                point.push_back(0.0f);  // Default to 0 if conversion fails
             }
         }
 
-        // dont ask.
-        FIELD_LENGTH = static_cast<int>(row.size()) - 1;
+        // Add the points
+        data[classIndex].push_back(point);
     }
+
     file.close();
 
+    // Set global variables
+    FIELD_LENGTH = data.empty() ? 0 : static_cast<int>(data[0][0].size());
     NUM_CLASSES = classNum;
+
     return data;
 }
 
@@ -123,7 +141,7 @@ void saveHyperBlocksToFile(const string& filepath, const vector<vector<vector<fl
 }
 
 
-void minMaxNormalization(vector<vector<float>>& dataset) {
+void minMaxNormalization(vector<vector<vector<float>>>& dataset) {
     if (dataset.empty()) return;
 
     int num_classes = dataset.size();
@@ -134,25 +152,24 @@ void minMaxNormalization(vector<vector<float>>& dataset) {
 
     // Step 1: Find min and max for each attribute
     for (const auto& class_data : dataset) {
-        for (size_t j = 0; j < class_data.size(); j += FIELD_LENGTH) {
+        for (const auto& point : class_data) {
             for (int k = 0; k < FIELD_LENGTH; k++) {
-                float val = class_data[j + k];
-                min_vals[k] = min(min_vals[k], val);
-                max_vals[k] = max(max_vals[k], val);
+                min_vals[k] = min(min_vals[k], point[k]);
+                max_vals[k] = max(max_vals[k], point[k]);
             }
         }
     }
 
     // Step 2: Apply Min-Max normalization
     for (auto& class_data : dataset) {
-        for (size_t j = 0; j < class_data.size(); j += FIELD_LENGTH) {
+        for (auto& point : class_data) {
             for (int k = 0; k < FIELD_LENGTH; k++) {
-                float& val = class_data[j + k];
-                if (max_vals[k] != min_vals[k]) {  // Avoid division by zero
-                    val = (val - min_vals[k]) / (max_vals[k] - min_vals[k]);
+                // Avoid div/0
+                if (max_vals[k] != min_vals[k]) {
+                    point[k] = (point[k] - min_vals[k]) / (max_vals[k] - min_vals[k]);
                 } else {
                     cout << "Column found with useless values" << endl;
-                    val = 0.5f;  // If all values are the same, set to 0
+                    point[k] = 0.5f;
                 }
             }
         }
@@ -165,14 +182,13 @@ int main() {
     printf("USER WARNING :: ENSURE THAT THERE IS NO ID COLUMN\n");
     printf("USER WARNING :: ENSURE THAT THE LAST COLUMN IS A CLASS COLUMN\n");
 
-    vector<vector<float>> data = dataSetup("./datasets/iris.csv");
+    vector<vector<vector<float>>> data = dataSetup("./datasets/iris.csv");
 
     cout << "NUM ATTRIBUTES : " << FIELD_LENGTH << endl;
     cout << "NUM CLASSES    : " << NUM_CLASSES << endl;
-    print2DVector(data);
+    print3DVector(data);
     minMaxNormalization(data);
-    print2DVector(data);
-
+    print3DVector(data);
 
 
     return 0;

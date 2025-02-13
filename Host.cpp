@@ -113,7 +113,7 @@ vector<vector<vector<float>>> dataSetup(const string& filepath) {
 
 
 // Function to generate hyperblocks
-void generateHBs(vector<vector<float>>& data_with_skips, vector<vector<float>>& data_without_skips) {
+void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_blocks) {
 
 
 }
@@ -189,10 +189,10 @@ void minMaxNormalization(vector<vector<vector<float>>>& dataset) {
 
 
 
-
+// Source
 void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vector<vector<vector<float>>>& all_data, vector<HyperBlock>& hyper_blocks) {
     // Mark uniform columns
-    vector<bool> removed = markUniformColumns(); // Assuming this function exists
+    vector<bool> removed = markUniformColumns(all_data); // Assuming this function exists
 
     // Initialize CUDA
     cudaDeviceProp prop;

@@ -5,12 +5,18 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <algorithm>
 #include <cuda_runtime.h>
 #include <limits>
 #include "CudaUtil.h"
 
 using namespace std;
 
+int NUM_CLASSES;   // Number of classes in the dataset
+int NUM_POINTS;    // Total number of points in the dataset
+int FIELD_LENGTH;  // Number of attributes in the dataset
+
+// Struct version of a HyperBlock.
 struct HyperBlock {
     vector<vector<float>> maximums;
     vector<vector<float>> minimums;
@@ -21,9 +27,184 @@ struct HyperBlock {
                int cls) : maximums(maxs), minimums(mins), classNum(cls) {}
 };
 
-int NUM_CLASSES;   // Number of classes in the dataset
-int NUM_POINTS;    // Total number of points in the dataset
-int FIELD_LENGTH;  // Number of attributes in the dataset
+// Struct version of DataATTR record
+struct DataATTR {
+    float value; // Value of one attribute of a point
+    int classNum; // The class number of the point
+    int classIndex; // The index of point within the class
+
+    DataATTR(float val, int cls, int index) : value(val), classNum(cls), classIndex(index) {}
+};
+
+// Interval struct to make interval thing more understandable
+struct Interval{
+    int size;
+    int start;
+    int end;
+    int attribute;
+
+    Interval(int s, int st, int e, int a) : size(s), start(st), end(e), attribute(a) {}
+};
+
+
+
+///////////////////////// FUNCTIONS FOR INTERVAL_HYPER IMPLEMENTATION /////////////////////////
+
+/**
+ * Seperates data into seperate vecs by attribute
+ */
+vector<vector<DataATTR>> separateByAttribute(vector<vector<vector<float>>>& data){
+    vector<vector<DataATTR>> attributes;
+
+    // Go through the attribute columns
+    for(int k = 0; k < FIELD_LENGTH; k++){
+        vector<DataATTR> tmpField;
+
+        // Go through the classes
+        for(int i = 0; i < data.size(); i++){
+            // Go through the points
+            for(int j = 0; j < data[i].size(); j++){
+                tmpField.push_back(DataATTR(data[i][j][k], i, j));
+            }
+        }
+    
+        // Sort data by value then add
+        sort(tmpField.begin(), tmpField.end(), [](const DataATTR& a, const DataATTR& b) {
+            return a.value < b.value;
+        });
+        attributes.push_back(tmpField);
+    }
+
+    return attributes;
+}
+
+/***
+ * This will sort the array based on the "best" columns values
+ * 
+ * The columns themselves aren't moving, we are moving the points
+ * based on the one columns values;
+ */
+void sortByColumn(vector<vector<float>>& classData, int colIndex) {
+    sort(classData.begin(), classData.end(), [colIndex](const vector<float>& a, const vector<float>& b) {
+        return a[colIndex] < b[colIndex];
+    });
+}
+
+/***
+ * Finds the longest interval in a sorted list of data by attribute.
+ * @param data_by_attr sorted data by attribute
+ * @param acc_threshold accuracy threshold for interval
+ * @param existing_hb existing hyperblocks to check for overlap
+ * @param attr attribute to find interval on
+ * @return longest interval
+*/
+Interval longest_interval(vector<DataATTR>& data_by_attr, float acc_threshold, vector<HyperBlock>& existing_hb, int attr){
+    Interval intr(1, 0, 0, attr);
+    Interval max_intr(-1, -1, -1, attr);
+
+    int n = data_by_attr.size();
+    float misclassified = 0;
+
+    for(int i = 1; i < n; i++){
+        // If current class matches with next
+        if(data_by_attr[intr.start].classNum == data_by_attr[i].classNum){
+            intr.size++;
+        }
+        else if( (misclassified+1) / intr.size > acc_threshold){
+            // ^ i think this is a poor way to check. but not changing rn for the translation from java
+            misclassified++;
+            intr.size++;
+        }
+        else{
+            // Remove value from interval if accuracy is below threshold.
+            if(data_by_attr[i-1].value == data_by_attr[i].value){
+                // remove then skip overlapped values
+                remove_value_from_interval(data_by_attr, intr, data_by_attr[i].value);
+                i = skip_value_in_interval(data_by_attr, i, data_by_attr[i].value);
+            }
+
+            // Update longest interval if it doesn't overlap
+            if(intr.size > max_intr.size && check_interval_overlap(data_by_attr, intr, attr, existing_hb)){
+                max_intr.start = intr.start;
+                max_intr.end = intr.end;
+                max_intr.size = intr.size;
+            }
+
+            // Reset curr interval
+            intr.size = 1;
+            intr.start = i;
+            misclassified = 0;
+        }
+        intr.end = i;
+    }
+
+    // final check update longest interval if it doesn't overlap
+    if(intr.size > max_intr.size && check_interval_overlap(data_by_attr, intr, attr, existing_hb)){
+        max_intr.start = intr.start;
+        max_intr.end = intr.end;
+        max_intr.size = intr.size;
+    }
+
+    return max_intr;
+}
+
+
+bool check_interval_overlap(vector<DataATTR>& data_by_attr, Interval& intr, int attr, vector<HyperBlock>& existing_hb){
+    // interval range of vals
+    float intv_min = data_by_attr[intr.start].value;
+    float intv_max = data_by_attr[intr.end].value;
+   
+    /*
+    *   check if interval range overlaps with any existing hyperblocks
+    * to not overlap the interval maximum must be below all existing hyperblock minimums
+    * or the interval minimum must be above all existing hyperblock maximums
+    */
+    for(const HyperBlock& hb : existing_hb){
+        if (!(intv_max < hb.minimums.at(attr).at(0) || intv_min > hb.maximums.at(attr).at(0))){
+            return false;
+        }
+    }
+
+    // If unique return true
+    return true;
+}
+
+
+
+//skip_value_in_interval
+int skip_value_in_interval(vector<DataATTR>& data_by_attr, int i, float value){
+    while(data_by_attr[i].value == value){
+        if(i < data_by_attr.size() - 1){
+            i++;
+        }
+        else{
+            break;
+        }
+    }
+
+    return i;
+}
+
+
+
+//remove_value_from_interval
+void remove_value_from_interval(vector<DataATTR>& data_by_attr, Interval& intr, float value){
+    while(data_by_attr[intr.end].value == value){
+        if(intr.end > intr.start){
+            intr.size--;
+            intr.end--;
+        }
+        else{
+            intr.size = -1;
+            break;
+        }
+    }
+}
+
+
+
+///////////////////////// END FUNCTIONS FOR INTERVAL_HYPER IMPLEMENTATION /////////////////////////
+
 
 void print3DVector(const vector<vector<vector<float>>>& vec) {
     for (size_t i = 0; i < vec.size(); i++) {

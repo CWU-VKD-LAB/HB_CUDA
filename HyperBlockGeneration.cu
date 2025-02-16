@@ -9,7 +9,7 @@ namespace cg = cooperative_groups;
 // iterate to the next one, merging the blocks to that one and so on.
 // we have only passed in countercases, not cases of our own class, all the blocks we are testing are also already the same class.
 // may need some changing around, when we test with a dataset over 2000 ish attributes we can't use shared memory to store the seedblock attributes, so we just will use global if such a thing happens.
-__global__ void GenerateHyperBlocks(float *hyperBlockMins, float *hyperBlockMaxes, float *combinedMins, float *combinedMaxes, int *deleteFlags, int *mergable, const int numAttributes, float* points, const int numPoints, const int numBlocks, int* readSeedQueue, int* writeSeedQueue){
+__global__ void merger_cuda(float *hyperBlockMins, float *hyperBlockMaxes, float *combinedMins, float *combinedMaxes, int *deleteFlags, int *mergable, const int numAttributes, float* points, const int numPoints, const int numBlocks, int* readSeedQueue, int* writeSeedQueue){
 
     extern __shared__ float seedBlockAttributes[];
     const cg::grid_group grid = cg::this_grid();

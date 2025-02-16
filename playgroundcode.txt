@@ -1,0 +1,347 @@
+// This has code snippets i want to implement into main structure later on campus.
+
+
+
+
+// New Snippet #1
+#include <vector>
+#include <algorithm>
+#include <future>
+#include <thread>
+
+using namespace std;
+
+struct HyperBlock {
+    vector<vector<float>> maximums;
+    vector<vector<float>> minimums;
+    int classNum;
+
+    HyperBlock(const vector<vector<float>>& maxs,
+               const vector<vector<float>>& mins,
+               int cls) : maximums(maxs), minimums(mins), classNum(cls) {}
+};
+
+// Optional struct for if we want to sort data by attribute
+struct DataATTR {
+    float value;
+    int cl;
+    int cl_index;
+
+    DataATTR(float v, int c, int i) : value(v), cl(c), cl_index(i) {}
+};
+
+class IntervalFinder {
+private:
+    // Skip overlapping values in interval
+    int skipValueInInterval(const vector<DataATTR>& dataByAttr, int index, float value) {
+        while (index < dataByAttr.size() && dataByAttr[index].value == value) {
+            index++;
+        }
+        return index;
+    }
+
+    // Remove overlapping values from interval
+    void removeValueFromInterval(const vector<DataATTR>& dataByAttr, vector<int>& intr, float value) {
+        while (intr[2] >= intr[1] && dataByAttr[intr[2]].value == value) {
+            intr[0]--;
+            intr[2]--;
+            if (intr[2] < intr[1]) {
+                intr[0] = -1;
+                break;
+            }
+        }
+    }
+
+    // Check if interval overlaps with existing hyperblocks
+    bool checkIntervalHyperblockOverlap(const vector<DataATTR>& dataByAttr,
+                                      const vector<int>& intv,
+                                      int attr,
+                                      const vector<HyperBlock>& existingHb) {
+        float intvMin = dataByAttr[intv[1]].value;
+        float intvMax = dataByAttr[intv[2]].value;
+
+        for (const auto& hb : existingHb) {
+            if (!(intvMax < hb.minimums[attr][0] || intvMin > hb.maximums[attr][0])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Find longest interval for a single attribute
+    vector<int> longestInterval(const vector<DataATTR>& dataByAttr,
+                              const vector<HyperBlock>& existingHb,
+                              int attr) {
+        vector<int> intr = {1, 0, 0};  // {size, start, end}
+        vector<int> maxIntr = {-1, -1, -1, -1};  // {size, start, end, attr}
+        int n = dataByAttr.size();
+
+        for (int i = 1; i < n; i++) {
+            if (dataByAttr[intr[1]].cl == dataByAttr[i].cl) {
+                intr[0]++;
+            }
+            else {
+                // Remove value if overlapping
+                if (dataByAttr[i - 1].value == dataByAttr[i].value) {
+                    removeValueFromInterval(dataByAttr, intr, dataByAttr[i].value);
+                    i = skipValueInInterval(dataByAttr, i, dataByAttr[i].value);
+                }
+
+                // Update longest interval if no overlap
+                if (intr[0] > maxIntr[0] &&
+                    checkIntervalHyperblockOverlap(dataByAttr, intr, attr, existingHb)) {
+                    maxIntr[0] = intr[0];
+                    maxIntr[1] = intr[1];
+                    maxIntr[2] = intr[2];
+                    maxIntr[3] = attr;
+                }
+
+                // Reset interval
+                intr[0] = 1;
+                intr[1] = i;
+            }
+            intr[2] = i;
+        }
+
+        // Check final interval
+        if (intr[0] > maxIntr[0] &&
+            checkIntervalHyperblockOverlap(dataByAttr, intr, attr, existingHb)) {
+            maxIntr[0] = intr[0];
+            maxIntr[1] = intr[1];
+            maxIntr[2] = intr[2];
+            maxIntr[3] = attr;
+        }
+
+        return maxIntr;
+    }
+
+public:
+    // Convert 3D vector data to DataATTR format for a single attribute
+    vector<DataATTR> convertToDataAttr(const vector<vector<vector<float>>>& data,
+                                     int attr) {
+        vector<DataATTR> dataByAttr;
+        for (int cl = 0; cl < data.size(); cl++) {
+            for (int pt = 0; pt < data[cl].size(); pt++) {
+                dataByAttr.emplace_back(data[cl][pt][attr], cl, pt);
+            }
+        }
+        sort(dataByAttr.begin(), dataByAttr.end(),
+             [](const DataATTR& a, const DataATTR& b) { return a.value < b.value; });
+        return dataByAttr;
+    }
+
+    // Find largest interval across all dimensions
+    vector<pair<float, int>> findLargestInterval(
+        const vector<vector<vector<float>>>& data,
+        const vector<HyperBlock>& existingHb) {
+
+        int numAttrs = data[0][0].size();
+        vector<future<vector<int>>> futures;
+        vector<vector<DataATTR>> dataByAttrs(numAttrs);
+
+        // Convert data for each attribute
+        for (int i = 0; i < numAttrs; i++) {
+            dataByAttrs[i] = convertToDataAttr(data, i);
+        }
+
+        // Launch threads for each attribute
+        for (int i = 0; i < numAttrs; i++) {
+            futures.push_back(async(launch::async,
+                [this, &dataByAttrs, &existingHb, i]() {
+                    return longestInterval(dataByAttrs[i], existingHb, i);
+                }));
+        }
+
+        // Find best interval
+        vector<int> best = {-1, -1, -1, -1};
+        for (auto& future : futures) {
+            auto interval = future.get();
+            if (interval[0] > 1 && interval[0] > best[0]) {
+                best = interval;
+            }
+        }
+
+        // Convert result to pairs of (value, class)
+        vector<pair<float, int>> result;
+        if (best[0] != -1) {
+            for (int i = best[1]; i <= best[2]; i++) {
+                result.emplace_back(dataByAttrs[best[3]][i].value,
+                                  dataByAttrs[best[3]][i].cl);
+            }
+        }
+
+        return result;
+    }
+};
+
+
+
+// New Snippet #2
+#include <vector>
+#include <algorithm>
+#include <chrono>
+#include <iostream>
+#include <thread>
+#include <memory>
+
+using namespace std;
+
+class HyperBlockGenerator {
+private:
+    vector<vector<vector<float>>> data;  // [class][point][attribute]
+    vector<HyperBlock> hyperBlocks;
+    int bestAttribute;
+    unique_ptr<IntervalFinder> intervalFinder;
+
+    // Sort data by specific column/attribute
+    void sortByColumn(vector<vector<float>>& data, int column) {
+        sort(data.begin(), data.end(),
+            [column](const vector<float>& a, const vector<float>& b) {
+                return a[column] < b[column];
+            });
+    }
+
+    // Order hyperblocks by class
+    void orderHBsByClass() {
+        // First, group blocks by class
+        map<int, vector<HyperBlock>> blocksByClass;
+
+        for (const auto& hb : hyperBlocks) {
+            blocksByClass[hb.classNum].push_back(hb);
+        }
+
+        // Clear current hyperblocks
+        hyperBlocks.clear();
+
+        // Add blocks back in class order
+        for (auto& [classNum, blocks] : blocksByClass) {
+            // Sort blocks within each class by size (descending)
+            sort(blocks.begin(), blocks.end(),
+                [](const HyperBlock& a, const HyperBlock& b) {
+                    // Assuming size is determined by the first dimension's size
+                    return a.maximums[0].size() > b.maximums[0].size();
+                });
+
+            // Add sorted blocks back to main vector
+            hyperBlocks.insert(hyperBlocks.end(), blocks.begin(), blocks.end());
+        }
+    }
+
+
+public:
+    HyperBlockGenerator(const vector<vector<vector<float>>>& inputData, int bestAttr) : data(inputData), bestAttribute(bestAttr) {
+        intervalFinder = make_unique<IntervalFinder>();
+    }
+
+    void generateHBs(bool removeOld, vector<HyperBlock>& hyper_blocks) {
+        // Clear existing hyperblocks if requested
+        if (removeOld) {
+            hyper_blocks.clear();
+        }
+
+        vector<HyperBlock> genHB;
+        vector<vector<pair<float, int>>> allIntervals;
+
+        // Record start time
+        auto startTime = chrono::high_resolution_clock::now();
+
+        // Initial hyperblock generation using interval finder
+        while (true) {
+            auto interval = intervalFinder->findLargestInterval(data, genHB);
+
+            if (interval.size() > 1) {
+                // Create new hyperblock from interval
+                vector<vector<float>> intervalData;
+                int classNum = interval[0].second;  // Get class from first point
+
+                // Extract data points for the interval
+                for (const auto& point : interval) {
+                    // Add the original data point to intervalData
+                    intervalData.push_back(data[point.second][point.first]);
+                }
+
+                // Create and add new hyperblock
+                vector<vector<float>> maxs(data[0][0].size());  // Number of attributes
+                vector<vector<float>> mins(data[0][0].size());
+
+                // Calculate mins and maxs for each attribute
+                for (size_t attr = 0; attr < data[0][0].size(); attr++) {
+                    float min_val = intervalData[0][attr];
+                    float max_val = intervalData[0][attr];
+                    for (const auto& point : intervalData) {
+                        min_val = min(min_val, point[attr]);
+                        max_val = max(max_val, point[attr]);
+                    }
+                    mins[attr].push_back(min_val);
+                    maxs[attr].push_back(max_val);
+                }
+
+                genHB.emplace_back(maxs, mins, classNum);
+                allIntervals.push_back(interval);
+            } else {
+                break;
+            }
+        }
+
+        // Record end time for interval generation
+        auto endTime = chrono::high_resolution_clock::now();
+        auto duration = chrono::duration_cast<chrono::milliseconds>(endTime - startTime);
+        cout << "Parallelized Interval HB creation time: " << duration.count() << " milliseconds" << endl;
+
+        // Add generated hyperblocks to main collection
+        hyper_blocks.insert(hyper_blocks.end(), genHB.begin(), genHB.end());
+
+        // Prepare data for merging
+        vector<vector<vector<float>>> seedData;
+        vector<vector<vector<float>>> datumCopy = data;
+
+        // Initialize seedData structure
+        seedData.resize(data.size());
+
+        // Remove points that are in intervals from seedData
+        vector<vector<int>> skipIndices(data.size());
+        for (const auto& interval : allIntervals) {
+            for (const auto& point : interval) {
+                skipIndices[point.second].push_back(point.first);
+            }
+        }
+
+        // Sort skip indices for each class
+        for (auto& indices : skipIndices) {
+            sort(indices.begin(), indices.end());
+        }
+
+        // Create seed data excluding points in intervals
+        for (size_t i = 0; i < data.size(); i++) {
+            auto skipIt = skipIndices[i].begin();
+            for (size_t j = 0; j < data[i].size(); j++) {
+                if (skipIt == skipIndices[i].end() || j != *skipIt) {
+                    seedData[i].push_back(data[i][j]);
+                } else {
+                    ++skipIt;
+                }
+            }
+        }
+
+        // Sort by best attribute
+        for (auto& classData : datumCopy) {
+            sortByColumn(classData, bestAttribute);
+        }
+        for (auto& classData : seedData) {
+            sortByColumn(classData, bestAttribute);
+        }
+
+        // Perform merging and ordering
+        try {
+            merger_cuda(datumCopy, seedData);
+            orderHBsByClass();
+        } catch (const exception& e) {
+            cerr << "Error generating hyperblocks: " << e.what() << endl;
+            return;
+        }
+    }
+
+    const vector<HyperBlock>& getHyperBlocks() const {
+        return hyperBlocks;
+    }
+};

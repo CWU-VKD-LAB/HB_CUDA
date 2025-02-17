@@ -169,8 +169,6 @@ bool check_interval_overlap(vector<DataATTR>& data_by_attr, Interval& intr, int 
     return true;
 }
 
-
-
 //skip_value_in_interval
 int skip_value_in_interval(vector<DataATTR>& data_by_attr, int i, float value){
     while(data_by_attr[i].value == value){
@@ -184,7 +182,6 @@ int skip_value_in_interval(vector<DataATTR>& data_by_attr, int i, float value){
 
     return i;
 }
-
 
 
 //remove_value_from_interval
@@ -293,12 +290,143 @@ vector<vector<vector<float>>> dataSetup(const string& filepath) {
 }
 
 
-// Function to generate hyperblocks
-void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_blocks) {
+// ------------------------------------------------------------------------------------------------
+// REFACTORED MERGER HYPER BLOCKS KERNEL FUNCTION. DOESN'T NEED THE COOPERATIVE GROUPS.
+// ------------------------------------------------------------------------------------------------
 
+#define min(a, b) (a > b)? b : a
+#define max(a, b) (a > b)? a : b
+__global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const int numBlocks, const int numAttributes, const int numPoints, const float *opposingPoints, float *hyperBlockMins, float *hyperBlockMaxes, int *deleteFlags, int *mergable){ 
 
+    // get our block index. which block are we on?
+    const int blockIndex = blockIdx.x;
+
+    // get our local ID. which thread of the block are we?
+    const int localID = threadIdx.x;
+
+    // get our seed block.
+    const int seedBlock = readSeedQueue[seedIndex];
+
+    // every block tries to do this, so that we can make sure and not start executing until the flag is set.
+    // it only updates once obviously, but it makes all the other blocks wait until someone has set that value.
+    if (localID == 0){
+        atomicMin(&deleteFlags[seedBlock], -9);
+        atomicMin(&mergable[seedBlock], -1);
+    }
+    // all the threads of a block are going to deal with their flag to determine our early out condition.
+    __shared__ int blockMergable; 
+
+    // our shared memory will store the bounds of a hyperblock. each cuda block will run through one block at a time. with an offset of gridDim.x * numAttributes
+    extern __shared__ float hyperBlockAttributes[];
+    // copy into our attributes the combined mins and maxes of seed block and our current block. 
+    float *localBlockMins = &hyperBlockAttributes[0];
+    float *localBlockMaxes = &hyperBlockAttributes[numAttributes];
+
+    __syncthreads();
+    // iterate through all the blocks, with a stride of numBlocks of CUDA that we have. 
+    for(int i = blockIndex; i < numBlocks; i+= gridDim.x){
+
+        // if the block has already been a seed block, we aren't going to do our merging business with it.
+        if (deleteFlags[i] < 0 || i == seedBlock){
+            continue;
+        }
+
+        // set our flag to 1, since we are passing until someone fails.
+        if (localID == 0){
+            blockMergable = 1;
+        }
+
+        // copy the mins and maxes of the seed block merged with our current block into our shared memory
+        for(int att = localID; att < numAttributes; att += blockDim.x){
+            localBlockMins[att] = min(hyperBlockMins[seedBlock * numAttributes + att], hyperBlockMins[i * numAttributes + att]);
+            localBlockMaxes[att] = max(hyperBlockMaxes[seedBlock * numAttributes + att], hyperBlockMaxes[i * numAttributes + att]);
+        }
+
+        // sync so we don't start early.
+        __syncthreads();
+
+        // now we need to check if the current block is mergable with the seed block.
+        // to do this we simply check all the datapoints. before a thread starts a datapoint, we are going to check the shared flag and make sure it's worth our time.
+        // if any threads finds unmergable, we set the flag, and wait for everyone else.
+        for(int pointIndex = localID; pointIndex < numPoints && blockMergable; pointIndex += blockDim.x){
+            char someAttributeOutside = 0;
+            for(int att = 0; att < numAttributes; att++){
+                if(opposingPoints[pointIndex * numAttributes + att] > localBlockMaxes[att] || opposingPoints[pointIndex * numAttributes + att] < localBlockMins[att]){
+                    someAttributeOutside = 1;
+                    break;
+                }
+            }
+            // if every single attribute was inside, we have failed. since these are all opposing points.
+            if(!someAttributeOutside){
+                blockMergable = 0;
+                break;
+            }
+        }
+        // wait for everyone else to finish that block.
+        __syncthreads();
+
+        // if it was mergable, we copy the mins and maxes into the original array.
+        if (blockMergable){
+            for(int att = localID; att < numAttributes; att += blockDim.x){
+                hyperBlockMins[i * numAttributes + att] = localBlockMins[att];
+                hyperBlockMaxes[i * numAttributes + att] = localBlockMaxes[att];
+            }
+
+            // now we update the delete flag for the seed block to show that it is trash.
+            if (localID == 0){
+                atomicMax(&deleteFlags[seedBlock], -1);
+            }
+        }
+        // if we're the first thread, we need to write the delete flags properly.
+        if (localID == 0){
+            mergable[i] = blockMergable;
+        }
+        // must sync here so that we don't accidentally pick a seed block while we are updating the delete flags queue potentially.
+        __syncthreads();
+    } // end of checking one single block.
 }
 
+__global__ void rearrangeQueue(int *readSeedQueue,  int *writeSeedQueue, int *deleteFlags, const int numBlocks){
+
+    const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
+    const int globalThreadCount = gridDim.x * blockDim.x;
+    // now we are just going to loop through the seed queue and compute each blocks new position in the queue. 
+    for(int i = threadID; i < numBlocks; i += globalThreadCount){
+        // if the block is dead, we just copy it over. it is dead if we have already used it as a seed block.
+        if (deleteFlags[i] < 0){
+            writeSeedQueue[i] = readSeedQueue[i];
+            continue;
+        }
+        // if we didn't merge, we are just going to iterate through and our new index is just the amount of numbers <= 0 to our LEFT.
+        if (mergable[i] == 0){
+            int newIndex = 0;
+            for(int j = 0; j < i; j++){
+                if (mergable[j] < 0){
+                    newIndex++;
+                }
+            }
+            writeSeedQueue[newIndex] = readSeedQueue[i];
+        }
+        else{
+            int count = 0;
+            // if we did merge our new index is the amount of 1's (flags that we merged) to our LEFT, SUBTRACTED FROM N - 1.
+            // this is because if you were at the front and merged we want you to go to the back.
+            for(int j = 0; j < i; j++){
+                if (mergable[j] == 1){
+                    count++;
+                }
+            }
+            writeSeedQueue[numBlocks - 1 - count] = readSeedQueue[i];
+        }
+    }
+}
+
+__global__ void resetFlags(int *mergableFlags, const int numBlocks){
+    // make all the flags 0.
+    for(int i = blockIdx.x * blockDim.x + threadIdx.x; i < numBlocks; i += gridDim.x * blockDim.x){
+        mergableFlags[i] = 0;
+    }
+}
 
 /* This needs to be a function to serialize hyperblocks.
  * take in 3-D vector that is the hyperblocks for each class
@@ -368,8 +496,6 @@ void minMaxNormalization(vector<vector<vector<float>>>& dataset) {
     }
 }
 
-
-
 // Source
 void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vector<vector<vector<float>>>& all_data, vector<HyperBlock>& hyper_blocks) {
     // Mark uniform columns
@@ -395,6 +521,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
 
     // Process each class
     for (int classN = 0; classN < NUM_CLASSES; classN++) {
+        
         int totalDataSetSizeFlat = numPoints * FIELD_LENGTH;
         int sizeWithoutHBpoints = ((data_with_skips[classN].size() + numBlocksOfEachClass[classN]) * FIELD_LENGTH);
 
@@ -514,11 +641,11 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         for (int i = 0; i < hyperBlockMinsC.size(); i += FIELD_LENGTH) {
             if (deleteFlagsC[i / FIELD_LENGTH] == -1) continue;
 
-            vector<vector<float>> blockMins(DataVisualizer::fieldLength);
-            vector<vector<float>> blockMaxes(DataVisualizer::fieldLength);
+            vector<vector<float>> blockMins(FIELD_LENGTH);
+            vector<vector<float>> blockMaxes(FIELD_LENGTH);
 
             int realIndex = 0;
-            for (int j = 0; j < DataVisualizer::fieldLength; j++) {
+            for (int j = 0; j < FIELD_LENGTH; j++) {
                 if (removed[j]) {
                     blockMins[j].push_back(0.0f);
                     blockMaxes[j].push_back(2.0f);
@@ -559,8 +686,5 @@ int main() {
     minMaxNormalization(data);
     print3DVector(data);
 
-
     return 0;
 }
-
-

@@ -292,6 +292,7 @@ vector<vector<vector<float>>> dataSetup(const string& filepath) {
 
 // ------------------------------------------------------------------------------------------------
 // REFACTORED MERGER HYPER BLOCKS KERNEL FUNCTION. DOESN'T NEED THE COOPERATIVE GROUPS.
+// WRAP IN A LOOP. launch mergerHyperBlocks with i up to N - 1 as seed index, each time then rearrange, then reset.
 // ------------------------------------------------------------------------------------------------
 
 #define min(a, b) (a > b)? b : a
@@ -386,7 +387,7 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
     } // end of checking one single block.
 }
 
-__global__ void rearrangeQueue(int *readSeedQueue,  int *writeSeedQueue, int *deleteFlags, const int numBlocks){
+__global__ void rearrangeSeedQueue(int *readSeedQueue,  int *writeSeedQueue, int *deleteFlags, const int numBlocks){
 
     const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
     const int globalThreadCount = gridDim.x * blockDim.x;
@@ -421,10 +422,197 @@ __global__ void rearrangeQueue(int *readSeedQueue,  int *writeSeedQueue, int *de
     }
 }
 
-__global__ void resetFlags(int *mergableFlags, const int numBlocks){
+__global__ void resetMergableFlags(int *mergableFlags, const int numBlocks){
     // make all the flags 0.
     for(int i = blockIdx.x * blockDim.x + threadIdx.x; i < numBlocks; i += gridDim.x * blockDim.x){
         mergableFlags[i] = 0;
+    }
+}
+
+
+// ------------------------------------------------------------------------------------------------
+// REMOVING USELESS HYPERBLOCKS KERNEL FUNCTION. 
+// RETAINS THE LOGIC FOR A DISJUNCTIVE BLOCK.
+// LAUNCH 4 KERNELS!!! ASSIGN -> SUM -> FIND BETTER -> SUM. Once we have the count back, just delete all the HB's with 0 points remaining.
+// ------------------------------------------------------------------------------------------------
+
+// ASSIGN POINTS TO BLOCKS KERNEL FUNCTION.
+// once every point has been assigned to a block, then we can start doing our removing of useless blocks.
+__global__ void assignPointsToBlocks(const float *dataPointsArray, const int numAttributes, const int numPoints, const float *blockMins, const float *blockMaxes, const int *blockEdges, const int numBlocks, int *dataPointBlocks){
+
+    const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
+    const int globalThreadCount = gridDim.x * blockDim.x;
+
+    float *thisThreadPoint = &dataPointsArray[threadID * numAttributes];
+
+    int *dataPointBlock;       // pointer to the slot in the numPoints long array that tells us which block this point goes into.
+    float *startOfBlockMins;    // pointer to the start of the mins of the current block.
+    float *startOfBlockMaxes;  // pointer to the start of the maxes of the current block.
+    float *endOfBlock;         // pointer to the end of the current block.
+    int currentBlock;          // the current block we are on.
+    int nextBlock;             // the next block. useful because blocks are varying sizes.
+
+    for(int i = threadID; i < numPoints; i += globalThreadCount){
+        
+        currentBlock = 0;
+        nextBlock = 1;
+
+        // set out pointer to where we assign this point to a block.
+        dataPointBlock = &dataPointBlocks[i];
+        *dataPointBlock = -1;
+
+        thisThreadPoint = &dataPointsArray[i * numAttributes];
+
+        // now we iterate through all the blocks. checking which block this point falls into first.
+        while (currentBlock < numBlocks){
+
+            // set up our start of mins and maxes.
+            startOfBlockMins = &blockMins[blockEdges[currentBlock]];
+            startOfBlockMaxes = &blockMaxes[blockEdges[currentBlock]];
+            endOfBlock = &blockMins[blockEdges[nextBlock]];
+            // now, we iterate through all the blocks, and the first one our point falls into, we set that block as the value of dataPointBlock, if not we put -1 and we have a coverage issue
+
+            bool inThisBlock = true;
+
+            // the x we are at, x0, x1, ...
+            int particularAttribute = 0;
+
+            // check through all the attributes for this block.
+            while(startOfBlockMins < endOfBlock){
+
+                // get the amount of x1's that we have in this particular block
+                int countOfThisAttribute = (int)*startOfBlockMins;
+
+                // increment these two at the same time, since they have the same length and same encoding of number of attributes in them
+                startOfBlockMins++;
+                startOfBlockMaxes++;
+
+                // now loop that many times, checking if the point is in bounds of any of those intervals
+                // we don't actually use i here, because we don't want to check the next attribute of our point on accident. since we may have 2 x2's and such.
+                bool inBounds = false;
+                for(int i = 0; i < countOfThisAttribute; i++){
+
+                    const double min = *startOfBlockMins;
+                    startOfBlockMins++;
+
+                    const double max = *startOfBlockMaxes;
+                    startOfBlockMaxes++;
+
+                    const double pointValue = thisThreadPoint[particularAttribute];
+
+                    // this loop is for the disjunctive blocks. if there is just one x, it doesn't matter. when we have 4 x2's to consider, once we are in one of them, we are done.
+                    if(pointValue >= min && pointValue <= max){
+                        inBounds = true;
+                        break;
+                    }
+                }
+                if (!inBounds){
+                    inThisBlock = false;
+                    break;
+                }
+                particularAttribute++;
+            }
+            // if in this block, we can set dataPointBlock and we're done
+            if (inThisBlock){
+                *dataPointBlock = currentBlock;
+                break;
+            }
+            // increment the currentBlock and the next block. 
+            currentBlock++;
+            nextBlock++;   
+        }
+    }
+}
+
+// NOW OUR FUNCTION WHICH SUMS UP THE AMOUNT OF POINTS PER BLOCK
+__global__ void sumPointsPerBlock(const int *dataPointBlocks, const int numPoints, int *numPointsInBlocks){
+
+    const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
+    const int globalThreadCount = gridDim.x * blockDim.x;
+
+    for(int i = threadID; i < numPoints; i += globalThreadCount){
+        atomicInc(&numPointsInBlocks[dataPointBlocks[i]]);
+    }
+}
+
+__global__ void findBetterBlocks(int *dataPointsBlocks, const int numPoints, const int numBlocks, const int numAttributes, const float *points, const int *blockEdges, float *hyperBlockMins, float *hyperBlockMaxes, int *numPointsInBlocks){
+
+    const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
+    const int globalThreadCount = gridDim.x * blockDim.x;
+
+    float *startOfBlockMins;
+    float *startOfBlockMaxes;
+    float *endOfBlock;
+    int *dataPointBlock;
+    for(int i = threadID; i < numPoints; i += globalThreadCount){
+        
+        int currentBlock = dataPointsBlocks[i];
+        int nextBlock = currentBlock + 1;
+        dataPointBlock = &dataPointsBlocks[i];
+
+        // we have a coverage issue if this happens.
+        if (currentBlock == -1){
+            continue;
+        }
+
+        float *thisThreadPoint = &points[i * numAttributes];
+
+        // largest block size is our current block we are assigned to for this point
+        int largestBlockSize = numPointsInBlocks[currentBlock];
+
+        // now we iterate through and finally assign our point to the most populous block we find that we fit into.        
+        while (currentBlock < numBlocks){
+
+            // now, we iterate through all the blocks after the one we chose, and if we find a bigger one we fit into, we go into that one.
+            startOfBlockMins = &blockMins[blockEdges[currentBlock]];
+            startOfBlockMaxes = &blockMaxes[blockEdges[currentBlock]];
+            endOfBlock = &blockMins[blockEdges[nextBlock]];
+
+            bool inThisBlock = true;
+
+            // the x we are at, x0, x1, ...
+            int particularAttribute = 0;
+
+            // check through all the attributes for this block.
+            while(startOfBlockMins < endOfBlock){
+
+                // get the amount of x1's that we have in this particular block
+                int countOfThisAttribute = (int)*startOfBlockMins;
+
+                // increment these two at the same time, since they have the same length and same encoding of number of attributes in them
+                startOfBlockMins++;
+                startOfBlockMaxes++; 
+
+                // now loop that many times, checking if the point is in bounds of any of those intervals
+                bool inBounds = false;
+                for(int att = 0; att < countOfThisAttribute; att++){
+
+                    const double min = *startOfBlockMins;
+                    startOfBlockMins++;
+
+                    const double max = *startOfBlockMaxes;
+                    startOfBlockMaxes++;
+
+                    const double pointValue = thisThreadPoint[particularAttribute];
+
+                    if (pointValue >= min && pointValue <= max && numPointsInBlocks[currentBlock] > largestBlockSize){
+                        inBounds = true;
+                        break;
+                    }
+                }   
+                if (!inBounds){
+                    inThisBlock = false;
+                    break;
+                }
+                particularAttribute++;
+            }
+            if (inThisBlock){
+                *dataPointBlock = currentBlock;
+                largestBlockSize = numPointsInBlocks[currentBlock];
+            }
+            currentBlock++;
+            nextBlock++;
+        }
     }
 }
 

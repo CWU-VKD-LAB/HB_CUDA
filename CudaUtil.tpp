@@ -16,5 +16,4 @@ CUdeviceptr allocateAndCopy(const std::vector<T>& hostData) {
 
     return devicePointer;
 }
-
 #endif // CUDA_UTIL_TPP

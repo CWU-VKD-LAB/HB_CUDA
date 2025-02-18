@@ -16,18 +16,7 @@ int NUM_CLASSES;   // Number of classes in the dataset
 int NUM_POINTS;    // Total number of points in the dataset
 int FIELD_LENGTH;  // Number of attributes in the dataset
 
-// Struct version of a HyperBlock.
-struct HyperBlock {
-    vector<vector<float>> maximums;
-    vector<vector<float>> minimums;
-    int classNum;
-
-    HyperBlock(const vector<vector<float>>& maxs,
-               const vector<vector<float>>& mins,
-               int cls) : maximums(maxs), minimums(mins), classNum(cls) {}
-};
-
-// Struct version of DataATTR record
+// Struct version of DataATTR xrecord
 struct DataATTR {
     float value; // Value of one attribute of a point
     int classNum; // The class number of the point
@@ -47,8 +36,46 @@ struct Interval{
 };
 
 
-
 ///////////////////////// FUNCTIONS FOR INTERVAL_HYPER IMPLEMENTATION /////////////////////////
+
+ /**
+     * Finds largest interval across all dimensions of a set of data.
+     * @param data_by_attr all data split by attribute
+     * @param acc_threshold accuracy threshold for interval
+     * @param existing_hb existing hyperblocks to check for overlap
+     * @return largest interval
+     */
+vector<DataATTR> interval_hyper(vector<vector<DataATTR>>& data_by_attr, float acc_threshold, vector<HyperBlock>& existing_hb){
+    vector<Future<Interval>> intervals;
+    int attr = -1;
+    Interval best(-1, -1, -1, -,1);
+
+    // Search each attribute
+   // Search each attribute
+    for (size_t i = 0; i < data_by_attr.size(); i++) {
+        // Launch async task
+        intervals.emplace_back(async(launch::async, longest_interval, cref(data_by_attr[i]), acc_threshold, cref(existing_hb), i));
+    }
+
+    // Wait for results then find largest interval
+    for(auto& future : intervals){
+        Interval intr = future.get();
+        if(intr.size > 1 && intr.size > best.size){
+            best = intr;
+            attr = intr.attribute;
+        }
+    }
+
+    // Construct ArrayList of data
+    vector<DataATTR> longest;
+    if(best.size != -1){
+        for(int i = best.start; i <= best.end; i++){
+            longest.push_back(data_by_attr[attr][i]);
+        }
+    }
+
+    return longest;
+}
 
 /**
  * Seperates data into seperate vecs by attribute
@@ -198,9 +225,106 @@ void remove_value_from_interval(vector<DataATTR>& data_by_attr, Interval& intr, 
     }
 }
 
-
-
 ///////////////////////// END FUNCTIONS FOR INTERVAL_HYPER IMPLEMENTATION /////////////////////////
+
+void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_blocks){
+    // Hyperblocks generated with this algorithm
+    vector<HyperBlock> gen_hb;
+
+    // Get data to create hyperblocks
+    vector<vector<DataATTR>> data_by_attr = separateByAttribute(data);
+    vector<vector<DataATTR>> all_intv;
+
+    // Create dataset without data from interval HyperBlocks
+    vector<vector<vector<float>> > datum;
+    vector<vector<vector<float>> > seed_data;
+    vector<vector<int>> skips;
+
+    // Initially generate blocks
+    try{
+        while(data_by_attr[0].size() > 0){
+            vector<DataATTR> intv = interval_hyper(data_by_attr, 100, gen_hb);
+            all_intv.push_back(intv);
+
+            // if hyperblock is unique then add
+            if(intv.size() > 1){
+                vector<vector<vector<float>>> hb_data;
+                vector<vector<float>> intv_data;
+
+                // Add the points from real data that are in the intervals
+                for(DataATTR& dataAttr : intv){
+                    intv_data.push_back(data[dataAttr.classNum][dataAttr.classIndex]);
+                }
+
+                // add data and hyperblock
+                hb_data.push_back(intv_data);
+                HyperBlock hb(hb_data, intv[0].classNum);
+                gen_hb.push_back(hb);
+            }
+            else{
+                break;
+            }
+        }
+
+        // Add all hbs from gen_hb to hyper_blocks
+        hyper_blocks.insert(hyper_blocks.end(), gen_hb.begin(), gen_hb.end());
+
+        // All data: go through each class and add points from data
+        for(const vector<vector<float>>& classData : data){
+            datum.push_back(classData);
+            seed_data.emplace_back(vector<float>());
+            skips.emplace_back(vector<int>());
+        }
+
+        // find which data to skip
+        for(const vector<DataATTR>& dataAttrs : all_intv){
+            for(const DataATTR& dataAttr : dataAttrs){
+                skips[dataAttr.classNum].push_back(dataAttr.classIndex);
+            }
+        }
+
+        // Sort the skips
+        for(vector<int>& skip : skips){
+            sort(skip.begin(), skip.end())
+        }
+
+        for(int i = 0; i < data.size(); i++){
+            for(int j = 0; j < data[i].size(); j++){
+                if(skips[i].size() > 0){
+                    if(j == skips[i][0]){
+                        seed_data[i].push_back(data[i][j]);
+                    }
+                    else{
+                        skips[i].erase(skips.begin());
+                    }
+                }
+                else{
+                    seed_data[i].push_back(data[i][j]);
+                }
+            }
+        }
+
+        // Sort data by most important attribute
+        for(int i = 0; i < datum.size(); i++){
+            sortByColumn(datum[i], bestAttribute);
+            sortByColumn(seed_data[i], bestAttribute);
+        }
+
+    }catch(exception e){
+        cout << "Error in generateHBs: intervals" << endl;
+    }
+
+
+    // Call CUDA function.
+    try{
+        merger_cuda(datum, seed_data, hyper_blocks);
+    }catch (exception e){
+        cout << "Error in generateHBs: merger_cuda" << endl;
+    }
+
+}
+
+
 
 
 void print3DVector(const vector<vector<vector<float>>>& vec) {

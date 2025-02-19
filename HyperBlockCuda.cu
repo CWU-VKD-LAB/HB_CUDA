@@ -1,10 +1,10 @@
+#include "HyperBlockCuda.cuh"
 #include <cuda_runtime.h>
 
 // ------------------------------------------------------------------------------------------------
 // REFACTORED MERGER HYPER BLOCKS KERNEL FUNCTION. DOESN'T NEED THE COOPERATIVE GROUPS.
 // WRAP IN A LOOP. launch mergerHyperBlocks with i up to N - 1 as seed index, each time then rearrange, then reset.
 // ------------------------------------------------------------------------------------------------
-
 #define min(a, b) (a > b)? b : a
 #define max(a, b) (a > b)? a : b
 __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const int numBlocks, const int numAttributes, const int numPoints, const float *opposingPoints, float *hyperBlockMins, float *hyperBlockMaxes, int *deleteFlags, int *mergable){
@@ -97,7 +97,7 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
     } // end of checking one single block.
 }
 
-__global__ void rearrangeSeedQueue(int *readSeedQueue,  int *writeSeedQueue, int *deleteFlags, const int numBlocks){
+__global__ void rearrangeSeedQueue(int *readSeedQueue, int *writeSeedQueue, int *deleteFlags, int *mergable, const int numBlocks){
 
     const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
     const int globalThreadCount = gridDim.x * blockDim.x;
@@ -147,12 +147,12 @@ __global__ void resetMergableFlags(int *mergableFlags, const int numBlocks){
 
 // ASSIGN POINTS TO BLOCKS KERNEL FUNCTION.
 // once every point has been assigned to a block, then we can start doing our removing of useless blocks.
-__global__ void assignPointsToBlocks(const float *dataPointsArray, const int numAttributes, const int numPoints, const float *blockMins, const float *blockMaxes, const int *blockEdges, const int numBlocks, int *dataPointBlocks){
+__global__ void assignPointsToBlocks(const float *dataPointsArray, const int numAttributes, const int numPoints, float *blockMins, float *blockMaxes, const int *blockEdges, const int numBlocks, int *dataPointBlocks){
 
     const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
     const int globalThreadCount = gridDim.x * blockDim.x;
 
-    float *thisThreadPoint = &dataPointsArray[threadID * numAttributes];
+    const float *thisThreadPoint = &dataPointsArray[threadID * numAttributes];
 
     int *dataPointBlock;       // pointer to the slot in the numPoints long array that tells us which block this point goes into.
     float *startOfBlockMins;    // pointer to the start of the mins of the current block.
@@ -234,6 +234,11 @@ __global__ void assignPointsToBlocks(const float *dataPointsArray, const int num
 }
 
 // NOW OUR FUNCTION WHICH SUMS UP THE AMOUNT OF POINTS PER BLOCK
+/*
+
+Ryans algo. not fixing since we not using yet.
+
+
 __global__ void sumPointsPerBlock(const int *dataPointBlocks, const int numPoints, int *numPointsInBlocks){
 
     const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
@@ -243,7 +248,6 @@ __global__ void sumPointsPerBlock(const int *dataPointBlocks, const int numPoint
         atomicInc(&numPointsInBlocks[dataPointBlocks[i]]);
     }
 }
-
 __global__ void findBetterBlocks(int *dataPointsBlocks, const int numPoints, const int numBlocks, const int numAttributes, const float *points, const int *blockEdges, float *hyperBlockMins, float *hyperBlockMaxes, int *numPointsInBlocks){
 
     const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
@@ -273,8 +277,8 @@ __global__ void findBetterBlocks(int *dataPointsBlocks, const int numPoints, con
         while (currentBlock < numBlocks){
 
             // now, we iterate through all the blocks after the one we chose, and if we find a bigger one we fit into, we go into that one.
-            startOfBlockMins = &blockMins[blockEdges[currentBlock]];
-            startOfBlockMaxes = &blockMaxes[blockEdges[currentBlock]];
+            startOfBlockMins = &hyperBlockMins[blockEdges[currentBlock]];
+            startOfBlockMaxes = &hyperBlockMaxes[blockEdges[currentBlock]];
             endOfBlock = &blockMins[blockEdges[nextBlock]];
 
             bool inThisBlock = true;
@@ -323,4 +327,37 @@ __global__ void findBetterBlocks(int *dataPointsBlocks, const int numPoints, con
             nextBlock++;
         }
     }
+}
+*/
+
+void mergerHyperBlocksWrapper(const int seedIndex, int *readSeedQueue, const int numBlocks, const int numAttributes, const int numPoints, const float *opposingPoints,float *hyperBlockMins, float *hyperBlockMaxes, int *deleteFlags, int *mergable, int gridSize, int blockSize, int sharedMemSize){
+	mergerHyperBlocks<<<gridSize, blockSize, sharedMemSize>>>(
+            seedIndex,
+            readSeedQueue,
+            numBlocks,
+            numAttributes,
+            numPoints,
+            opposingPoints,
+	    	hyperBlockMins,
+			hyperBlockMaxes,
+			deleteFlags,
+			mergable
+		);
+    return;
+}
+
+void rearrangeSeedQueueWrapper(int *readSeedQueue, int *writeSeedQueue, int *deleteFlags, int *mergable, const int numBlocks, int gridSize, int blockSize){
+    rearrangeSeedQueue<<<gridSize, blockSize>>>(readSeedQueue, writeSeedQueue, deleteFlags, mergable, numBlocks);
+	return;
+}
+void resetMergableFlagsWrapper(int *mergableFlags, const int numBlocks, int gridSize, int blockSize){
+	resetMergableFlags<<<gridSize, blockSize>>>(mergableFlags, numBlocks);
+  	return;
+}
+
+/**
+* IMPLEMENT ME NOT YET DONE!!!!!!!!!!
+*/
+void assignPointsToBlocksWrapper(const float *dataPointsArray, const int numAttributes, const int numPoints,const float *blockMins, const float *blockMaxes, const int *blockEdges,const int numBlocks, int *dataPointBlocks, int gridSize, int blockSize){
+	return;
 }

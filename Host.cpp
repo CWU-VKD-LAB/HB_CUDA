@@ -11,6 +11,7 @@
 #include <future>
 #include "CudaUtil.h"
 #include "HyperBlock.h"
+#include "HyperBlockCuda.cuh"
 
 using namespace std;
 
@@ -41,6 +42,7 @@ Interval longest_interval(vector<DataATTR>& data_by_attr, float acc_threshold, v
 void remove_value_from_interval(vector<DataATTR>& data_by_attr, Interval& intr, float value);
 int skip_value_in_interval(vector<DataATTR>& data_by_attr, int i, float value);
 bool check_interval_overlap(vector<DataATTR>& data_by_attr, Interval& intr, int attr, vector<HyperBlock>& existing_hb);
+void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vector<vector<vector<float>>>& all_data, vector<HyperBlock>& hyper_blocks);
 
 
 ///////////////////////// FUNCTIONS FOR INTERVAL_HYPER IMPLEMENTATION /////////////////////////
@@ -59,9 +61,9 @@ vector<DataATTR> interval_hyper(vector<vector<DataATTR>>& data_by_attr, float ac
 
     // Search each attribute
    // Search each attribute
-    for (size_t i = 0; i < data_by_attr.size(); i++) {
+    for (int i = 0; i < data_by_attr.size(); i++) {
         // Launch async task
-        intervals.emplace_back(async(launch::async, longest_interval, cref(data_by_attr[i]), acc_threshold, cref(existing_hb), i));
+        intervals.emplace_back(async(launch::async, longest_interval, ref(data_by_attr[i]), acc_threshold, ref(existing_hb), i));
     }
 
     // Wait for results then find largest interval
@@ -235,6 +237,7 @@ void remove_value_from_interval(vector<DataATTR>& data_by_attr, Interval& intr, 
 ///////////////////////// END FUNCTIONS FOR INTERVAL_HYPER IMPLEMENTATION /////////////////////////
 
 void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_blocks){
+  	cout << "Generating HBS\n" << endl;
     // Hyperblocks generated with this algorithm
     vector<HyperBlock> gen_hb;
 
@@ -243,8 +246,8 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
     vector<vector<DataATTR>> all_intv;
 
     // Create dataset without data from interval HyperBlocks
-    vector<vector<vector<float>> > datum;
-    vector<vector<vector<float>> > seed_data;
+    vector<vector<vector<float>>> datum;
+    vector<vector<vector<float>>> seed_data;
     vector<vector<int>> skips;
 
     // Initially generate blocks
@@ -279,8 +282,8 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
         // All data: go through each class and add points from data
         for(const vector<vector<float>>& classData : data){
             datum.push_back(classData);
-            seed_data.emplace_back(vector<float>());
-            skips.emplace_back(vector<int>());
+            seed_data.push_back(vector<vector<float>>());
+            skips.push_back(vector<int>());
         }
 
         // find which data to skip
@@ -292,7 +295,7 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
 
         // Sort the skips
         for(vector<int>& skip : skips){
-            sort(skip.begin(), skip.end())
+            sort(skip.begin(), skip.end());
         }
 
         for(int i = 0; i < data.size(); i++){
@@ -302,7 +305,8 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
                         seed_data[i].push_back(data[i][j]);
                     }
                     else{
-                        skips[i].erase(skips.begin());
+                      	// remove first element from skips[i]
+                        skips[i].erase(skips[i].begin());
                     }
                 }
                 else{
@@ -324,6 +328,8 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
 
     // Call CUDA function.
     try{
+      	cout << "Calling merger_cuda\n" << endl;
+
         merger_cuda(datum, seed_data, hyper_blocks);
     }catch (exception e){
         cout << "Error in generateHBs: merger_cuda" << endl;
@@ -335,11 +341,11 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
 
 
 void print3DVector(const vector<vector<vector<float>>>& vec) {
-    for (size_t i = 0; i < vec.size(); i++) {
+    for (int i = 0; i < vec.size(); i++) {
         cout << "Class " << i << ":" << endl;
         for (const auto& row : vec[i]) {
             cout << "  [";
-            for (size_t j = 0; j < row.size(); j++) {
+            for (int j = 0; j < row.size(); j++) {
                 cout << row[j];
                 if (j < row.size() - 1) cout << ", ";
             }
@@ -391,7 +397,7 @@ vector<vector<vector<float>>> dataSetup(const string& filepath) {
         // Check if class exists, else create new entry
         if (classMap.count(classLabel) == 0) {
             classMap[classLabel] = classNum;
-            data.emplace_back();
+            data.push_back(vector<vector<float>>());
             classNum++;
         }
 
@@ -417,6 +423,8 @@ vector<vector<vector<float>>> dataSetup(const string& filepath) {
     FIELD_LENGTH = data.empty() ? 0 : static_cast<int>(data[0][0].size());
     NUM_CLASSES = classNum;
 
+    cout << "Finished setting up data\n" << endl;
+
     return data;
 }
 
@@ -436,11 +444,11 @@ void saveHyperBlocksToFile(const string& filepath, const vector<vector<vector<fl
     }
 
     // Loop through each class (outermost vector)
-    for (size_t classNum = 0; classNum < hyperBlocks.size(); classNum++) {
+    for (int classNum = 0; classNum < hyperBlocks.size(); classNum++) {
         // Loop through each hyperblock (2D vector)
         for (const auto& hyperblock : hyperBlocks[classNum]) {
             // Write hyperblock values
-            for (size_t i = 0; i < hyperblock.size(); i++) {
+            for (int i = 0; i < hyperblock.size(); i++) {
                 file << hyperblock[i];
                 if (i < hyperblock.size()) file << ", ";
             }
@@ -455,13 +463,15 @@ void saveHyperBlocksToFile(const string& filepath, const vector<vector<vector<fl
 
 
 void minMaxNormalization(vector<vector<vector<float>>>& dataset) {
+    cout << "Starting min-max normalization\n" << endl;
+
     if (dataset.empty()) return;
 
     int num_classes = dataset.size();
 
     // Min and max values for each attribute
-    vector<float> min_vals(FIELD_LENGTH, numeric_limits<float>::max());
-    vector<float> max_vals(FIELD_LENGTH, numeric_limits<float>::lowest());
+    vector<float> min_vals(FIELD_LENGTH);
+    vector<float> max_vals(FIELD_LENGTH);
 
     // Step 1: Find min and max for each attribute
     for (const auto& class_data : dataset) {
@@ -487,16 +497,20 @@ void minMaxNormalization(vector<vector<vector<float>>>& dataset) {
             }
         }
     }
+
+    cout << "Finished min-max normalization\n" << endl;
 }
 
 vector<bool> markUniformColumns(const vector<vector<vector<float>>>& data) {
+      cout << "Starting mark uniform columns\n" << endl;
+
     if (data.empty() || data[0].empty()) return vector<bool>(); // Handle edge case
 
-    size_t numCols = data[0][0].size();
+    int numCols = data[0][0].size();
     vector<bool> removed(numCols, false);
 
     // Iterate through each column
-    for (size_t col = 0; col < numCols; col++) {
+    for (int col = 0; col < numCols; col++) {
         float referenceValue = data[0][0][col]; // Use first row of first class as reference
         bool allSame = true;
 
@@ -516,6 +530,8 @@ vector<bool> markUniformColumns(const vector<vector<vector<float>>>& data) {
             removed[col] = true;
         }
     }
+
+    cout << "Finished mark uniform columns\n" << endl;
 
     return removed;
 }
@@ -594,7 +610,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         // Add the existing blocks from interval_hyper
         for (auto it = hyper_blocks.begin(); it != hyper_blocks.end();) {
             if (it->classNum == classN) {
-                for (size_t i = 0; i < it->minimums.size(); i++) {
+                for (int i = 0; i < it->minimums.size(); i++) {
                     if (removed[i]) continue;
                     hyperBlockMinsC[currentClassIndex] = it->minimums[i][0];
                     hyperBlockMaxesC[currentClassIndex] = it->maximums[i][0];
@@ -638,37 +654,38 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         int blockSize = 256;
         int gridSize = 17;
         int sharedMemSize = 2 * FIELD_LENGTH * sizeof(float) + sizeof(int);
-//__global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const int numBlocks, const int numAttributes, const int numPoints, const float *opposingPoints, float *hyperBlockMins, float *hyperBlockMaxes, int *deleteFlags, int *mergable){
 
         // funky wap to swap the readQueue and writeQueue
-		int queues[2] = {d_seedQueue, d_writeSeedQueue};
+		int* queues[2] = {d_seedQueue, d_writeSeedQueue};
 
         for(int i = 0; i < numBlocks; i++){
            // swap between the two queues
            int* readQueue = queues[i % 2];
     	   int* writeQueue = queues[(i + 1) % 2];
-
-        	mergerHyperBlocks<<<gridSize, blockSize, sharedMemSize>>>(
-              	i,
-                readQueue,
-              	numBlocks,
-                FIELD_LENGTH,
-              	pointsC.size() / FIELD_LENGTH,
-            	d_points,
-	    		d_hyperBlockMins,
-				d_hyperBlockMaxes,
+           mergerHyperBlocksWrapper(
+                i, 			// seednum
+                readQueue,  // seedQueue
+                numBlocks,  // number seed blocks
+                FIELD_LENGTH,	// num attributes
+              	pointsC.size() / FIELD_LENGTH,	// num op class points
+            	d_points,						// op class points
+	    		d_hyperBlockMins,				// mins
+				d_hyperBlockMaxes,				// maxes
 				d_deleteFlags,
-				d_mergable,
-			);
-			cudaDeviceSynchronize();
+				d_mergable,						// mergable flags
+                gridSize,
+                blockSize,
+                sharedMemSize
+       	   );
+		   cudaDeviceSynchronize();
 
-            // Reorder the seedblock order
-            rearrangeSeedQueue<<<gridSize, blockSize>>>(readQueue, writeQueue, d_deleteFlags, numBlocks);
-    		cudaDeviceSynchronize();
+           // Reorder the seedblock order
+    	   rearrangeSeedQueueWrapper(readQueue, writeQueue, d_deleteFlags, d_mergable, numBlocks, gridSize, blockSize);
+           cudaDeviceSynchronize();
 
-            // Reset mergable flags
-			resetMergableFlags<<<gridSize, blockSize>>>(d_mergable, numBlocks);
-            cudaDeviceSynchronize();
+           // Reset mergable flags
+           resetMergableFlagsWrapper(d_mergable, numBlocks, gridSize, blockSize);
+           cudaDeviceSynchronize();
         }
 
 
@@ -688,7 +705,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
             for (int j = 0; j < FIELD_LENGTH; j++) {
                 if (removed[j]) {
                     blockMins[j].push_back(0.0f);
-                    blockMaxes[j].push_back(2.0f);
+                    blockMaxes[j].push_back(1.0f);
                 } else {
                     blockMins[j].push_back(hyperBlockMinsC[i + realIndex]);
                     blockMaxes[j].push_back(hyperBlockMaxesC[i + realIndex]);
@@ -696,7 +713,8 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
                 }
             }
 
-            hyper_blocks.emplace_back(blockMaxes, blockMins, classN);
+            HyperBlock hb(blockMaxes, blockMins, classN);
+            hyper_blocks.emplace_back(hb);
         }
 
         // Free device memory
@@ -710,6 +728,8 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         cudaFree(d_seedQueue);
         cudaFree(d_writeSeedQueue);
     }
+
+    cout << "Finished merger cuda\n" << endl;
 }
 
 // WE WILL ASSUME WE DONT HAVE A ID COLUMN.
@@ -731,9 +751,9 @@ int main() {
 
     // generate hyperblocks
     generateHBs(data, hyper_blocks);
-
-    for(const auto& hyperBlock : hyper_blocks) {
-      cout << hyperBlock << endl;
+	cout << "HyperBlocks : " << hyper_blocks.size() << endl;
+    for(const HyperBlock& hb : hyper_blocks) {
+      cout << hb.classNum << "\n" << endl;
     }
 
 

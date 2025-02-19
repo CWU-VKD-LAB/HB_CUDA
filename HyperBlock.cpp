@@ -3,7 +3,7 @@
 // Constructor definition
 HyperBlock::HyperBlock(const std::vector<std::vector<float>>& maxs, const std::vector<std::vector<float>>& mins, int cls) : maximums(maxs), minimums(mins), classNum(cls) {}
 
-HyperBlock::HyperBlock(const std::vector<std::vector<std::vector<float>>>& hb_data, int cls) : classNum(cls) {
+HyperBlock::HyperBlock(const std::vector<std::vector<std::vector<float>>>& hb_data, int cls){
     size_t attr_count = hb_data[0].size(); // Number of attributes
 
     // Initialize maxes and mins with size and initial values
@@ -24,4 +24,5 @@ HyperBlock::HyperBlock(const std::vector<std::vector<std::vector<float>>>& hb_da
 
     maximums = maxes;
     minimums = mins;
+    classNum = cls;
 }

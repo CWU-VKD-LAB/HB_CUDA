@@ -12,7 +12,7 @@ public:
     
     // Constructor
     HyperBlock(const std::vector<std::vector<float>>& maxs, const std::vector<std::vector<float>>& mins, int cls);
-    HyperBlock(const std::vector<std::vector<float>>& hb_data, int cls);
+    HyperBlock(const std::vector<std::vector<std::vector<float>>>& hb_data, int cls);
 };
 
 #endif // HYPERBLOCK_H

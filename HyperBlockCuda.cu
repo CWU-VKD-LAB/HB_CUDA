@@ -1,6 +1,6 @@
 #include "HyperBlockCuda.cuh"
 #include <cuda_runtime.h>
-
+#include <stdio.h>
 // ------------------------------------------------------------------------------------------------
 // REFACTORED MERGER HYPER BLOCKS KERNEL FUNCTION. DOESN'T NEED THE COOPERATIVE GROUPS.
 // WRAP IN A LOOP. launch mergerHyperBlocks with i up to N - 1 as seed index, each time then rearrange, then reset.
@@ -39,7 +39,7 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
 
         // if the block has already been a seed block, we aren't going to do our merging business with it.
         // every thread skips this so it's ok. the sync isn't a problem. 
-        if (deleteFlags[i] < 0 || i == seedBlock){
+        if (deleteFlags[readSeedQueue[i]] < 0 || readSeedQueue[i] == seedBlock){
             continue;
         }
 
@@ -92,44 +92,47 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
         }
         // if we're the first thread, we need to write the delete flags properly.
         if (localID == 0){
-            mergable[i] = blockMergable;
+            mergable[readSeedQueue[i]] = blockMergable;
         }
         // must sync here so that we don't accidentally pick a seed block while we are updating the delete flags queue potentially.
         __syncthreads();
     } // end of checking one single block.
 }
 
-__global__ void rearrangeSeedQueue(int *readSeedQueue, int *writeSeedQueue, int *deleteFlags, int *mergable, const int numBlocks){
+__global__ void rearrangeSeedQueue(const int deadSeedNum, int *readSeedQueue, int *writeSeedQueue, int *deleteFlags, int *mergable, const int numBlocks){
 
     const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
     const int globalThreadCount = gridDim.x * blockDim.x;
     // now we are just going to loop through the seed queue and compute each blocks new position in the queue.
-    for(int i = threadID; i < numBlocks; i += globalThreadCount){
-        // if the block is dead, we just copy it over. it is dead if we have already used it as a seed block.
-        if (deleteFlags[readSeedQueue[i]] < 0){
+    for (int i = threadID; i < numBlocks; i += globalThreadCount) {
+        
+        if (i <= deadSeedNum){
             writeSeedQueue[i] = readSeedQueue[i];
             continue;
         }
-        // if we didn't merge, we are just going to iterate through and our new index is just the amount of numbers <= 0 to our LEFT.
-        if (mergable[readSeedQueue[i]] == 0){
-            int newIndex = 0;
-            for(int j = 0; j < i; j++){
-                if (mergable[readSeedQueue[j]] == 0){
+
+        const int seed = readSeedQueue[i];
+
+        if (mergable[seed] == 0) {
+            int newIndex = deadSeedNum + 1;
+            // Count only live, non-merged blocks in positions after deadSeedNum.
+            for (int j = deadSeedNum + 1; j < i; j++) {
+                int other = readSeedQueue[j];
+                if (mergable[other] == 0)
                     newIndex++;
-                }
             }
-            writeSeedQueue[newIndex] = readSeedQueue[i];
+            writeSeedQueue[newIndex] = seed;
         }
-        else{
+        // if we DID MERGE.
+        else {
             int count = 0;
-            // if we did merge our new index is the amount of 1's (flags that we merged) to our LEFT, SUBTRACTED FROM N - 1.
-            // this is because if you were at the front and merged we want you to go to the back.
-            for(int j = 0; j < i; j++){
-                if (mergable[readSeedQueue[j]] == 1){
+            // Count live merged blocks among indices after deadSeedNum.
+            for (int j = deadSeedNum + 1; j < i; j++) {
+                int other = readSeedQueue[j];
+                if (mergable[other] == 1)
                     count++;
-                }
             }
-            writeSeedQueue[numBlocks - 1 - count] = readSeedQueue[i];
+            writeSeedQueue[numBlocks - 1 - count] = seed;
         }
     }
 }
@@ -348,8 +351,8 @@ void mergerHyperBlocksWrapper(const int seedIndex, int *readSeedQueue, const int
     return;
 }
 
-void rearrangeSeedQueueWrapper(int *readSeedQueue, int *writeSeedQueue, int *deleteFlags, int *mergable, const int numBlocks, int gridSize, int blockSize){
-    rearrangeSeedQueue<<<gridSize, blockSize>>>(readSeedQueue, writeSeedQueue, deleteFlags, mergable, numBlocks);
+void rearrangeSeedQueueWrapper(const int deadSeedCount, int *readSeedQueue, int *writeSeedQueue, int *deleteFlags, int *mergable, const int numBlocks, int gridSize, int blockSize){
+    rearrangeSeedQueue<<<gridSize, blockSize>>>(deadSeedCount, readSeedQueue, writeSeedQueue, deleteFlags, mergable, numBlocks);
 	return;
 }
 void resetMergableFlagsWrapper(int *mergableFlags, const int numBlocks, int gridSize, int blockSize){

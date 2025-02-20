@@ -8,7 +8,10 @@
 #include <algorithm>
 #include <cuda_runtime.h>
 #include <limits>
+#include <future>
 #include "CudaUtil.h"
+#include "HyperBlock.h"
+#include "HyperBlockCuda.cuh"
 
 using namespace std;
 
@@ -35,6 +38,46 @@ struct Interval{
     Interval(int s, int st, int e, int a) : size(s), start(st), end(e), attribute(a) {}
 };
 
+Interval longest_interval(vector<DataATTR>& data_by_attr, float acc_threshold, vector<HyperBlock>& existing_hb, int attr);
+void remove_value_from_interval(vector<DataATTR>& data_by_attr, Interval& intr, float value);
+int skip_value_in_interval(vector<DataATTR>& data_by_attr, int i, float value);
+bool check_interval_overlap(vector<DataATTR>& data_by_attr, Interval& intr, int attr, vector<HyperBlock>& existing_hb);
+void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vector<vector<vector<float>>>& all_data, vector<HyperBlock>& hyper_blocks);
+void saveBasicHBsToCSV(const vector<HyperBlock>& hyper_blocks);
+
+
+/***
+* We want to go through the hyper_blocks that were generated and write them to a file.
+*
+*
+* This print isn't caring about disjunctive blocks.
+*/
+void saveBasicHBsToCSV(const vector<HyperBlock>& hyper_blocks, const string& file_name){
+	// Open file for writing
+    ofstream file(file_name);
+    if (!file.is_open()) {
+        cerr << "Error opening file: " << file_name << endl;
+        return;
+    }
+
+	// min1, min2, min3, ..., minN, max1, max2, max3, ..., maxN, class
+	for (const auto& hyper_block : hyper_blocks) {
+        // Write minimums
+        for (const vector<float>& min : hyper_block.minimums) {
+            file << min[0] << ",";
+        }
+
+        // Write maximums
+        for (const vector<float>& max : hyper_block.maximums) {
+            file << max[0] << ",";
+        }
+
+        // Write the class number
+        file << hyper_block.classNum << "\n";
+    }
+
+    file.close();
+}
 
 ///////////////////////// FUNCTIONS FOR INTERVAL_HYPER IMPLEMENTATION /////////////////////////
 
@@ -46,20 +89,21 @@ struct Interval{
      * @return largest interval
      */
 vector<DataATTR> interval_hyper(vector<vector<DataATTR>>& data_by_attr, float acc_threshold, vector<HyperBlock>& existing_hb){
-    vector<Future<Interval>> intervals;
+    cout << "Starting interval hyperblock" << endl;
+    vector<future<Interval>> intervals;
     int attr = -1;
-    Interval best(-1, -1, -1, -,1);
+    Interval best(-1, -1, -1, -1);
 
     // Search each attribute
    // Search each attribute
-    for (size_t i = 0; i < data_by_attr.size(); i++) {
+    for (int i = 0; i < data_by_attr.size(); i++) {
         // Launch async task
-        intervals.emplace_back(async(launch::async, longest_interval, cref(data_by_attr[i]), acc_threshold, cref(existing_hb), i));
+        intervals.emplace_back(async(launch::async, longest_interval, ref(data_by_attr[i]), acc_threshold, ref(existing_hb), i));
     }
 
     // Wait for results then find largest interval
-    for(auto& future : intervals){
-        Interval intr = future.get();
+    for(auto& future1 : intervals){
+        Interval intr = future1.get();
         if(intr.size > 1 && intr.size > best.size){
             best = intr;
             attr = intr.attribute;
@@ -74,6 +118,7 @@ vector<DataATTR> interval_hyper(vector<vector<DataATTR>>& data_by_attr, float ac
         }
     }
 
+    cout << "Finished interval hyperblock" << endl;
     return longest;
 }
 
@@ -126,6 +171,8 @@ void sortByColumn(vector<vector<float>>& classData, int colIndex) {
  * @return longest interval
 */
 Interval longest_interval(vector<DataATTR>& data_by_attr, float acc_threshold, vector<HyperBlock>& existing_hb, int attr){
+    //cout << "Started longest interval \n" << endl;
+
     Interval intr(1, 0, 0, attr);
     Interval max_intr(-1, -1, -1, attr);
 
@@ -172,11 +219,14 @@ Interval longest_interval(vector<DataATTR>& data_by_attr, float acc_threshold, v
         max_intr.size = intr.size;
     }
 
+    //cout << "Finished longest interval \n" << endl;
+
     return max_intr;
 }
 
 
 bool check_interval_overlap(vector<DataATTR>& data_by_attr, Interval& intr, int attr, vector<HyperBlock>& existing_hb){
+    //cout << "Started check interval overlap\n" << endl;
     // interval range of vals
     float intv_min = data_by_attr[intr.start].value;
     float intv_max = data_by_attr[intr.end].value;
@@ -192,12 +242,16 @@ bool check_interval_overlap(vector<DataATTR>& data_by_attr, Interval& intr, int 
         }
     }
 
+    //cout << "Finished check interval overlap\n" << endl;
+
     // If unique return true
     return true;
 }
 
 //skip_value_in_interval
 int skip_value_in_interval(vector<DataATTR>& data_by_attr, int i, float value){
+    //cout << "Starting skip value in interval\n" << endl;
+
     while(data_by_attr[i].value == value){
         if(i < data_by_attr.size() - 1){
             i++;
@@ -207,12 +261,15 @@ int skip_value_in_interval(vector<DataATTR>& data_by_attr, int i, float value){
         }
     }
 
+    //cout << "Finished skip value in interval\n" << endl;
+
     return i;
 }
 
 
 //remove_value_from_interval
 void remove_value_from_interval(vector<DataATTR>& data_by_attr, Interval& intr, float value){
+    //cout << "Starting remove value from intervals\n" << endl;
     while(data_by_attr[intr.end].value == value){
         if(intr.end > intr.start){
             intr.size--;
@@ -223,11 +280,13 @@ void remove_value_from_interval(vector<DataATTR>& data_by_attr, Interval& intr, 
             break;
         }
     }
+    //cout << "Finished remove value from intervals\n" << endl;
 }
 
 ///////////////////////// END FUNCTIONS FOR INTERVAL_HYPER IMPLEMENTATION /////////////////////////
 
 void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_blocks){
+  	cout << "Started generating HBS\n" << endl;
     // Hyperblocks generated with this algorithm
     vector<HyperBlock> gen_hb;
 
@@ -236,13 +295,18 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
     vector<vector<DataATTR>> all_intv;
 
     // Create dataset without data from interval HyperBlocks
-    vector<vector<vector<float>> > datum;
-    vector<vector<vector<float>> > seed_data;
+    vector<vector<vector<float>>> datum;
+    vector<vector<vector<float>>> seed_data;
     vector<vector<int>> skips;
+	cout << "Initialized datum, seed_data, skips\n" << endl;
 
     // Initially generate blocks
     try{
+        cout << "Starting while loop to generate hyperblocks\n";
+		cout << "data_by_attr[0].size() = " << data_by_attr[0].size() << endl;
+
         while(data_by_attr[0].size() > 0){
+
             vector<DataATTR> intv = interval_hyper(data_by_attr, 100, gen_hb);
             all_intv.push_back(intv);
 
@@ -256,15 +320,26 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
                     intv_data.push_back(data[dataAttr.classNum][dataAttr.classIndex]);
                 }
 
+				cout << "After the for loop in intv.size\n" << endl;
+
                 // add data and hyperblock
                 hb_data.push_back(intv_data);
+                cout << "Before making hyperblock\n" << endl;
+
                 HyperBlock hb(hb_data, intv[0].classNum);
+                cout << "After making hyperblock\n" << endl;
+
                 gen_hb.push_back(hb);
+                cout << "After the push back in intv.size\n" << endl;
+
             }
             else{
+                cout << "Breaking because the intv size is < 1\n" << endl;
                 break;
             }
         }
+
+		cout << "Ended while loop to generate hyperblocks\n";
 
         // Add all hbs from gen_hb to hyper_blocks
         hyper_blocks.insert(hyper_blocks.end(), gen_hb.begin(), gen_hb.end());
@@ -272,8 +347,8 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
         // All data: go through each class and add points from data
         for(const vector<vector<float>>& classData : data){
             datum.push_back(classData);
-            seed_data.emplace_back(vector<float>());
-            skips.emplace_back(vector<int>());
+            seed_data.push_back(vector<vector<float>>());
+            skips.push_back(vector<int>());
         }
 
         // find which data to skip
@@ -285,7 +360,7 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
 
         // Sort the skips
         for(vector<int>& skip : skips){
-            sort(skip.begin(), skip.end())
+            sort(skip.begin(), skip.end());
         }
 
         for(int i = 0; i < data.size(); i++){
@@ -295,7 +370,8 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
                         seed_data[i].push_back(data[i][j]);
                     }
                     else{
-                        skips[i].erase(skips.begin());
+                      	// remove first element from skips[i]
+                        skips[i].erase(skips[i].begin());
                     }
                 }
                 else{
@@ -306,8 +382,8 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
 
         // Sort data by most important attribute
         for(int i = 0; i < datum.size(); i++){
-            sortByColumn(datum[i], bestAttribute);
-            sortByColumn(seed_data[i], bestAttribute);
+            sortByColumn(datum[i], 0);
+            sortByColumn(seed_data[i], 0);
         }
 
     }catch(exception e){
@@ -316,23 +392,26 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
 
 
     // Call CUDA function.
+    cout << "Calling merger_cuda\n" << endl;
+
     try{
         merger_cuda(datum, seed_data, hyper_blocks);
     }catch (exception e){
         cout << "Error in generateHBs: merger_cuda" << endl;
     }
 
+    cout << "Finished generating HBS\n" << endl;
 }
 
 
 
 
 void print3DVector(const vector<vector<vector<float>>>& vec) {
-    for (size_t i = 0; i < vec.size(); i++) {
+    for (int i = 0; i < vec.size(); i++) {
         cout << "Class " << i << ":" << endl;
         for (const auto& row : vec[i]) {
             cout << "  [";
-            for (size_t j = 0; j < row.size(); j++) {
+            for (int j = 0; j < row.size(); j++) {
                 cout << row[j];
                 if (j < row.size() - 1) cout << ", ";
             }
@@ -384,7 +463,7 @@ vector<vector<vector<float>>> dataSetup(const string& filepath) {
         // Check if class exists, else create new entry
         if (classMap.count(classLabel) == 0) {
             classMap[classLabel] = classNum;
-            data.emplace_back();
+            data.push_back(vector<vector<float>>());
             classNum++;
         }
 
@@ -410,335 +489,11 @@ vector<vector<vector<float>>> dataSetup(const string& filepath) {
     FIELD_LENGTH = data.empty() ? 0 : static_cast<int>(data[0][0].size());
     NUM_CLASSES = classNum;
 
+    cout << "Finished setting up data\n" << endl;
+
     return data;
 }
 
-
-// ------------------------------------------------------------------------------------------------
-// REFACTORED MERGER HYPER BLOCKS KERNEL FUNCTION. DOESN'T NEED THE COOPERATIVE GROUPS.
-// WRAP IN A LOOP. launch mergerHyperBlocks with i up to N - 1 as seed index, each time then rearrange, then reset.
-// ------------------------------------------------------------------------------------------------
-
-#define min(a, b) (a > b)? b : a
-#define max(a, b) (a > b)? a : b
-__global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const int numBlocks, const int numAttributes, const int numPoints, const float *opposingPoints, float *hyperBlockMins, float *hyperBlockMaxes, int *deleteFlags, int *mergable){ 
-
-    // get our block index. which block are we on?
-    const int blockIndex = blockIdx.x;
-
-    // get our local ID. which thread of the block are we?
-    const int localID = threadIdx.x;
-
-    // get our seed block.
-    const int seedBlock = readSeedQueue[seedIndex];
-
-    // every block tries to do this, so that we can make sure and not start executing until the flag is set.
-    // it only updates once obviously, but it makes all the other blocks wait until someone has set that value.
-    if (localID == 0){
-        atomicMin(&deleteFlags[seedBlock], -9);
-        atomicMin(&mergable[seedBlock], -1);
-    }
-    // all the threads of a block are going to deal with their flag to determine our early out condition.
-    __shared__ int blockMergable; 
-
-    // our shared memory will store the bounds of a hyperblock. each cuda block will run through one block at a time. with an offset of gridDim.x * numAttributes
-    extern __shared__ float hyperBlockAttributes[];
-    // copy into our attributes the combined mins and maxes of seed block and our current block. 
-    float *localBlockMins = &hyperBlockAttributes[0];
-    float *localBlockMaxes = &hyperBlockAttributes[numAttributes];
-
-    __syncthreads();
-    // iterate through all the blocks, with a stride of numBlocks of CUDA that we have. 
-    for(int i = blockIndex; i < numBlocks; i+= gridDim.x){
-
-        // if the block has already been a seed block, we aren't going to do our merging business with it.
-        if (deleteFlags[i] < 0 || i == seedBlock){
-            continue;
-        }
-
-        // set our flag to 1, since we are passing until someone fails.
-        if (localID == 0){
-            blockMergable = 1;
-        }
-
-        // copy the mins and maxes of the seed block merged with our current block into our shared memory
-        for(int att = localID; att < numAttributes; att += blockDim.x){
-            localBlockMins[att] = min(hyperBlockMins[seedBlock * numAttributes + att], hyperBlockMins[i * numAttributes + att]);
-            localBlockMaxes[att] = max(hyperBlockMaxes[seedBlock * numAttributes + att], hyperBlockMaxes[i * numAttributes + att]);
-        }
-
-        // sync so we don't start early.
-        __syncthreads();
-
-        // now we need to check if the current block is mergable with the seed block.
-        // to do this we simply check all the datapoints. before a thread starts a datapoint, we are going to check the shared flag and make sure it's worth our time.
-        // if any threads finds unmergable, we set the flag, and wait for everyone else.
-        for(int pointIndex = localID; pointIndex < numPoints && blockMergable; pointIndex += blockDim.x){
-            char someAttributeOutside = 0;
-            for(int att = 0; att < numAttributes; att++){
-                if(opposingPoints[pointIndex * numAttributes + att] > localBlockMaxes[att] || opposingPoints[pointIndex * numAttributes + att] < localBlockMins[att]){
-                    someAttributeOutside = 1;
-                    break;
-                }
-            }
-            // if every single attribute was inside, we have failed. since these are all opposing points.
-            if(!someAttributeOutside){
-                blockMergable = 0;
-                break;
-            }
-        }
-        // wait for everyone else to finish that block.
-        __syncthreads();
-
-        // if it was mergable, we copy the mins and maxes into the original array.
-        if (blockMergable){
-            for(int att = localID; att < numAttributes; att += blockDim.x){
-                hyperBlockMins[i * numAttributes + att] = localBlockMins[att];
-                hyperBlockMaxes[i * numAttributes + att] = localBlockMaxes[att];
-            }
-
-            // now we update the delete flag for the seed block to show that it is trash.
-            if (localID == 0){
-                atomicMax(&deleteFlags[seedBlock], -1);
-            }
-        }
-        // if we're the first thread, we need to write the delete flags properly.
-        if (localID == 0){
-            mergable[i] = blockMergable;
-        }
-        // must sync here so that we don't accidentally pick a seed block while we are updating the delete flags queue potentially.
-        __syncthreads();
-    } // end of checking one single block.
-}
-
-__global__ void rearrangeSeedQueue(int *readSeedQueue,  int *writeSeedQueue, int *deleteFlags, const int numBlocks){
-
-    const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
-    const int globalThreadCount = gridDim.x * blockDim.x;
-    // now we are just going to loop through the seed queue and compute each blocks new position in the queue. 
-    for(int i = threadID; i < numBlocks; i += globalThreadCount){
-        // if the block is dead, we just copy it over. it is dead if we have already used it as a seed block.
-        if (deleteFlags[i] < 0){
-            writeSeedQueue[i] = readSeedQueue[i];
-            continue;
-        }
-        // if we didn't merge, we are just going to iterate through and our new index is just the amount of numbers <= 0 to our LEFT.
-        if (mergable[i] == 0){
-            int newIndex = 0;
-            for(int j = 0; j < i; j++){
-                if (mergable[j] < 0){
-                    newIndex++;
-                }
-            }
-            writeSeedQueue[newIndex] = readSeedQueue[i];
-        }
-        else{
-            int count = 0;
-            // if we did merge our new index is the amount of 1's (flags that we merged) to our LEFT, SUBTRACTED FROM N - 1.
-            // this is because if you were at the front and merged we want you to go to the back.
-            for(int j = 0; j < i; j++){
-                if (mergable[j] == 1){
-                    count++;
-                }
-            }
-            writeSeedQueue[numBlocks - 1 - count] = readSeedQueue[i];
-        }
-    }
-}
-
-__global__ void resetMergableFlags(int *mergableFlags, const int numBlocks){
-    // make all the flags 0.
-    for(int i = blockIdx.x * blockDim.x + threadIdx.x; i < numBlocks; i += gridDim.x * blockDim.x){
-        mergableFlags[i] = 0;
-    }
-}
-
-
-// ------------------------------------------------------------------------------------------------
-// REMOVING USELESS HYPERBLOCKS KERNEL FUNCTION. 
-// RETAINS THE LOGIC FOR A DISJUNCTIVE BLOCK.
-// LAUNCH 4 KERNELS!!! ASSIGN -> SUM -> FIND BETTER -> SUM. Once we have the count back, just delete all the HB's with 0 points remaining.
-// ------------------------------------------------------------------------------------------------
-
-// ASSIGN POINTS TO BLOCKS KERNEL FUNCTION.
-// once every point has been assigned to a block, then we can start doing our removing of useless blocks.
-__global__ void assignPointsToBlocks(const float *dataPointsArray, const int numAttributes, const int numPoints, const float *blockMins, const float *blockMaxes, const int *blockEdges, const int numBlocks, int *dataPointBlocks){
-
-    const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
-    const int globalThreadCount = gridDim.x * blockDim.x;
-
-    float *thisThreadPoint = &dataPointsArray[threadID * numAttributes];
-
-    int *dataPointBlock;       // pointer to the slot in the numPoints long array that tells us which block this point goes into.
-    float *startOfBlockMins;    // pointer to the start of the mins of the current block.
-    float *startOfBlockMaxes;  // pointer to the start of the maxes of the current block.
-    float *endOfBlock;         // pointer to the end of the current block.
-    int currentBlock;          // the current block we are on.
-    int nextBlock;             // the next block. useful because blocks are varying sizes.
-
-    for(int i = threadID; i < numPoints; i += globalThreadCount){
-        
-        currentBlock = 0;
-        nextBlock = 1;
-
-        // set out pointer to where we assign this point to a block.
-        dataPointBlock = &dataPointBlocks[i];
-        *dataPointBlock = -1;
-
-        thisThreadPoint = &dataPointsArray[i * numAttributes];
-
-        // now we iterate through all the blocks. checking which block this point falls into first.
-        while (currentBlock < numBlocks){
-
-            // set up our start of mins and maxes.
-            startOfBlockMins = &blockMins[blockEdges[currentBlock]];
-            startOfBlockMaxes = &blockMaxes[blockEdges[currentBlock]];
-            endOfBlock = &blockMins[blockEdges[nextBlock]];
-            // now, we iterate through all the blocks, and the first one our point falls into, we set that block as the value of dataPointBlock, if not we put -1 and we have a coverage issue
-
-            bool inThisBlock = true;
-
-            // the x we are at, x0, x1, ...
-            int particularAttribute = 0;
-
-            // check through all the attributes for this block.
-            while(startOfBlockMins < endOfBlock){
-
-                // get the amount of x1's that we have in this particular block
-                int countOfThisAttribute = (int)*startOfBlockMins;
-
-                // increment these two at the same time, since they have the same length and same encoding of number of attributes in them
-                startOfBlockMins++;
-                startOfBlockMaxes++;
-
-                // now loop that many times, checking if the point is in bounds of any of those intervals
-                // we don't actually use i here, because we don't want to check the next attribute of our point on accident. since we may have 2 x2's and such.
-                bool inBounds = false;
-                for(int i = 0; i < countOfThisAttribute; i++){
-
-                    const double min = *startOfBlockMins;
-                    startOfBlockMins++;
-
-                    const double max = *startOfBlockMaxes;
-                    startOfBlockMaxes++;
-
-                    const double pointValue = thisThreadPoint[particularAttribute];
-
-                    // this loop is for the disjunctive blocks. if there is just one x, it doesn't matter. when we have 4 x2's to consider, once we are in one of them, we are done.
-                    if(pointValue >= min && pointValue <= max){
-                        inBounds = true;
-                        break;
-                    }
-                }
-                if (!inBounds){
-                    inThisBlock = false;
-                    break;
-                }
-                particularAttribute++;
-            }
-            // if in this block, we can set dataPointBlock and we're done
-            if (inThisBlock){
-                *dataPointBlock = currentBlock;
-                break;
-            }
-            // increment the currentBlock and the next block. 
-            currentBlock++;
-            nextBlock++;   
-        }
-    }
-}
-
-// NOW OUR FUNCTION WHICH SUMS UP THE AMOUNT OF POINTS PER BLOCK
-__global__ void sumPointsPerBlock(const int *dataPointBlocks, const int numPoints, int *numPointsInBlocks){
-
-    const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
-    const int globalThreadCount = gridDim.x * blockDim.x;
-
-    for(int i = threadID; i < numPoints; i += globalThreadCount){
-        atomicInc(&numPointsInBlocks[dataPointBlocks[i]]);
-    }
-}
-
-__global__ void findBetterBlocks(int *dataPointsBlocks, const int numPoints, const int numBlocks, const int numAttributes, const float *points, const int *blockEdges, float *hyperBlockMins, float *hyperBlockMaxes, int *numPointsInBlocks){
-
-    const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
-    const int globalThreadCount = gridDim.x * blockDim.x;
-
-    float *startOfBlockMins;
-    float *startOfBlockMaxes;
-    float *endOfBlock;
-    int *dataPointBlock;
-    for(int i = threadID; i < numPoints; i += globalThreadCount){
-        
-        int currentBlock = dataPointsBlocks[i];
-        int nextBlock = currentBlock + 1;
-        dataPointBlock = &dataPointsBlocks[i];
-
-        // we have a coverage issue if this happens.
-        if (currentBlock == -1){
-            continue;
-        }
-
-        float *thisThreadPoint = &points[i * numAttributes];
-
-        // largest block size is our current block we are assigned to for this point
-        int largestBlockSize = numPointsInBlocks[currentBlock];
-
-        // now we iterate through and finally assign our point to the most populous block we find that we fit into.        
-        while (currentBlock < numBlocks){
-
-            // now, we iterate through all the blocks after the one we chose, and if we find a bigger one we fit into, we go into that one.
-            startOfBlockMins = &blockMins[blockEdges[currentBlock]];
-            startOfBlockMaxes = &blockMaxes[blockEdges[currentBlock]];
-            endOfBlock = &blockMins[blockEdges[nextBlock]];
-
-            bool inThisBlock = true;
-
-            // the x we are at, x0, x1, ...
-            int particularAttribute = 0;
-
-            // check through all the attributes for this block.
-            while(startOfBlockMins < endOfBlock){
-
-                // get the amount of x1's that we have in this particular block
-                int countOfThisAttribute = (int)*startOfBlockMins;
-
-                // increment these two at the same time, since they have the same length and same encoding of number of attributes in them
-                startOfBlockMins++;
-                startOfBlockMaxes++; 
-
-                // now loop that many times, checking if the point is in bounds of any of those intervals
-                bool inBounds = false;
-                for(int att = 0; att < countOfThisAttribute; att++){
-
-                    const double min = *startOfBlockMins;
-                    startOfBlockMins++;
-
-                    const double max = *startOfBlockMaxes;
-                    startOfBlockMaxes++;
-
-                    const double pointValue = thisThreadPoint[particularAttribute];
-
-                    if (pointValue >= min && pointValue <= max && numPointsInBlocks[currentBlock] > largestBlockSize){
-                        inBounds = true;
-                        break;
-                    }
-                }   
-                if (!inBounds){
-                    inThisBlock = false;
-                    break;
-                }
-                particularAttribute++;
-            }
-            if (inThisBlock){
-                *dataPointBlock = currentBlock;
-                largestBlockSize = numPointsInBlocks[currentBlock];
-            }
-            currentBlock++;
-            nextBlock++;
-        }
-    }
-}
 
 /* This needs to be a function to serialize hyperblocks.
  * take in 3-D vector that is the hyperblocks for each class
@@ -755,11 +510,11 @@ void saveHyperBlocksToFile(const string& filepath, const vector<vector<vector<fl
     }
 
     // Loop through each class (outermost vector)
-    for (size_t classNum = 0; classNum < hyperBlocks.size(); classNum++) {
+    for (int classNum = 0; classNum < hyperBlocks.size(); classNum++) {
         // Loop through each hyperblock (2D vector)
         for (const auto& hyperblock : hyperBlocks[classNum]) {
             // Write hyperblock values
-            for (size_t i = 0; i < hyperblock.size(); i++) {
+            for (int i = 0; i < hyperblock.size(); i++) {
                 file << hyperblock[i];
                 if (i < hyperblock.size()) file << ", ";
             }
@@ -774,13 +529,15 @@ void saveHyperBlocksToFile(const string& filepath, const vector<vector<vector<fl
 
 
 void minMaxNormalization(vector<vector<vector<float>>>& dataset) {
+    cout << "Starting min-max normalization\n" << endl;
+
     if (dataset.empty()) return;
 
     int num_classes = dataset.size();
 
     // Min and max values for each attribute
-    vector<float> min_vals(FIELD_LENGTH, numeric_limits<float>::max());
-    vector<float> max_vals(FIELD_LENGTH, numeric_limits<float>::lowest());
+    vector<float> min_vals(FIELD_LENGTH);
+    vector<float> max_vals(FIELD_LENGTH);
 
     // Step 1: Find min and max for each attribute
     for (const auto& class_data : dataset) {
@@ -806,17 +563,54 @@ void minMaxNormalization(vector<vector<vector<float>>>& dataset) {
             }
         }
     }
+
+    cout << "Finished min-max normalization\n" << endl;
+}
+
+vector<bool> markUniformColumns(const vector<vector<vector<float>>>& data) {
+      cout << "Starting mark uniform columns\n" << endl;
+
+    if (data.empty() || data[0].empty()) return vector<bool>(); // Handle edge case
+
+    int numCols = data[0][0].size();
+    vector<bool> removed(numCols, false);
+
+    // Iterate through each column
+    for (int col = 0; col < numCols; col++) {
+        float referenceValue = data[0][0][col]; // Use first row of first class as reference
+        bool allSame = true;
+
+        // Check across all classes and all rows
+        for (const auto& obj : data) {
+            for (const auto& row : obj) {
+                if (row[col] != referenceValue) {
+                    allSame = false;
+                    break;
+                }
+            }
+            if (!allSame) break;
+        }
+
+        // If the column is uniform across all classes, mark it for removal
+        if (allSame) {
+            removed[col] = true;
+        }
+    }
+
+    cout << "Finished mark uniform columns\n" << endl;
+
+    return removed;
 }
 
 // Source
 void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vector<vector<vector<float>>>& all_data, vector<HyperBlock>& hyper_blocks) {
     // Mark uniform columns
-    vector<bool> removed = markUniformColumns(all_data); // Assuming this function exists
+    vector<bool> removed = markUniformColumns(all_data);
 
     // Initialize CUDA
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
-    int totalCores = getCudaCores(prop);
+    int totalCores = getNumberCudaCores(prop);
     cout << "Total number of CUDA cores: " << totalCores << endl;
 
     // Calculate total points
@@ -882,7 +676,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         // Add the existing blocks from interval_hyper
         for (auto it = hyper_blocks.begin(); it != hyper_blocks.end();) {
             if (it->classNum == classN) {
-                for (size_t i = 0; i < it->minimums.size(); i++) {
+                for (int i = 0; i < it->minimums.size(); i++) {
                     if (removed[i]) continue;
                     hyperBlockMinsC[currentClassIndex] = it->minimums[i][0];
                     hyperBlockMaxesC[currentClassIndex] = it->maximums[i][0];
@@ -927,22 +721,39 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         int gridSize = 17;
         int sharedMemSize = 2 * FIELD_LENGTH * sizeof(float) + sizeof(int);
 
-        mergerHelper1<<<gridSize, blockSize, sharedMemSize>>>(
-            d_hyperBlockMins,
-            d_hyperBlockMaxes,
-            d_combinedMins,
-            d_combinedMaxes,
-            d_deleteFlags,
-            d_mergable,
-            FIELD_LENGTH,
-            d_points,
-            pointsC.size() / FIELD_LENGTH,
-            numBlocks,
-            d_seedQueue,
-            d_writeSeedQueue
-        );
+        // funky wap to swap the readQueue and writeQueue
+		int* queues[2] = {d_seedQueue, d_writeSeedQueue};
 
-        cudaDeviceSynchronize();
+        for(int i = 0; i < numBlocks; i++){
+           // swap between the two queues
+           int* readQueue = queues[i % 2];
+    	   int* writeQueue = queues[(i + 1) % 2];
+           mergerHyperBlocksWrapper(
+                i, 			// seednum
+                readQueue,  // seedQueue
+                numBlocks,  // number seed blocks
+                FIELD_LENGTH,	// num attributes
+              	pointsC.size() / FIELD_LENGTH,	// num op class points
+            	d_points,						// op class points
+	    		d_hyperBlockMins,				// mins
+				d_hyperBlockMaxes,				// maxes
+				d_deleteFlags,
+				d_mergable,						// mergable flags
+                gridSize,
+                blockSize,
+                sharedMemSize
+       	   );
+		   cudaDeviceSynchronize();
+
+           // Reorder the seedblock order
+    	   rearrangeSeedQueueWrapper(readQueue, writeQueue, d_deleteFlags, d_mergable, numBlocks, gridSize, blockSize);
+           cudaDeviceSynchronize();
+
+           // Reset mergable flags
+           resetMergableFlagsWrapper(d_mergable, numBlocks, gridSize, blockSize);
+           cudaDeviceSynchronize();
+        }
+
 
         // Copy results back
         cudaMemcpy(hyperBlockMinsC.data(), d_hyperBlockMins, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
@@ -960,7 +771,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
             for (int j = 0; j < FIELD_LENGTH; j++) {
                 if (removed[j]) {
                     blockMins[j].push_back(0.0f);
-                    blockMaxes[j].push_back(2.0f);
+                    blockMaxes[j].push_back(1.0f);
                 } else {
                     blockMins[j].push_back(hyperBlockMinsC[i + realIndex]);
                     blockMaxes[j].push_back(hyperBlockMaxesC[i + realIndex]);
@@ -968,7 +779,8 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
                 }
             }
 
-            hyper_blocks.emplace_back(blockMaxes, blockMins, classN);
+            HyperBlock hb(blockMaxes, blockMins, classN);
+            hyper_blocks.emplace_back(hb);
         }
 
         // Free device memory
@@ -982,6 +794,8 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         cudaFree(d_seedQueue);
         cudaFree(d_writeSeedQueue);
     }
+
+    cout << "Finished merger cuda\n" << endl;
 }
 
 // WE WILL ASSUME WE DONT HAVE A ID COLUMN.
@@ -994,9 +808,36 @@ int main() {
 
     cout << "NUM ATTRIBUTES : " << FIELD_LENGTH << endl;
     cout << "NUM CLASSES    : " << NUM_CLASSES << endl;
-    print3DVector(data);
-    minMaxNormalization(data);
-    print3DVector(data);
 
+ 	// normalize the data
+    minMaxNormalization(data);
+	print3DVector(data);
+    // Make the hyperblocks list to store the hyperblocks that are generated.
+	vector<HyperBlock> hyper_blocks;
+
+    // generate hyperblocks
+    generateHBs(data, hyper_blocks);
+	//cout << "HyperBlocks : " << hyper_blocks.size() << endl;
+   for(const HyperBlock& hb : hyper_blocks) {
+		cout << "Minimums:\n";
+		for (const auto& row : hb.minimums) {
+    		for (float value : row) {
+        		cout << value << " ";
+    		}
+    		cout << "\n";
+		}
+
+		cout << "Maximums:\n";
+		for (const auto& row : hb.maximums) {
+    		for (float value : row) {
+        		cout << value << " ";
+    		}
+    		cout << "\n";
+		}
+
+		cout << "------------------\n"; // Separator for readability
+   }
+
+   saveBasicHBsToCSV(hyper_blocks, "testForDVinCPP.csv");
     return 0;
 }

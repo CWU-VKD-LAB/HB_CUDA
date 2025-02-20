@@ -3,3 +3,6 @@ CMakeLists.txt
 cmake-build-debug/
 a.exe
 .vscode/
+a.exp
+a.lib
+testForDVinCPP.csv

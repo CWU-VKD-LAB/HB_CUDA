@@ -43,7 +43,41 @@ void remove_value_from_interval(vector<DataATTR>& data_by_attr, Interval& intr, 
 int skip_value_in_interval(vector<DataATTR>& data_by_attr, int i, float value);
 bool check_interval_overlap(vector<DataATTR>& data_by_attr, Interval& intr, int attr, vector<HyperBlock>& existing_hb);
 void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vector<vector<vector<float>>>& all_data, vector<HyperBlock>& hyper_blocks);
+void saveBasicHBsToCSV(const vector<HyperBlock>& hyper_blocks);
 
+
+/***
+* We want to go through the hyper_blocks that were generated and write them to a file.
+*
+*
+* This print isn't caring about disjunctive blocks.
+*/
+void saveBasicHBsToCSV(const vector<HyperBlock>& hyper_blocks, const string& file_name){
+	// Open file for writing
+    ofstream file(file_name);
+    if (!file.is_open()) {
+        cerr << "Error opening file: " << file_name << endl;
+        return;
+    }
+
+	// min1, min2, min3, ..., minN, max1, max2, max3, ..., maxN, class
+	for (const auto& hyper_block : hyper_blocks) {
+        // Write minimums
+        for (const vector<float>& min : hyper_block.minimums) {
+            file << min[0] << ",";
+        }
+
+        // Write maximums
+        for (const vector<float>& max : hyper_block.maximums) {
+            file << max[0] << ",";
+        }
+
+        // Write the class number
+        file << hyper_block.classNum << "\n";
+    }
+
+    file.close();
+}
 
 ///////////////////////// FUNCTIONS FOR INTERVAL_HYPER IMPLEMENTATION /////////////////////////
 
@@ -55,6 +89,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
      * @return largest interval
      */
 vector<DataATTR> interval_hyper(vector<vector<DataATTR>>& data_by_attr, float acc_threshold, vector<HyperBlock>& existing_hb){
+    cout << "Starting interval hyperblock" << endl;
     vector<future<Interval>> intervals;
     int attr = -1;
     Interval best(-1, -1, -1, -1);
@@ -83,6 +118,7 @@ vector<DataATTR> interval_hyper(vector<vector<DataATTR>>& data_by_attr, float ac
         }
     }
 
+    cout << "Finished interval hyperblock" << endl;
     return longest;
 }
 
@@ -135,6 +171,8 @@ void sortByColumn(vector<vector<float>>& classData, int colIndex) {
  * @return longest interval
 */
 Interval longest_interval(vector<DataATTR>& data_by_attr, float acc_threshold, vector<HyperBlock>& existing_hb, int attr){
+    //cout << "Started longest interval \n" << endl;
+
     Interval intr(1, 0, 0, attr);
     Interval max_intr(-1, -1, -1, attr);
 
@@ -181,11 +219,14 @@ Interval longest_interval(vector<DataATTR>& data_by_attr, float acc_threshold, v
         max_intr.size = intr.size;
     }
 
+    //cout << "Finished longest interval \n" << endl;
+
     return max_intr;
 }
 
 
 bool check_interval_overlap(vector<DataATTR>& data_by_attr, Interval& intr, int attr, vector<HyperBlock>& existing_hb){
+    //cout << "Started check interval overlap\n" << endl;
     // interval range of vals
     float intv_min = data_by_attr[intr.start].value;
     float intv_max = data_by_attr[intr.end].value;
@@ -201,12 +242,16 @@ bool check_interval_overlap(vector<DataATTR>& data_by_attr, Interval& intr, int 
         }
     }
 
+    //cout << "Finished check interval overlap\n" << endl;
+
     // If unique return true
     return true;
 }
 
 //skip_value_in_interval
 int skip_value_in_interval(vector<DataATTR>& data_by_attr, int i, float value){
+    //cout << "Starting skip value in interval\n" << endl;
+
     while(data_by_attr[i].value == value){
         if(i < data_by_attr.size() - 1){
             i++;
@@ -216,12 +261,15 @@ int skip_value_in_interval(vector<DataATTR>& data_by_attr, int i, float value){
         }
     }
 
+    //cout << "Finished skip value in interval\n" << endl;
+
     return i;
 }
 
 
 //remove_value_from_interval
 void remove_value_from_interval(vector<DataATTR>& data_by_attr, Interval& intr, float value){
+    //cout << "Starting remove value from intervals\n" << endl;
     while(data_by_attr[intr.end].value == value){
         if(intr.end > intr.start){
             intr.size--;
@@ -232,12 +280,13 @@ void remove_value_from_interval(vector<DataATTR>& data_by_attr, Interval& intr, 
             break;
         }
     }
+    //cout << "Finished remove value from intervals\n" << endl;
 }
 
 ///////////////////////// END FUNCTIONS FOR INTERVAL_HYPER IMPLEMENTATION /////////////////////////
 
 void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_blocks){
-  	cout << "Generating HBS\n" << endl;
+  	cout << "Started generating HBS\n" << endl;
     // Hyperblocks generated with this algorithm
     vector<HyperBlock> gen_hb;
 
@@ -249,10 +298,15 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
     vector<vector<vector<float>>> datum;
     vector<vector<vector<float>>> seed_data;
     vector<vector<int>> skips;
+	cout << "Initialized datum, seed_data, skips\n" << endl;
 
     // Initially generate blocks
     try{
+        cout << "Starting while loop to generate hyperblocks\n";
+		cout << "data_by_attr[0].size() = " << data_by_attr[0].size() << endl;
+
         while(data_by_attr[0].size() > 0){
+
             vector<DataATTR> intv = interval_hyper(data_by_attr, 100, gen_hb);
             all_intv.push_back(intv);
 
@@ -266,15 +320,26 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
                     intv_data.push_back(data[dataAttr.classNum][dataAttr.classIndex]);
                 }
 
+				cout << "After the for loop in intv.size\n" << endl;
+
                 // add data and hyperblock
                 hb_data.push_back(intv_data);
+                cout << "Before making hyperblock\n" << endl;
+
                 HyperBlock hb(hb_data, intv[0].classNum);
+                cout << "After making hyperblock\n" << endl;
+
                 gen_hb.push_back(hb);
+                cout << "After the push back in intv.size\n" << endl;
+
             }
             else{
+                cout << "Breaking because the intv size is < 1\n" << endl;
                 break;
             }
         }
+
+		cout << "Ended while loop to generate hyperblocks\n";
 
         // Add all hbs from gen_hb to hyper_blocks
         hyper_blocks.insert(hyper_blocks.end(), gen_hb.begin(), gen_hb.end());
@@ -327,14 +392,15 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
 
 
     // Call CUDA function.
-    try{
-      	cout << "Calling merger_cuda\n" << endl;
+    cout << "Calling merger_cuda\n" << endl;
 
+    try{
         merger_cuda(datum, seed_data, hyper_blocks);
     }catch (exception e){
         cout << "Error in generateHBs: merger_cuda" << endl;
     }
 
+    cout << "Finished generating HBS\n" << endl;
 }
 
 
@@ -745,17 +811,33 @@ int main() {
 
  	// normalize the data
     minMaxNormalization(data);
-
+	print3DVector(data);
     // Make the hyperblocks list to store the hyperblocks that are generated.
 	vector<HyperBlock> hyper_blocks;
 
     // generate hyperblocks
     generateHBs(data, hyper_blocks);
-	cout << "HyperBlocks : " << hyper_blocks.size() << endl;
-    for(const HyperBlock& hb : hyper_blocks) {
-      cout << hb.classNum << "\n" << endl;
-    }
+	//cout << "HyperBlocks : " << hyper_blocks.size() << endl;
+   for(const HyperBlock& hb : hyper_blocks) {
+		cout << "Minimums:\n";
+		for (const auto& row : hb.minimums) {
+    		for (float value : row) {
+        		cout << value << " ";
+    		}
+    		cout << "\n";
+		}
 
+		cout << "Maximums:\n";
+		for (const auto& row : hb.maximums) {
+    		for (float value : row) {
+        		cout << value << " ";
+    		}
+    		cout << "\n";
+		}
 
+		cout << "------------------\n"; // Separator for readability
+   }
+
+   saveBasicHBsToCSV(hyper_blocks, "testForDVinCPP.csv");
     return 0;
 }

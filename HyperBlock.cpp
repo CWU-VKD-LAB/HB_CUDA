@@ -3,25 +3,9 @@
 // Constructor definition
 HyperBlock::HyperBlock(const std::vector<std::vector<float>>& maxs, const std::vector<std::vector<float>>& mins, int cls) : maximums(maxs), minimums(mins), classNum(cls) {}
 
-void print3DVector2(const std::vector<std::vector<std::vector<float>>>& vec) {
-    for (int i = 0; i < vec.size(); i++) {
-        std::cout << "Class " << i << ":" << std::endl;
-        for (const auto& row : vec[i]) {
-            std::cout << "  [";
-            for (int j = 0; j < row.size(); j++) {
-                std::cout << row[j];
-                if (j < row.size() - 1) std::cout << ", ";
-            }
-            std::cout << "]" << std::endl;
-        }
-        std::cout << std::endl;  // Add spacing between classes
-    }
-}
-
 HyperBlock::HyperBlock(std::vector<std::vector<std::vector<float>>>& hb_data, int cls){
     int attr_count = hb_data[0][0].size(); // Number of attributes
     std::cout << "print the vector\n" << std::endl;
-	print3DVector2(hb_data);
     // Initialize maxes and mins with size and initial values
     std::vector<std::vector<float>> maxes(attr_count, std::vector<float>(1));
     std::vector<std::vector<float>> mins(attr_count, std::vector<float>(1));

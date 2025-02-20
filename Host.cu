@@ -393,7 +393,21 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
     cout << "Calling merger_cuda\n" << endl;
 
     try{
-        merger_cuda(datum, seed_data, hyper_blocks);
+        cout << "Printing interval hyperblocks:\n\n" << endl;
+        for(const auto& hb : hyper_blocks){
+            for(const auto& min : hb.minimums){
+                cout << min[0] << " ";
+            }
+            cout << endl;
+
+            for(const auto& max : hb.maximums){
+                cout << max[0] << " ";
+            }
+            cout << endl;
+        }
+        cout << "End interval hyperblocks:\n\n" << endl;
+
+        merger_cuda(seed_data, datum, hyper_blocks);
     }catch (exception e){
         cout << "Error in generateHBs: merger_cuda" << endl;
     }
@@ -601,21 +615,17 @@ vector<bool> markUniformColumns(const vector<vector<vector<float>>>& data) {
 // Source
 void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vector<vector<vector<float>>>& all_data, vector<HyperBlock>& hyper_blocks) {
     // Mark uniform columns
-    vector<bool> removed = markUniformColumns(all_data);
+    //vector<bool> removed = markUniformColumns(all_data);
 
     // Initialize CUDA
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
-    int totalCores = getNumberCudaCores(prop);
-    cout << "Total number of CUDA cores: " << totalCores << endl;
-
-    // Launch kernel
-    int blockSize = getNumberCudaThreadsPerSM(prop);
-    int gridSize = getNumberCudaSMs(prop);
     int sharedMemSize = 2 * FIELD_LENGTH * sizeof(float) + sizeof(int);
-    cout << "Block size: " << blockSize << endl;
-    cout << "Grid size: " << gridSize << endl;
-    cout << "Shared memory size: " << sharedMemSize << endl;
+    int minGridSize;  // Minimum grid size needed to achieve maximum occupancy
+    int blockSize;    // Suggested block size for maximum occupancy
+    // Calculate the block size and minimum grid size required to maximize occupancy.
+    // The third parameter is the kernel function, and the fourth is shared memory per block (set to 0 if not used).
+    cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, mergerHyperBlocks, sharedMemSize, 0);
 
     // Calculate total points
     int numPoints = 0;
@@ -629,6 +639,10 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         numBlocksOfEachClass[hb.classNum]++;
     }
 
+    for(int a = 0; a < NUM_CLASSES; a++){
+        cout << "Number of blocks for class " << a << ": " << numBlocksOfEachClass[a] << endl;
+    }
+
     // Process each class
     for (int classN = 0; classN < NUM_CLASSES; classN++) {
         
@@ -638,6 +652,13 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         if (data_with_skips[classN].empty()) {
             sizeWithoutHBpoints = numBlocksOfEachClass[classN] * FIELD_LENGTH;
         }
+
+        // Compute grid size to cover all elements. we already know our ideal block size from before. 
+        int gridSize = ((sizeWithoutHBpoints / FIELD_LENGTH) + blockSize - 1) / blockSize;
+
+        cout << "Grid size: " << gridSize << endl;
+        cout << "Block size: " << blockSize << endl;
+        cout << "Shared memory size: " << sharedMemSize << endl;
 
         // Allocate host memory
         vector<float> hyperBlockMinsC(sizeWithoutHBpoints);
@@ -655,7 +676,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
             for (const auto& point : data_with_skips[currentClass]) {
                 if (currentClass == classN) {
                     for (int attr = 0; attr < FIELD_LENGTH; attr++) {
-                        if (removed[attr]) continue;
+                        //if (removed[attr]) continue;
                         hyperBlockMinsC[currentClassIndex] = point[attr];
                         hyperBlockMaxesC[currentClassIndex] = point[attr];
                         currentClassIndex++;
@@ -664,6 +685,10 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
             }
         }
 
+        cout << "Current Class Index: " << currentClassIndex << endl;
+        cout << "Size Without HB Points: " << sizeWithoutHBpoints << endl;
+        cout << "Number of Blocks: " << numBlocksOfEachClass[classN] << endl;
+
         // Process other class points
         int otherClassIndex = 0;
         for (int currentClass = 0; currentClass < all_data.size(); currentClass++) {
@@ -671,7 +696,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
 
             for (const auto& point : all_data[currentClass]) {
                 for (int attr = 0; attr < FIELD_LENGTH; attr++) {
-                    if (removed[attr]) continue;
+                    //if (removed[attr]) continue;
                     pointsC[otherClassIndex++] = point[attr];
                 }
             }
@@ -681,7 +706,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         for (auto it = hyper_blocks.begin(); it != hyper_blocks.end();) {
             if (it->classNum == classN) {
                 for (int i = 0; i < it->minimums.size(); i++) {
-                    if (removed[i]) continue;
+                    //if (removed[i]) continue;
                     hyperBlockMinsC[currentClassIndex] = it->minimums[i][0];
                     hyperBlockMaxesC[currentClassIndex] = it->maximums[i][0];
                     currentClassIndex++;
@@ -706,9 +731,6 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
 
         int numBlocks = hyperBlockMinsC.size() / FIELD_LENGTH;
         vector<int> seedQueue(numBlocks);
-        for (int i = 0; i < numBlocks; i++) {
-            seedQueue[i] = i;
-        }
 
         cudaMalloc(&d_mergable, numBlocks * sizeof(int));
         cudaMalloc(&d_seedQueue, numBlocks * sizeof(int));
@@ -744,7 +766,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
 		   cudaDeviceSynchronize();
 
            // Reorder the seedblock order
-    	   rearrangeSeedQueueWrapper(readQueue, writeQueue, d_deleteFlags, d_mergable, numBlocks, gridSize, blockSize);
+    	   rearrangeSeedQueueWrapper(i, readQueue, writeQueue, d_deleteFlags, d_mergable, numBlocks, gridSize, blockSize);
            cudaDeviceSynchronize();
 
            // Reset mergable flags
@@ -766,14 +788,14 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
 
             int realIndex = 0;
             for (int j = 0; j < FIELD_LENGTH; j++) {
-                if (removed[j]) {
-                    blockMins[j].push_back(0.0f);
-                    blockMaxes[j].push_back(1.0f);
-                } else {
+                //if (removed[j]) {
+                 //   blockMins[j].push_back(0.0f);
+                //    blockMaxes[j].push_back(1.0f);
+                //} else {
                     blockMins[j].push_back(hyperBlockMinsC[i + realIndex]);
                     blockMaxes[j].push_back(hyperBlockMaxesC[i + realIndex]);
                     realIndex++;
-                }
+                //}
             }
 
             HyperBlock hb(blockMaxes, blockMins, classN);

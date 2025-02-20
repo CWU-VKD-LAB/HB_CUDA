@@ -27,4 +27,3 @@ int getNumberCudaSMs(const cudaDeviceProp& prop) {
 int getNumberCudaThreadsPerSM(const cudaDeviceProp& prop) {
     return getCudaCoresPerSM(prop.major, prop.minor);
 }
-

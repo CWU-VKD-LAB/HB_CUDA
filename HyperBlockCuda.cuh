@@ -28,7 +28,7 @@ void mergerHyperBlocksWrapper(
     const int numAttributes, const int numPoints, const float *opposingPoints,
     float *hyperBlockMins, float *hyperBlockMaxes, int *deleteFlags, int *mergable, int gridSize, int blockSize, int sharedMemSize);
 
-void rearrangeSeedQueueWrapper(int *readSeedQueue, int *writeSeedQueue, int *deleteFlags,int *mergable, const int numBlocks, int gridSize, int blockSize);
+void rearrangeSeedQueueWrapper(const int deadSeedNum, int *readSeedQueue, int *writeSeedQueue, int *deleteFlags,int *mergable, const int numBlocks, int gridSize, int blockSize);
 
 void resetMergableFlagsWrapper(int *mergableFlags, const int numBlocks, int gridSize, int blockSize);
 

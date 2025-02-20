@@ -19,3 +19,12 @@ int getNumberCudaCores(const cudaDeviceProp& prop) {
     int coresPerSM = getCudaCoresPerSM(prop.major, prop.minor);
     return prop.multiProcessorCount * coresPerSM;
 }
+
+int getNumberCudaSMs(const cudaDeviceProp& prop) {
+    return prop.multiProcessorCount;
+}
+
+int getNumberCudaThreadsPerSM(const cudaDeviceProp& prop) {
+    return getCudaCoresPerSM(prop.major, prop.minor);
+}
+

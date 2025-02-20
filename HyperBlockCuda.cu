@@ -22,7 +22,7 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
     // it only updates once obviously, but it makes all the other blocks wait until someone has set that value.
     if (localID == 0){
         atomicMin(&deleteFlags[seedBlock], -9);
-        atomicMin(&mergable[seedBlock], -1);
+        atomicMin(&mergable[seedBlock], 0);     // shouldn't probably matter for the seedblock but we do it for the love of the game.
     }
     // all the threads of a block are going to deal with their flag to determine our early out condition.
     __shared__ int blockMergable;
@@ -38,6 +38,7 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
     for(int i = blockIndex; i < numBlocks; i+= gridDim.x){
 
         // if the block has already been a seed block, we aren't going to do our merging business with it.
+        // every thread skips this so it's ok. the sync isn't a problem. 
         if (deleteFlags[i] < 0 || i == seedBlock){
             continue;
         }
@@ -84,6 +85,7 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
             }
 
             // now we update the delete flag for the seed block to show that it is trash.
+            // -1 means it got merged, so we don't need to copy it back. -9 is for if it never merged, so it ends up living on.
             if (localID == 0){
                 atomicMax(&deleteFlags[seedBlock], -1);
             }
@@ -104,15 +106,15 @@ __global__ void rearrangeSeedQueue(int *readSeedQueue, int *writeSeedQueue, int 
     // now we are just going to loop through the seed queue and compute each blocks new position in the queue.
     for(int i = threadID; i < numBlocks; i += globalThreadCount){
         // if the block is dead, we just copy it over. it is dead if we have already used it as a seed block.
-        if (deleteFlags[i] < 0){
+        if (deleteFlags[readSeedQueue[i]] < 0){
             writeSeedQueue[i] = readSeedQueue[i];
             continue;
         }
         // if we didn't merge, we are just going to iterate through and our new index is just the amount of numbers <= 0 to our LEFT.
-        if (mergable[i] == 0){
+        if (mergable[readSeedQueue[i]] == 0){
             int newIndex = 0;
             for(int j = 0; j < i; j++){
-                if (mergable[j] < 0){
+                if (mergable[readSeedQueue[j]] == 0){
                     newIndex++;
                 }
             }
@@ -123,7 +125,7 @@ __global__ void rearrangeSeedQueue(int *readSeedQueue, int *writeSeedQueue, int 
             // if we did merge our new index is the amount of 1's (flags that we merged) to our LEFT, SUBTRACTED FROM N - 1.
             // this is because if you were at the front and merged we want you to go to the back.
             for(int j = 0; j < i; j++){
-                if (mergable[j] == 1){
+                if (mergable[readSeedQueue[j]] == 1){
                     count++;
                 }
             }

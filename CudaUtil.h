@@ -15,6 +15,10 @@ int getCudaCoresPerSM(int major, int minor);
 // Get the total number of CUDA cores on the GPU
 int getNumberCudaCores(const cudaDeviceProp& prop);
 
+int getNumberCudaSMs(const cudaDeviceProp& prop);
+
+int getNumberCudaThreadsPerSM(const cudaDeviceProp& prop);
+
 #include "CudaUtil.tpp" // Include the template implementation file
 
 #endif // CUDA_UTIL_H

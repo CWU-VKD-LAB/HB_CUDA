@@ -117,8 +117,6 @@ vector<DataATTR> interval_hyper(vector<vector<DataATTR>>& data_by_attr, float ac
             longest.push_back(data_by_attr[attr][i]);
         }
     }
-
-    cout << "Finished interval hyperblock" << endl;
     return longest;
 }
 
@@ -399,8 +397,6 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
     }catch (exception e){
         cout << "Error in generateHBs: merger_cuda" << endl;
     }
-
-    cout << "Finished generating HBS\n" << endl;
 }
 
 
@@ -424,7 +420,7 @@ void print3DVector(const vector<vector<vector<float>>>& vec) {
 /*  Returns a class seperated version of the dataset
  *  Each class has an entry in the outer vector with a 2-d vector of its points
  */
-vector<vector<vector<float>>> dataSetup(const string& filepath) {
+vector<vector<vector<float>>> dataSetup(const string filepath) {
     // 3D vector: data[class][point][attribute]
     vector<vector<vector<float>>> data;
 
@@ -613,6 +609,14 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
     int totalCores = getNumberCudaCores(prop);
     cout << "Total number of CUDA cores: " << totalCores << endl;
 
+    // Launch kernel
+    int blockSize = getNumberCudaThreadsPerSM(prop);
+    int gridSize = getNumberCudaSMs(prop);
+    int sharedMemSize = 2 * FIELD_LENGTH * sizeof(float) + sizeof(int);
+    cout << "Block size: " << blockSize << endl;
+    cout << "Grid size: " << gridSize << endl;
+    cout << "Shared memory size: " << sharedMemSize << endl;
+
     // Calculate total points
     int numPoints = 0;
     for (const auto& classData : all_data) {
@@ -716,14 +720,8 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         cudaMemcpy(d_points, pointsC.data(), pointsC.size() * sizeof(float), cudaMemcpyHostToDevice);
         cudaMemcpy(d_seedQueue, seedQueue.data(), numBlocks * sizeof(int), cudaMemcpyHostToDevice);
 
-        // Launch kernel
-        int blockSize = 256;
-        int gridSize = 17;
-        int sharedMemSize = 2 * FIELD_LENGTH * sizeof(float) + sizeof(int);
-
         // funky wap to swap the readQueue and writeQueue
 		int* queues[2] = {d_seedQueue, d_writeSeedQueue};
-
         for(int i = 0; i < numBlocks; i++){
            // swap between the two queues
            int* readQueue = queues[i % 2];
@@ -754,7 +752,6 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
            cudaDeviceSynchronize();
         }
 
-
         // Copy results back
         cudaMemcpy(hyperBlockMinsC.data(), d_hyperBlockMins, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
         cudaMemcpy(hyperBlockMaxesC.data(), d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
@@ -762,7 +759,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
 
         // Process results
         for (int i = 0; i < hyperBlockMinsC.size(); i += FIELD_LENGTH) {
-            if (deleteFlagsC[i / FIELD_LENGTH] == -1) continue;
+            if (deleteFlagsC[i / FIELD_LENGTH] == -1) continue;  // -1 is a seed block which was merged to. so it doesn't need to be copied back.
 
             vector<vector<float>> blockMins(FIELD_LENGTH);
             vector<vector<float>> blockMaxes(FIELD_LENGTH);
@@ -794,17 +791,16 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         cudaFree(d_seedQueue);
         cudaFree(d_writeSeedQueue);
     }
-
-    cout << "Finished merger cuda\n" << endl;
 }
 
 // WE WILL ASSUME WE DONT HAVE A ID COLUMN.
 // WE WILL ASSSUME THE LAST COLUMN IS A CLASS COLUMN
-int main() {
+int main(int argc, char* argv[]) {
     printf("USER WARNING :: ENSURE THAT THERE IS NO ID COLUMN\n");
     printf("USER WARNING :: ENSURE THAT THE LAST COLUMN IS A CLASS COLUMN\n");
 
-    vector<vector<vector<float>>> data = dataSetup("./datasets/iris.csv");
+    // dimension 1 is the class, then it is just a list of points, since each point is a list of floats.
+    vector<vector<vector<float>>> data = dataSetup(argv[1]);
 
     cout << "NUM ATTRIBUTES : " << FIELD_LENGTH << endl;
     cout << "NUM CLASSES    : " << NUM_CLASSES << endl;
@@ -837,6 +833,9 @@ int main() {
 
 		cout << "------------------\n"; // Separator for readability
    }
+
+    cout << "Finished generating HBS\n" << endl;
+    cout << "Number of HBs: " << hyper_blocks.size() << endl;
 
    saveBasicHBsToCSV(hyper_blocks, "testForDVinCPP.csv");
     return 0;

@@ -18,12 +18,6 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
     // get our seed block.
     const int seedBlock = readSeedQueue[seedIndex];
 
-    // every block tries to do this, so that we can make sure and not start executing until the flag is set.
-    // it only updates once obviously, but it makes all the other blocks wait until someone has set that value.
-    if (localID == 0){
-        atomicMin(&deleteFlags[seedBlock], -9);
-        atomicMin(&mergable[seedBlock], 0);     // shouldn't probably matter for the seedblock but we do it for the love of the game.
-    }
     // all the threads of a block are going to deal with their flag to determine our early out condition.
     __shared__ int blockMergable;
 
@@ -35,11 +29,11 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
 
     __syncthreads();
     // iterate through all the blocks, with a stride of numBlocks of CUDA that we have.
-    for(int i = blockIndex; i < numBlocks; i+= gridDim.x){
+    for(int i = blockIndex + seedIndex; i < numBlocks; i+= gridDim.x){
 
         // if the block has already been a seed block, we aren't going to do our merging business with it.
         // every thread skips this so it's ok. the sync isn't a problem. 
-        if (deleteFlags[readSeedQueue[i]] < 0 || readSeedQueue[i] == seedBlock){
+         if (i <= seedIndex){
             continue;
         }
 
@@ -48,10 +42,11 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
             blockMergable = 1;
         }
 
+		const int ourBlock = readSeedQueue[i];
         // copy the mins and maxes of the seed block merged with our current block into our shared memory
         for(int att = localID; att < numAttributes; att += blockDim.x){
-            localBlockMins[att] = min(hyperBlockMins[seedBlock * numAttributes + att], hyperBlockMins[i * numAttributes + att]);
-            localBlockMaxes[att] = max(hyperBlockMaxes[seedBlock * numAttributes + att], hyperBlockMaxes[i * numAttributes + att]);
+            localBlockMins[att] = min(hyperBlockMins[seedBlock * numAttributes + att], hyperBlockMins[ourBlock * numAttributes + att]);
+            localBlockMaxes[att] = max(hyperBlockMaxes[seedBlock * numAttributes + att], hyperBlockMaxes[ourBlock * numAttributes + att]);
         }
 
         // sync so we don't start early.
@@ -70,6 +65,7 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
             }
             // if every single attribute was inside, we have failed. since these are all opposing points.
             if(!someAttributeOutside){
+              	// i want to keep this one tbh
                 blockMergable = 0;
                 break;
             }
@@ -80,19 +76,19 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
         // if it was mergable, we copy the mins and maxes into the original array.
         if (blockMergable){
             for(int att = localID; att < numAttributes; att += blockDim.x){
-                hyperBlockMins[i * numAttributes + att] = localBlockMins[att];
-                hyperBlockMaxes[i * numAttributes + att] = localBlockMaxes[att];
+                hyperBlockMins[ourBlock * numAttributes + att] = localBlockMins[att];
+                hyperBlockMaxes[ourBlock * numAttributes + att] = localBlockMaxes[att];
             }
 
             // now we update the delete flag for the seed block to show that it is trash.
             // -1 means it got merged, so we don't need to copy it back. -9 is for if it never merged, so it ends up living on.
             if (localID == 0){
-                atomicMax(&deleteFlags[seedBlock], -1);
+                atomicMin(&deleteFlags[seedBlock], -1);
             }
         }
         // if we're the first thread, we need to write the delete flags properly.
         if (localID == 0){
-            mergable[readSeedQueue[i]] = blockMergable;
+            mergable[ourBlock] = blockMergable;
         }
         // must sync here so that we don't accidentally pick a seed block while we are updating the delete flags queue potentially.
         __syncthreads();

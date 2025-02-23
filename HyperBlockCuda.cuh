@@ -8,7 +8,7 @@
 __global__ void mergerHyperBlocks(
     const int seedIndex, int *readSeedQueue, const int numBlocks,
     const int numAttributes, const int numPoints, const float *opposingPoints,
-    float *hyperBlockMins, float *hyperBlockMaxes, int *deleteFlags, int *mergable);
+    float *hyperBlockMins, float *hyperBlockMaxes, int *deleteFlags, int *mergable, float* combinedMins, float* combinedMaxes);
 
 __global__ void rearrangeSeedQueue(
     int *readSeedQueue, int *writeSeedQueue, int *deleteFlags,int *mergable, const int numBlocks);
@@ -26,7 +26,7 @@ __global__ void assignPointsToBlocks(
 void mergerHyperBlocksWrapper(
     const int seedIndex, int *readSeedQueue, const int numBlocks,
     const int numAttributes, const int numPoints, const float *opposingPoints,
-    float *hyperBlockMins, float *hyperBlockMaxes, int *deleteFlags, int *mergable, int gridSize, int blockSize, int sharedMemSize);
+    float *hyperBlockMins, float *hyperBlockMaxes, int *deleteFlags, int *mergable, int gridSize, int blockSize, int sharedMemSize, float* combinedMins, float* combinedMaxes);
 
 void rearrangeSeedQueueWrapper(const int deadSeedNum, int *readSeedQueue, int *writeSeedQueue, int *deleteFlags,int *mergable, const int numBlocks, int gridSize, int blockSize);
 

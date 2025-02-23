@@ -12,7 +12,7 @@
 #include "CudaUtil.h"
 #include "HyperBlock.h"
 #include "HyperBlockCuda.cuh"
-
+#include <chrono>
 using namespace std;
 
 int NUM_CLASSES;   // Number of classes in the dataset
@@ -90,7 +90,7 @@ void saveBasicHBsToCSV(const vector<HyperBlock>& hyper_blocks, const string& fil
      * @return largest interval
      */
 vector<DataATTR> interval_hyper(vector<vector<DataATTR>>& data_by_attr, float acc_threshold, vector<HyperBlock>& existing_hb){
-    //cout << "Starting interval hyperblock" << endl;
+    cout << "Starting interval hyperblock" << endl;
     vector<future<Interval>> intervals;
     int attr = -1;
     Interval best(-1, -1, -1, -1);
@@ -118,6 +118,8 @@ vector<DataATTR> interval_hyper(vector<vector<DataATTR>>& data_by_attr, float ac
             longest.push_back(data_by_attr[attr][i]);
         }
     }
+    cout << "Finished interval hyperblock" << endl;
+
     return longest;
 }
 
@@ -286,7 +288,7 @@ void remove_value_from_interval(vector<DataATTR>& data_by_attr, Interval& intr, 
 ///////////////////////// END FUNCTIONS FOR INTERVAL_HYPER IMPLEMENTATION /////////////////////////
 
 void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_blocks){
-  	//cout << "Started generating HBS\n" << endl;
+  	cout << "Started generating HBS\n" << endl;
     // Hyperblocks generated with this algorithm
     vector<HyperBlock> gen_hb;
 
@@ -298,17 +300,19 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
     vector<vector<vector<float>>> datum;
     vector<vector<vector<float>>> seed_data;
     vector<vector<int>> skips;
-	//cout << "Initialized datum, seed_data, skips\n" << endl;
+	cout << "Initialized datum, seed_data, skips\n" << endl;
 
     // Initially generate blocks
-    try{
+
         //cout << "Starting while loop to generate hyperblocks\n";
 		//cout << "data_by_attr[0].size() = " << data_by_attr[0].size() << endl;
 
         while(data_by_attr[0].size() > 0){
+			cout << "Attempting to go into interval_hyper " << endl;
 
             vector<DataATTR> intv = interval_hyper(data_by_attr, 100, gen_hb);
             all_intv.push_back(intv);
+			cout << intv.size() << endl;
 
             // if hyperblock is unique then add
             if(intv.size() > 1){
@@ -320,13 +324,18 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
                     intv_data.push_back(data[dataAttr.classNum][dataAttr.classIndex]);
                 }
 
+                cout << "Made it past the points from real data thingy" << endl << endl;
                 // add data and hyperblock
                 hb_data.push_back(intv_data);
+                cout << "Added intv data to hb_data" << endl << endl;
+
                 HyperBlock hb(hb_data, intv[0].classNum);
+                cout << "Made the hyperblock for this interval thing" << endl << endl;
+
                 gen_hb.push_back(hb);
-            }
-            else{
-                cout << "Breaking because the intv size is < 1\n" << endl;
+                cout << "Added results from last interval_hyper" << endl << endl;
+            }else{
+                cout << "Breaking because the intv size is < 1" << endl;
                 break;
             }
         }
@@ -347,7 +356,6 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
                 skips[dataAttr.classNum].push_back(dataAttr.classIndex);
             }
         }
-
         // Sort the skips
         for(vector<int>& skip : skips){
             sort(skip.begin(), skip.end());
@@ -376,9 +384,7 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
             sortByColumn(seed_data[i], 0);
         }
 
-    }catch(exception e){
-        cout << "Error in generateHBs: intervals" << endl;
-    }
+
 
 
     // Call CUDA function.
@@ -398,10 +404,10 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
         //    cout << endl;
         //}
         //cout << "End interval hyperblocks:\n\n" << endl;
-		//printf("DATUM BEING PASSED INTO MERGING:\n");
+		printf("DATUM BEING PASSED INTO MERGING:\n");
 		//print3DVector(datum);
 
-        //printf("SEED DATA BEING PASSED INTO MERGING:\n");
+        printf("SEED DATA BEING PASSED INTO MERGING:\n");
 		//print3DVector(seed_data);
 
         merger_cuda(seed_data, datum, hyper_blocks);
@@ -446,7 +452,6 @@ vector<vector<vector<float>>> dataSetup(const string filepath) {
 
     int classNum = 0;
     string line;
-
     // Ignore the header, can use later if needed
     getline(file, line);
 
@@ -748,8 +753,8 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
 		int* queues[2] = {d_seedQueue, d_writeSeedQueue};
         for(int i = 0; i < numBlocks; i++){
            // swap between the two queues
-           int* readQueue = queues[i % 2];
-    	   int* writeQueue = queues[(i + 1) % 2];
+           int* readQueue = queues[i & 1];
+    	   int* writeQueue = queues[(i + 1) & 1];
            mergerHyperBlocksWrapper(
                 i, 			// seednum
                 readQueue,  // seedQueue
@@ -763,7 +768,9 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
 				d_mergable,						// mergable flags
                 gridSize,
                 blockSize,
-                sharedMemSize
+                sharedMemSize,
+               	d_combinedMins,
+                d_combinedMaxes
        	   );
 		   cudaDeviceSynchronize();
 
@@ -829,38 +836,54 @@ int main(int argc, char* argv[]) {
     cout << "NUM ATTRIBUTES : " << FIELD_LENGTH << endl;
     cout << "NUM CLASSES    : " << NUM_CLASSES << endl;
 
+    cout << "Number elements in class 0: " << data[0].size() << endl;
+    cout << "Number elements in class 1: " << data[1].size() << endl;
  	// normalize the data
+
+    cout << data.size() << endl;
+    cout << data[0].size() << endl;
+    cout << data[0][0].size() << endl;
+
+    cout << data[1].size() << endl;
+    cout << data[1][0].size() << endl;
+
+    cout << "Checking the sizes are good" << endl;
+	for(int i = 0; i < data[0].size(); i++){
+       if(data[0][i].size() != 784)
+         cerr << data[0][i].size() << endl;
+    }
+    for(int i = 0; i < data[1].size(); i++){
+       if(data[1][i].size() != 784)
+          cerr << data[1][i].size() << endl;
+    }
+	cout << "Done checking the sizes are good" << endl;
+
+    cout << endl;
     minMaxNormalization(data);
 	//print3DVector(data);
+    printf("Made it past normalization");
     // Make the hyperblocks list to store the hyperblocks that are generated.
 	vector<HyperBlock> hyper_blocks;
 
     // generate hyperblocks
+    auto start = std::chrono::high_resolution_clock::now();
+
     generateHBs(data, hyper_blocks);
-	//cout << "HyperBlocks : " << hyper_blocks.size() << endl;
-   for(const HyperBlock& hb : hyper_blocks) {
-		cout << "Minimums:\n";
-		for (const auto& row : hb.minimums) {
-    		for (float value : row) {
-        		cout << value << " ";
-    		}
-    		cout << "\n";
-		}
 
-		cout << "Maximums:\n";
-		for (const auto& row : hb.maximums) {
-    		for (float value : row) {
-        		cout << value << " ";
-    		}
-    		cout << "\n";
-		}
+	printf("Generated HyperBlocks\n");
+    auto stop = std::chrono::high_resolution_clock::now();
 
-		cout << "------------------\n"; // Separator for readability
-   }
+ 	auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+    std::cout << "Time taken: " << duration_ms.count() << " ms\n";
+
+    // Calculate duration in seconds
+    auto duration_sec = std::chrono::duration_cast<std::chrono::seconds>(stop - start);
+    std::cout << "Time taken: " << duration_sec.count() << " s\n";
+	cout << "HyperBlocks : " << hyper_blocks.size() << endl;
 
     cout << "Finished generating HBS\n" << endl;
     cout << "Number of HBs: " << hyper_blocks.size() << endl;
 
-   saveBasicHBsToCSV(hyper_blocks, "testForDVinCPP.csv");
+    saveBasicHBsToCSV(hyper_blocks, "testForDVinCPP.csv");
     return 0;
 }

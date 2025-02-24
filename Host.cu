@@ -658,6 +658,23 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         numBlocksOfEachClass[hb.classNum]++;
     }
 
+    vector<vector<float>> preMadeHyperBlockMins;
+	vector<vector<float>> preMadeHyperBlockMaxes;
+    //TODO: ADAPT THIS TO WORK !!!!!!!! This was what was inside before
+    for (auto it = hyper_blocks.begin(); it != hyper_blocks.end();) {
+        if (it->classNum == classN) {
+            for (int i = 0; i < it->minimums.size(); i++) {
+                //if (removed[i]) continue;
+                hyperBlockMinsC[currentClassIndex] = it->minimums[i][0];
+                hyperBlockMaxesC[currentClassIndex] = it->maximums[i][0];
+                currentClassIndex++;
+            }
+            it = hyper_blocks.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
     #pragma omp parallel for num_threads(deviceCount)
     for(int deviceID = 0; deviceID < deviceCount; deviceID++){
 		cudaSetDevice(deviceID);
@@ -730,6 +747,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
             	}
         	}
 
+                /*
         	// Add the existing blocks from interval_hyper
         	for (auto it = hyper_blocks.begin(); it != hyper_blocks.end();) {
             	if (it->classNum == classN) {
@@ -744,11 +762,17 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
                 	++it;
             	}
         	}
+			*/
+            // Add the premade blocks of class classN to the end of the local hyperBlockMins/Maxes
+			hyperBlockMinsC.insert(hyperBlockMinsC.end(), premadeHyperBlockMins[classN].begin(), premadeHyperBlockMins[classN].end());
+            hyperBlockMaxesC.insert(hyperBlockMaxesC.end(), premadeHyperBlockMaxes[classN].begin(), premadeHyperBlockMaxes[classN].end());
+
+
+            // We should do that before and then during this loop just add the result from that to the end of hyperBlockMinsC and hyperBlockMaxesC
 
         	// Allocate device memory
-        	float *d_hyperBlockMins, *d_hyperBlockMaxes, *d_combinedMins, *d_combinedMaxes;
+        	float *d_hyperBlockMins, *d_hyperBlockMaxes, *d_combinedMins, *d_combinedMaxes, *d_points;
         	int *d_deleteFlags, *d_mergable, *d_seedQueue, *d_writeSeedQueue;
-        	float *d_points;
 
         	cudaMalloc(&d_hyperBlockMins, sizeWithoutHBpoints * sizeof(float));
         	cudaMalloc(&d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float));
@@ -774,7 +798,9 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         	cudaMemcpy(d_hyperBlockMaxes, hyperBlockMaxesC.data(), sizeWithoutHBpoints * sizeof(float), cudaMemcpyHostToDevice);
         	cudaMemcpy(d_points, pointsC.data(), pointsC.size() * sizeof(float), cudaMemcpyHostToDevice);
         	cudaMemcpy(d_seedQueue, seedQueue.data(), numBlocks * sizeof(int), cudaMemcpyHostToDevice);
-			cout << "kernel" << endl;
+
+			cout << "Launched a kernel for class: " << classN << endl;
+
         	// funky wap to swap the readQueue and writeQueue
 			int* queues[2] = {d_seedQueue, d_writeSeedQueue};
         	for(int i = 0; i < numBlocks; i++){
@@ -834,7 +860,12 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
             	}
 
             	HyperBlock hb(blockMaxes, blockMins, classN);
-            	hyper_blocks.emplace_back(hb);
+
+                // Make this be executed on 1 thread at a time.
+                #pragma omp critical{
+            		hyper_blocks.emplace_back(hb);
+                }
+
         	}
 
         	// Free device memory

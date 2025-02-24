@@ -7,8 +7,8 @@
 // ------------------------------------------------------------------------------------------------
 #define min(a, b) (a > b)? b : a
 #define max(a, b) (a > b)? a : b
-__global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const int numBlocks, const int numAttributes, const int numPoints, const float *points, float *hyperBlockMins, float *hyperBlockMaxes, int *deleteFlags, int *mergable, float* combinedMins, float* combinedMaxes){
-	int threadID = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const int numBlocks, const int numAttributes, const int numPoints, const float* __restrict__ points, float *hyperBlockMins, float *hyperBlockMaxes, int* deleteFlags, int* mergable, float* combinedMins, float* combinedMaxes){
+	const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
 
   	// Put the seed block attributes in instead.
 	extern __shared__ float seedBlockAttributes[];
@@ -24,9 +24,12 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
     const int seedBlock = readSeedQueue[seedIndex];
 
     // put seed block into shared mem
+    const int baseIndex = seedBlock * numAttributes;
     for (int index = threadIdx.x; index < numAttributes; index += blockDim.x){
-        seedBlockMins[index] = hyperBlockMins[seedBlock * numAttributes + index];
-        seedBlockMaxes[index] = hyperBlockMaxes[seedBlock * numAttributes + index];
+        int globalIndex = index + baseIndex;
+    	//seedBlockMins[index] = hyperBlockMins[seedBlock * numAttributes + index];
+        seedBlockMins[index] = hyperBlockMins[globalIndex];
+        seedBlockMaxes[index] = hyperBlockMaxes[globalIndex];
     }
 
 	// sync block so shared mem is right.
@@ -50,7 +53,8 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
 
                     char someAttributeOutside = 0;
                     for(int att = 0; att < numAttributes; att++){
-                        if (points[point * numAttributes + att] > thisBlockCombinedMaxes[att] || points[point * numAttributes + att] < thisBlockCombinedMins[att]){
+                        const float val = points[point * numAttributes + att];
+                        if (val > thisBlockCombinedMaxes[att] || val < thisBlockCombinedMins[att]){
                             someAttributeOutside = 1;
                             break;
                         }
@@ -65,13 +69,13 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
                 // then we simply flag that seedBlock is trash.
                 if (allPassed){
                     // copy the combined mins and maxes into the original array
-                    for (int i = 0; i < numAttributes; i++){
-                        hyperBlockMins[k * numAttributes + i] = thisBlockCombinedMins[i];
-                        hyperBlockMaxes[k * numAttributes + i] = thisBlockCombinedMaxes[i];
+                    int index = k * numAttributes;
+                    for (int i = 0; i < numAttributes; i++, index++){
+                        hyperBlockMins[index] = thisBlockCombinedMins[i];
+                        hyperBlockMaxes[index] = thisBlockCombinedMaxes[i];
                     }
-                    // set the flag to -1. atomic because many threads will try this.
-
-                    atomicMin(&deleteFlags[seedBlock], -1);
+                    // set the flag to -1.
+                    deleteFlags[seedBlock] = -1;
                     mergable[k] = 1;
                 }
             }

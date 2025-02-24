@@ -380,8 +380,8 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
 
         // Sort data by most important attribute
         for(int i = 0; i < datum.size(); i++){
-            sortByColumn(datum[i], 0);
-            sortByColumn(seed_data[i], 0);
+            sortByColumn(datum[i], 6);
+            sortByColumn(seed_data[i], 6);
         }
 
 

@@ -659,7 +659,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
     }
 
     vector<vector<HyperBlock>> resultingBlocks(NUM_CLASSES);
-
+    deviceCount = NUM_CLASSES > deviceCount ? deviceCount : NUM_CLASSES;
     #pragma omp parallel for num_threads(deviceCount)
     for(int deviceID = 0; deviceID < deviceCount; deviceID++){
 		cudaSetDevice(deviceID);

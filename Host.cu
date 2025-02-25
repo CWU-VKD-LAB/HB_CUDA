@@ -12,7 +12,8 @@
 #include "CudaUtil.h"
 #include "HyperBlock.h"
 #include "HyperBlockCuda.cuh"
-
+#include <chrono>
+#include <omp.h>
 using namespace std;
 
 int NUM_CLASSES;   // Number of classes in the dataset
@@ -95,7 +96,6 @@ vector<DataATTR> interval_hyper(vector<vector<DataATTR>>& data_by_attr, float ac
     int attr = -1;
     Interval best(-1, -1, -1, -1);
 
-    // Search each attribute
    // Search each attribute
     for (int i = 0; i < data_by_attr.size(); i++) {
         // Launch async task
@@ -106,18 +106,28 @@ vector<DataATTR> interval_hyper(vector<vector<DataATTR>>& data_by_attr, float ac
     for(auto& future1 : intervals){
         Interval intr = future1.get();
         if(intr.size > 1 && intr.size > best.size){
-            best = intr;
+            best.size = intr.size;
+            best.start = intr.start;
+            best.end = intr.end;
+            best.attribute = intr.attribute;
+
             attr = intr.attribute;
         }
     }
+	//cout << "Best.start: " << best.start << "  Best.end: " << best.end <<"  Best.size: " << best.size <<  "  Best.attribute: " << best.attribute << endl;
 
     // Construct ArrayList of data
     vector<DataATTR> longest;
     if(best.size != -1){
         for(int i = best.start; i <= best.end; i++){
+          	//cout << "Data by attribute printing time: " << data_by_attr[attr][i].classNum << " " << data_by_attr[attr][i].classIndex << "\n";
+            //cout << attr << endl;
+
             longest.push_back(data_by_attr[attr][i]);
         }
     }
+    //cout << "Finished interval hyperblock" << endl;
+
     return longest;
 }
 
@@ -173,7 +183,7 @@ Interval longest_interval(vector<DataATTR>& data_by_attr, float acc_threshold, v
     //cout << "Started longest interval \n" << endl;
 
     Interval intr(1, 0, 0, attr);
-    Interval max_intr(-1, -1, -1, -1);
+    Interval max_intr(-1, -1, -1, attr);
 
     int n = data_by_attr.size();
     float misclassified = 0;
@@ -286,7 +296,7 @@ void remove_value_from_interval(vector<DataATTR>& data_by_attr, Interval& intr, 
 ///////////////////////// END FUNCTIONS FOR INTERVAL_HYPER IMPLEMENTATION /////////////////////////
 
 void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_blocks){
-  	//cout << "Started generating HBS\n" << endl;
+  	// "Started generating HBS\n" << endl;
     // Hyperblocks generated with this algorithm
     vector<HyperBlock> gen_hb;
 
@@ -298,35 +308,58 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
     vector<vector<vector<float>>> datum;
     vector<vector<vector<float>>> seed_data;
     vector<vector<int>> skips;
-	//cout << "Initialized datum, seed_data, skips\n" << endl;
+	// "Initialized datum, seed_data, skips\n" << endl;
 
     // Initially generate blocks
-    try{
+
         //cout << "Starting while loop to generate hyperblocks\n";
 		//cout << "data_by_attr[0].size() = " << data_by_attr[0].size() << endl;
 
         while(data_by_attr[0].size() > 0){
+			//cout << "Attempting to go into interval_hyper " << endl;
 
             vector<DataATTR> intv = interval_hyper(data_by_attr, 100, gen_hb);
             all_intv.push_back(intv);
+			//cout << "Pushed to back of all intervals" << endl;
 
             // if hyperblock is unique then add
             if(intv.size() > 1){
+                //cout << "making hb and intv_data" << endl;
                 vector<vector<vector<float>>> hb_data;
                 vector<vector<float>> intv_data;
 
+
                 // Add the points from real data that are in the intervals
                 for(DataATTR& dataAttr : intv){
+                    /*cout << "Trying to add a dataATTR. " << endl;
+
+					if(dataAttr.classNum > 1 || dataAttr.classNum < 0){
+                    	cout << "Invalid classNum: " << dataAttr.classNum << endl;
+                        cout << "Value: " << dataAttr.value << endl;
+                        continue;
+                    }
+
+
+                    if(dataAttr.classIndex > data[dataAttr.classNum].size() - 1 || dataAttr.classIndex < 0){
+                    	cout << "Invalid class index: " << dataAttr.classIndex << endl;
+                        continue;
+                    }
+					*/
                     intv_data.push_back(data[dataAttr.classNum][dataAttr.classIndex]);
                 }
 
+                //cout << "Made it past the points from real data thingy" << endl << endl;
                 // add data and hyperblock
                 hb_data.push_back(intv_data);
+                //cout << "Added intv data to hb_data" << endl << endl;
+
                 HyperBlock hb(hb_data, intv[0].classNum);
+                //cout << "Made the hyperblock for this interval thing" << endl << endl;
+
                 gen_hb.push_back(hb);
-            }
-            else{
-                cout << "Breaking because the intv size is < 1\n" << endl;
+                //cout << "Added results from last interval_hyper" << endl << endl;
+            }else{
+                //cout << "Breaking because the intv size is < 1" << endl;
                 break;
             }
         }
@@ -347,7 +380,6 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
                 skips[dataAttr.classNum].push_back(dataAttr.classIndex);
             }
         }
-
         // Sort the skips
         for(vector<int>& skip : skips){
             sort(skip.begin(), skip.end());
@@ -372,17 +404,15 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
 
         // Sort data by most important attribute
         for(int i = 0; i < datum.size(); i++){
-            sortByColumn(datum[i], 0);
-            sortByColumn(seed_data[i], 0);
+            sortByColumn(datum[i], 3);
+            sortByColumn(seed_data[i], 3);
         }
 
-    }catch(exception e){
-        cout << "Error in generateHBs: intervals" << endl;
-    }
+
 
 
     // Call CUDA function.
-    cout << "Calling merger_cuda\n" << endl;
+    //cout << "Calling merger_cuda\n" << endl;
 
     try{
         //cout << "Printing interval hyperblocks:\n\n" << endl;
@@ -398,10 +428,10 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
         //    cout << endl;
         //}
         //cout << "End interval hyperblocks:\n\n" << endl;
-		//printf("DATUM BEING PASSED INTO MERGING:\n");
+		//cout << "DATUM BEING PASSED INTO MERGING:" << endl;
 		//print3DVector(datum);
 
-        //printf("SEED DATA BEING PASSED INTO MERGING:\n");
+        //cout << "SEED DATA BEING PASSED INTO MERGING:" << endl;
 		//print3DVector(seed_data);
 
         merger_cuda(seed_data, datum, hyper_blocks);
@@ -446,7 +476,6 @@ vector<vector<vector<float>>> dataSetup(const string filepath) {
 
     int classNum = 0;
     string line;
-
     // Ignore the header, can use later if needed
     getline(file, line);
 
@@ -496,7 +525,7 @@ vector<vector<vector<float>>> dataSetup(const string filepath) {
     FIELD_LENGTH = data.empty() ? 0 : static_cast<int>(data[0][0].size());
     NUM_CLASSES = classNum;
 
-    cout << "Finished setting up data\n" << endl;
+    //cout << "Finished setting up data\n" << endl;
 
     return data;
 }
@@ -613,16 +642,9 @@ vector<bool> markUniformColumns(const vector<vector<vector<float>>>& data) {
 void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vector<vector<vector<float>>>& all_data, vector<HyperBlock>& hyper_blocks) {
     // Mark uniform columns
     //vector<bool> removed = markUniformColumns(all_data);
-
-    // Initialize CUDA
-    cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, 0);
-    int sharedMemSize = 2 * FIELD_LENGTH * sizeof(float) + sizeof(int);
-    int minGridSize;  // Minimum grid size needed to achieve maximum occupancy
-    int blockSize;    // Suggested block size for maximum occupancy
-    // Calculate the block size and minimum grid size required to maximize occupancy.
-    // The third parameter is the kernel function, and the fourth is shared memory per block (set to 0 if not used).
-    cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, mergerHyperBlocks, sharedMemSize, 0);
+	int deviceCount;
+    cudaGetDeviceCount(&deviceCount);
+    cout << "Device count: " << deviceCount << endl;
 
     // Calculate total points
     int numPoints = 0;
@@ -636,184 +658,189 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         numBlocksOfEachClass[hb.classNum]++;
     }
 
-    for(int a = 0; a < NUM_CLASSES; a++){
-        cout << "Number of blocks for class " << a << ": " << numBlocksOfEachClass[a] << endl;
+    vector<vector<HyperBlock>> resultingBlocks(NUM_CLASSES);
+
+    #pragma omp parallel for num_threads(deviceCount)
+    for(int deviceID = 0; deviceID < deviceCount; deviceID++){
+		cudaSetDevice(deviceID);
+
+    	// Initialize CUDA
+    	cudaDeviceProp prop;
+    	cudaGetDeviceProperties(&prop, deviceID);
+
+        // Find best occupancy
+    	int sharedMemSize = 2 * FIELD_LENGTH * sizeof(float) + sizeof(int);
+    	int minGridSize, blockSize;
+    	cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, mergerHyperBlocks, sharedMemSize, 0);
+
+    	// Process each class
+    	for (int classN = deviceID; classN < NUM_CLASSES; classN += deviceCount) {
+
+        	int totalDataSetSizeFlat = numPoints * FIELD_LENGTH;
+        	int sizeWithoutHBpoints = ((data_with_skips[classN].size() + numBlocksOfEachClass[classN]) * FIELD_LENGTH);
+
+        	if (data_with_skips[classN].empty()) {
+            	sizeWithoutHBpoints = numBlocksOfEachClass[classN] * FIELD_LENGTH;
+        	}
+
+        	// Compute grid size to cover all elements. we already know our ideal block size from before.
+        	int gridSize = ((sizeWithoutHBpoints / FIELD_LENGTH) + blockSize - 1) / blockSize;
+
+        	//cout << "Grid size: " << gridSize << endl;
+        	//cout << "Block size: " << blockSize << endl;
+        	//cout << "Shared memory size: " << sharedMemSize << endl;
+
+        	// Allocate host memory
+        	vector<float> hyperBlockMinsC(sizeWithoutHBpoints);
+        	vector<float> hyperBlockMaxesC(sizeWithoutHBpoints);
+        	vector<float> combinedMinsC(sizeWithoutHBpoints);
+        	vector<float> combinedMaxesC(sizeWithoutHBpoints);
+        	vector<int> deleteFlagsC(sizeWithoutHBpoints / FIELD_LENGTH);
+
+        	int nSize = all_data[classN].size();
+        	vector<float> pointsC(totalDataSetSizeFlat - (nSize * FIELD_LENGTH));
+
+        	// Fill data arrays
+        	int currentClassIndex = 0;
+        	for (int currentClass = 0; currentClass < data_with_skips.size(); currentClass++) {
+            	for (const auto& point : data_with_skips[currentClass]) {
+                	if (currentClass == classN) {
+                    	for (int attr = 0; attr < FIELD_LENGTH; attr++) {
+                        	//if (removed[attr]) continue;
+                        	hyperBlockMinsC[currentClassIndex] = point[attr];
+                        	hyperBlockMaxesC[currentClassIndex] = point[attr];
+                        	currentClassIndex++;
+                    	}
+                	}
+            	}
+        	}
+
+        	// Process other class points
+        	int otherClassIndex = 0;
+        	for (int currentClass = 0; currentClass < all_data.size(); currentClass++) {
+            	if (currentClass == classN) continue;
+
+            	for (const auto& point : all_data[currentClass]) {
+                	for (int attr = 0; attr < FIELD_LENGTH; attr++) {
+                    	//if (removed[attr]) continue;
+                    	pointsC[otherClassIndex++] = point[attr];
+                	}
+            	}
+        	}
+
+        	// Add the existing blocks from interval_hyper
+        	for (auto it = hyper_blocks.begin(); it != hyper_blocks.end(); ++it) {
+            	if (it->classNum == classN) {
+                	for (int i = 0; i < it->minimums.size(); i++) {
+                    	//if (removed[i]) continue;
+                    	hyperBlockMinsC[currentClassIndex] = it->minimums[i][0];
+                    	hyperBlockMaxesC[currentClassIndex] = it->maximums[i][0];
+                    	currentClassIndex++;
+                	}
+                }
+            }
+
+        	// Allocate device memory
+        	float *d_hyperBlockMins, *d_hyperBlockMaxes, *d_combinedMins, *d_combinedMaxes, *d_points;
+        	int *d_deleteFlags, *d_mergable, *d_seedQueue, *d_writeSeedQueue;
+
+        	cudaMalloc(&d_hyperBlockMins, sizeWithoutHBpoints * sizeof(float));
+        	cudaMalloc(&d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float));
+        	cudaMalloc(&d_combinedMins, sizeWithoutHBpoints * sizeof(float));
+        	cudaMalloc(&d_combinedMaxes, sizeWithoutHBpoints * sizeof(float));
+        	cudaMalloc(&d_deleteFlags, (sizeWithoutHBpoints / FIELD_LENGTH) * sizeof(int));
+        	cudaMemset(d_deleteFlags, 0, (sizeWithoutHBpoints / FIELD_LENGTH) * sizeof(int));
+
+        	cudaMalloc(&d_points, pointsC.size() * sizeof(float));
+
+        	int numBlocks = hyperBlockMinsC.size() / FIELD_LENGTH;
+        	vector<int> seedQueue(numBlocks);
+   			for(int i = 0; i < numBlocks; i++){
+            	seedQueue[i] = i;
+        	}
+
+        	cudaMalloc(&d_mergable, numBlocks * sizeof(int));
+        	cudaMalloc(&d_seedQueue, numBlocks * sizeof(int));
+        	cudaMalloc(&d_writeSeedQueue, numBlocks * sizeof(int));
+
+        	// Copy data to device
+        	cudaMemcpy(d_hyperBlockMins, hyperBlockMinsC.data(), sizeWithoutHBpoints * sizeof(float), cudaMemcpyHostToDevice);
+        	cudaMemcpy(d_hyperBlockMaxes, hyperBlockMaxesC.data(), sizeWithoutHBpoints * sizeof(float), cudaMemcpyHostToDevice);
+        	cudaMemcpy(d_points, pointsC.data(), pointsC.size() * sizeof(float), cudaMemcpyHostToDevice);
+        	cudaMemcpy(d_seedQueue, seedQueue.data(), numBlocks * sizeof(int), cudaMemcpyHostToDevice);
+
+			cout << "Launched a kernel for class: " << classN << endl;
+
+        	// funky wap to swap the readQueue and writeQueue
+			int* queues[2] = {d_seedQueue, d_writeSeedQueue};
+        	for(int i = 0; i < numBlocks; i++){
+           		// swap between the two queues
+           		int* readQueue = queues[i & 1];
+    	   		int* writeQueue = queues[(i + 1) & 1];
+           		mergerHyperBlocksWrapper(
+                	i, 			// seednum
+                	readQueue,  // seedQueue
+                	numBlocks,  // number seed blocks
+                	FIELD_LENGTH,	// num attributes
+              		pointsC.size() / FIELD_LENGTH,	// num op class points
+            		d_points,						// op class points
+	    			d_hyperBlockMins,				// mins
+					d_hyperBlockMaxes,				// maxes
+					d_deleteFlags,
+					d_mergable,						// mergable flags
+                	gridSize,
+                	blockSize,
+                	sharedMemSize,
+               		d_combinedMins,
+                	d_combinedMaxes
+       	   		);
+		   		cudaDeviceSynchronize();
+
+            	// Reorder the seedblock order
+    	    	rearrangeSeedQueueWrapper(i, readQueue, writeQueue, d_deleteFlags, d_mergable, numBlocks, gridSize, blockSize);
+            	cudaDeviceSynchronize();
+
+             	// Reset mergable flags
+           		resetMergableFlagsWrapper(d_mergable, numBlocks, gridSize, blockSize);
+           		cudaDeviceSynchronize();
+        	}
+
+        	// Copy results back
+        	cudaMemcpy(hyperBlockMinsC.data(), d_hyperBlockMins, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
+        	cudaMemcpy(hyperBlockMaxesC.data(), d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
+        	cudaMemcpy(deleteFlagsC.data(), d_deleteFlags, deleteFlagsC.size() * sizeof(int), cudaMemcpyDeviceToHost);
+        	// Process results
+        	for (int i = 0; i < hyperBlockMinsC.size(); i += FIELD_LENGTH) {
+            	if (deleteFlagsC[i / FIELD_LENGTH] == -1) continue;  // -1 is a seed block which was merged to. so it doesn't need to be copied back.
+
+            	vector<vector<float>> blockMins(FIELD_LENGTH);
+            	vector<vector<float>> blockMaxes(FIELD_LENGTH);
+
+            	for (int j = 0; j < FIELD_LENGTH; j++) {
+                    blockMins[j].push_back(hyperBlockMinsC[i + j]);
+                    blockMaxes[j].push_back(hyperBlockMaxesC[i + j]);
+            	}
+
+            	HyperBlock hb(blockMaxes, blockMins, classN);
+            	resultingBlocks[classN].emplace_back(hb);
+        	}
+
+           	// Free device memory
+        	cudaFree(d_hyperBlockMins);
+        	cudaFree(d_hyperBlockMaxes);
+        	cudaFree(d_combinedMins);
+        	cudaFree(d_combinedMaxes);
+        	cudaFree(d_deleteFlags);
+        	cudaFree(d_points);
+        	cudaFree(d_mergable);
+        	cudaFree(d_seedQueue);
+        	cudaFree(d_writeSeedQueue);
+    	}
     }
 
-    // Process each class
-    for (int classN = 0; classN < NUM_CLASSES; classN++) {
-        
-        int totalDataSetSizeFlat = numPoints * FIELD_LENGTH;
-        int sizeWithoutHBpoints = ((data_with_skips[classN].size() + numBlocksOfEachClass[classN]) * FIELD_LENGTH);
-
-        if (data_with_skips[classN].empty()) {
-            sizeWithoutHBpoints = numBlocksOfEachClass[classN] * FIELD_LENGTH;
-        }
-
-        // Compute grid size to cover all elements. we already know our ideal block size from before. 
-        int gridSize = ((sizeWithoutHBpoints / FIELD_LENGTH) + blockSize - 1) / blockSize;
-
-        cout << "Grid size: " << gridSize << endl;
-        cout << "Block size: " << blockSize << endl;
-        cout << "Shared memory size: " << sharedMemSize << endl;
-
-        // Allocate host memory
-        vector<float> hyperBlockMinsC(sizeWithoutHBpoints);
-        vector<float> hyperBlockMaxesC(sizeWithoutHBpoints);
-        vector<float> combinedMinsC(sizeWithoutHBpoints);
-        vector<float> combinedMaxesC(sizeWithoutHBpoints);
-        vector<int> deleteFlagsC(sizeWithoutHBpoints / FIELD_LENGTH);
-
-        int nSize = all_data[classN].size();
-        vector<float> pointsC(totalDataSetSizeFlat - (nSize * FIELD_LENGTH));
-
-        // Fill data arrays
-        int currentClassIndex = 0;
-        for (int currentClass = 0; currentClass < data_with_skips.size(); currentClass++) {
-            for (const auto& point : data_with_skips[currentClass]) {
-                if (currentClass == classN) {
-                    for (int attr = 0; attr < FIELD_LENGTH; attr++) {
-                        //if (removed[attr]) continue;
-                        hyperBlockMinsC[currentClassIndex] = point[attr];
-                        hyperBlockMaxesC[currentClassIndex] = point[attr];
-                        currentClassIndex++;
-                    }
-                }
-            }
-        }
-
-        cout << "Current Class Index: " << currentClassIndex << endl;
-        cout << "Size Without HB Points: " << sizeWithoutHBpoints << endl;
-        cout << "Number of Blocks: " << numBlocksOfEachClass[classN] << endl;
-
-        // Process other class points
-        int otherClassIndex = 0;
-        for (int currentClass = 0; currentClass < all_data.size(); currentClass++) {
-            if (currentClass == classN) continue;
-
-            for (const auto& point : all_data[currentClass]) {
-                for (int attr = 0; attr < FIELD_LENGTH; attr++) {
-                    //if (removed[attr]) continue;
-                    pointsC[otherClassIndex++] = point[attr];
-                }
-            }
-        }
-
-        // Add the existing blocks from interval_hyper
-        for (auto it = hyper_blocks.begin(); it != hyper_blocks.end();) {
-            if (it->classNum == classN) {
-                for (int i = 0; i < it->minimums.size(); i++) {
-                    //if (removed[i]) continue;
-                    hyperBlockMinsC[currentClassIndex] = it->minimums[i][0];
-                    hyperBlockMaxesC[currentClassIndex] = it->maximums[i][0];
-                    currentClassIndex++;
-                }
-                it = hyper_blocks.erase(it);
-            } else {
-                ++it;
-            }
-        }
-
-        // Allocate device memory
-        float *d_hyperBlockMins, *d_hyperBlockMaxes, *d_combinedMins, *d_combinedMaxes;
-        int *d_deleteFlags, *d_mergable, *d_seedQueue, *d_writeSeedQueue;
-        float *d_points;
-
-        cudaMalloc(&d_hyperBlockMins, sizeWithoutHBpoints * sizeof(float));
-        cudaMalloc(&d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float));
-        cudaMalloc(&d_combinedMins, sizeWithoutHBpoints * sizeof(float));
-        cudaMalloc(&d_combinedMaxes, sizeWithoutHBpoints * sizeof(float));
-        cudaMalloc(&d_deleteFlags, (sizeWithoutHBpoints / FIELD_LENGTH) * sizeof(int));
-        cudaMemset(d_deleteFlags, 0, (sizeWithoutHBpoints / FIELD_LENGTH) * sizeof(int));
-
-        cudaMalloc(&d_points, pointsC.size() * sizeof(float));
-
-        int numBlocks = hyperBlockMinsC.size() / FIELD_LENGTH;
-        vector<int> seedQueue(numBlocks);
-   		for(int i = 0; i < numBlocks; i++){
-            seedQueue[i] = i;
-        }
-
-        cudaMalloc(&d_mergable, numBlocks * sizeof(int));
-        cudaMalloc(&d_seedQueue, numBlocks * sizeof(int));
-        cudaMalloc(&d_writeSeedQueue, numBlocks * sizeof(int));
-
-        // Copy data to device
-        cudaMemcpy(d_hyperBlockMins, hyperBlockMinsC.data(), sizeWithoutHBpoints * sizeof(float), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_hyperBlockMaxes, hyperBlockMaxesC.data(), sizeWithoutHBpoints * sizeof(float), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_points, pointsC.data(), pointsC.size() * sizeof(float), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_seedQueue, seedQueue.data(), numBlocks * sizeof(int), cudaMemcpyHostToDevice);
-
-        // funky wap to swap the readQueue and writeQueue
-		int* queues[2] = {d_seedQueue, d_writeSeedQueue};
-        for(int i = 0; i < numBlocks; i++){
-           // swap between the two queues
-           int* readQueue = queues[i % 2];
-    	   int* writeQueue = queues[(i + 1) % 2];
-           mergerHyperBlocksWrapper(
-                i, 			// seednum
-                readQueue,  // seedQueue
-                numBlocks,  // number seed blocks
-                FIELD_LENGTH,	// num attributes
-              	pointsC.size() / FIELD_LENGTH,	// num op class points
-            	d_points,						// op class points
-	    		d_hyperBlockMins,				// mins
-				d_hyperBlockMaxes,				// maxes
-				d_deleteFlags,
-				d_mergable,						// mergable flags
-                gridSize,
-                blockSize,
-                sharedMemSize
-       	   );
-		   cudaDeviceSynchronize();
-
-           // Reorder the seedblock order
-    	   rearrangeSeedQueueWrapper(i, readQueue, writeQueue, d_deleteFlags, d_mergable, numBlocks, gridSize, blockSize);
-           cudaDeviceSynchronize();
-
-           // Reset mergable flags
-           resetMergableFlagsWrapper(d_mergable, numBlocks, gridSize, blockSize);
-           cudaDeviceSynchronize();
-        }
-
-        // Copy results back
-        cudaMemcpy(hyperBlockMinsC.data(), d_hyperBlockMins, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
-        cudaMemcpy(hyperBlockMaxesC.data(), d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
-        cudaMemcpy(deleteFlagsC.data(), d_deleteFlags, deleteFlagsC.size() * sizeof(int), cudaMemcpyDeviceToHost);
-
-        // Process results
-        for (int i = 0; i < hyperBlockMinsC.size(); i += FIELD_LENGTH) {
-            if (deleteFlagsC[i / FIELD_LENGTH] == -1) continue;  // -1 is a seed block which was merged to. so it doesn't need to be copied back.
-
-            vector<vector<float>> blockMins(FIELD_LENGTH);
-            vector<vector<float>> blockMaxes(FIELD_LENGTH);
-
-            int realIndex = 0;
-            for (int j = 0; j < FIELD_LENGTH; j++) {
-                //if (removed[j]) {
-                 //   blockMins[j].push_back(0.0f);
-                //    blockMaxes[j].push_back(1.0f);
-                //} else {
-                    blockMins[j].push_back(hyperBlockMinsC[i + realIndex]);
-                    blockMaxes[j].push_back(hyperBlockMaxesC[i + realIndex]);
-                    realIndex++;
-                //}
-            }
-
-            HyperBlock hb(blockMaxes, blockMins, classN);
-            hyper_blocks.emplace_back(hb);
-        }
-
-        // Free device memory
-        cudaFree(d_hyperBlockMins);
-        cudaFree(d_hyperBlockMaxes);
-        cudaFree(d_combinedMins);
-        cudaFree(d_combinedMaxes);
-        cudaFree(d_deleteFlags);
-        cudaFree(d_points);
-        cudaFree(d_mergable);
-        cudaFree(d_seedQueue);
-        cudaFree(d_writeSeedQueue);
+    hyper_blocks.clear();
+    for(const vector<HyperBlock>& classBlocks : resultingBlocks) {
+      hyper_blocks.insert(hyper_blocks.end(), classBlocks.begin(), classBlocks.end());
     }
 }
 
@@ -829,38 +856,34 @@ int main(int argc, char* argv[]) {
     cout << "NUM ATTRIBUTES : " << FIELD_LENGTH << endl;
     cout << "NUM CLASSES    : " << NUM_CLASSES << endl;
 
+    cout << "Number elements in class 0: " << data[0].size() << endl;
+    cout << "Number elements in class 1: " << data[1].size() << endl;
  	// normalize the data
+
+
     minMaxNormalization(data);
 	//print3DVector(data);
+    printf("Made it past normalization");
     // Make the hyperblocks list to store the hyperblocks that are generated.
 	vector<HyperBlock> hyper_blocks;
 
     // generate hyperblocks
+    auto start = std::chrono::high_resolution_clock::now();
+
     generateHBs(data, hyper_blocks);
-	//cout << "HyperBlocks : " << hyper_blocks.size() << endl;
-   for(const HyperBlock& hb : hyper_blocks) {
-		cout << "Minimums:\n";
-		for (const auto& row : hb.minimums) {
-    		for (float value : row) {
-        		cout << value << " ";
-    		}
-    		cout << "\n";
-		}
+    auto stop = std::chrono::high_resolution_clock::now();
 
-		cout << "Maximums:\n";
-		for (const auto& row : hb.maximums) {
-    		for (float value : row) {
-        		cout << value << " ";
-    		}
-    		cout << "\n";
-		}
+ 	auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+    std::cout << "Time taken: " << duration_ms.count() << " ms\n";
 
-		cout << "------------------\n"; // Separator for readability
-   }
+    // Calculate duration in seconds
+    auto duration_sec = std::chrono::duration_cast<std::chrono::seconds>(stop - start);
+    std::cout << "Time taken: " << duration_sec.count() << " s\n";
+	cout << "HyperBlocks : " << hyper_blocks.size() << endl;
 
     cout << "Finished generating HBS\n" << endl;
     cout << "Number of HBs: " << hyper_blocks.size() << endl;
 
-   saveBasicHBsToCSV(hyper_blocks, "testForDVinCPP.csv");
+    saveBasicHBsToCSV(hyper_blocks, "testForDVinCPP.csv");
     return 0;
 }

@@ -738,6 +738,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
                     	currentClassIndex++;
                 	}
                 }
+            }
 
         	// Allocate device memory
         	float *d_hyperBlockMins, *d_hyperBlockMaxes, *d_combinedMins, *d_combinedMaxes, *d_points;

@@ -1,4 +1,4 @@
-#include <cstdio>
+q#include <cstdio>
 #include <vector>
 #include <string>
 #include <map>
@@ -658,28 +658,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         numBlocksOfEachClass[hb.classNum]++;
     }
 
-    vector<vector<float>> preMadeHyperBlockMins(NUM_CLASSES);
-	vector<vector<float>> preMadeHyperBlockMaxes(NUM_CLASSES);
-
-    cout << "Attempting to add on master thread" << endl;
-
-
-    for(int i = hyper_blocks.size() - 1; i >= 0; i--) {
-      for(int j = 0; j < hyper_blocks[i].minimums.size(); j++) {
-         preMadeHyperBlockMins[hyper_blocks[i].classNum].push_back(hyper_blocks[i].minimums[j][0]);
-         preMadeHyperBlockMaxes[hyper_blocks[i].classNum].push_back(hyper_blocks[i].maximums[j][0]);
-      }
-      hyper_blocks.pop_back();
-    }
-	cout << "Added all to premademaxes" << endl;
-	cout << preMadeHyperBlockMins[0].size() << endl;
-    cout << preMadeHyperBlockMins[1].size() << endl;
-	cout << preMadeHyperBlockMins[2].size() << endl;
-
-		cout << preMadeHyperBlockMaxes[0].size() << endl;
-    cout << preMadeHyperBlockMaxes[1].size() << endl;
-	cout << preMadeHyperBlockMaxes[2].size() << endl;
-    cout << "Hyperblocks remainiing" << hyper_blocks.size() << endl;
+    vector<vector<HyperBlock>> resultingBlocks(NUM_CLASSES);
 
     #pragma omp parallel for num_threads(deviceCount)
     for(int deviceID = 0; deviceID < deviceCount; deviceID++){
@@ -749,18 +728,16 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
             	}
         	}
 
-            cout << "Made it to adding the interval blocks" << endl;
-            // Add the premade blocks of class classN to the end of the local hyperBlockMins/Maxes
-			hyperBlockMinsC.insert(hyperBlockMinsC.end(), preMadeHyperBlockMins[classN].begin(), preMadeHyperBlockMins[classN].end());
-            hyperBlockMaxesC.insert(hyperBlockMaxesC.end(), preMadeHyperBlockMaxes[classN].begin(), preMadeHyperBlockMaxes[classN].end());
-
-            //Add the size of however many blocks we just added as seedpoints to this class
-            currentClassIndex += preMadeHyperBlockMins[classN].size();
-
-            cout << "Current Class Index: " << currentClassIndex << endl;
-       		cout << "Size Without HB Points: " << sizeWithoutHBpoints << endl;
-        	cout << "Number of Blocks: " << numBlocksOfEachClass[classN] << endl;
-            // We should do that before and then during this loop just add the result from that to the end of hyperBlockMinsC and hyperBlockMaxesC
+        	// Add the existing blocks from interval_hyper
+        	for (auto it = hyper_blocks.begin(); it != hyper_blocks.end(); ++it) {
+            	if (it->classNum == classN) {
+                	for (int i = 0; i < it->minimums.size(); i++) {
+                    	//if (removed[i]) continue;
+                    	hyperBlockMinsC[currentClassIndex] = it->minimums[i][0];
+                    	hyperBlockMaxesC[currentClassIndex] = it->maximums[i][0];
+                    	currentClassIndex++;
+                	}
+                }
 
         	// Allocate device memory
         	float *d_hyperBlockMins, *d_hyperBlockMaxes, *d_combinedMins, *d_combinedMaxes, *d_points;
@@ -831,7 +808,6 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         	cudaMemcpy(hyperBlockMinsC.data(), d_hyperBlockMins, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
         	cudaMemcpy(hyperBlockMaxesC.data(), d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
         	cudaMemcpy(deleteFlagsC.data(), d_deleteFlags, deleteFlagsC.size() * sizeof(int), cudaMemcpyDeviceToHost);
-			cout << "Results have made it back. Now we will try to copy" << endl;
         	// Process results
         	for (int i = 0; i < hyperBlockMinsC.size(); i += FIELD_LENGTH) {
             	if (deleteFlagsC[i / FIELD_LENGTH] == -1) continue;  // -1 is a seed block which was merged to. so it doesn't need to be copied back.
@@ -845,19 +821,8 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
             	}
 
             	HyperBlock hb(blockMaxes, blockMins, classN);
-
-                // Make this be executed on 1 thread at a time.
-                //cout << "pre pragma" << endl;
-
-                #pragma omp critical{
-                	cout << "HyperBlock created" << endl;
-            		hyper_blocks.emplace_back(hb);
-				}
-                //cout << "post pragma" << endl;
-
-            }
-
-            cout << "We copied things back!" << endl;
+            	resultingBlocks[classN].emplace_back(hb);
+        	}
 
         	// Free device memory
             if(d_hyperBlockMins != nullptr) cudaFree(d_hyperBlockMins);
@@ -870,6 +835,11 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         	if(d_seedQueue != nullptr)	cudaFree(d_seedQueue);
         	if(d_writeSeedQueue != nullptr)	cudaFree(d_writeSeedQueue);
     	}
+    }
+
+    hyper_blocks.clear();
+    for(const vector<HyperBlock>& classBlocks : resultingBlocks) {
+      hyper_blocks.insert(hyper_blocks.end(), classBlocks.begin(), classBlocks.end());
     }
 }
 

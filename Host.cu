@@ -658,6 +658,8 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         numBlocksOfEachClass[hb.classNum]++;
     }
 
+    vector<vector<HyperBlock>> resultingBlocks(NUM_CLASSES);
+
     #pragma omp parallel for num_threads(deviceCount)
     for(int deviceID = 0; deviceID < deviceCount; deviceID++){
 		cudaSetDevice(deviceID);
@@ -731,7 +733,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         	}
 
         	// Add the existing blocks from interval_hyper
-        	for (auto it = hyper_blocks.begin(); it != hyper_blocks.end();) {
+        	for (auto it = hyper_blocks.begin(); it != hyper_blocks.end(); ++it) {
             	if (it->classNum == classN) {
                 	for (int i = 0; i < it->minimums.size(); i++) {
                     	//if (removed[i]) continue;
@@ -739,10 +741,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
                     	hyperBlockMaxesC[currentClassIndex] = it->maximums[i][0];
                     	currentClassIndex++;
                 	}
-                	it = hyper_blocks.erase(it);
-            	} else {
-                	++it;
-            	}
+                }
         	}
 
         	// Allocate device memory
@@ -813,7 +812,6 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         	cudaMemcpy(hyperBlockMinsC.data(), d_hyperBlockMins, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
         	cudaMemcpy(hyperBlockMaxesC.data(), d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
         	cudaMemcpy(deleteFlagsC.data(), d_deleteFlags, deleteFlagsC.size() * sizeof(int), cudaMemcpyDeviceToHost);
-
         	// Process results
         	for (int i = 0; i < hyperBlockMinsC.size(); i += FIELD_LENGTH) {
             	if (deleteFlagsC[i / FIELD_LENGTH] == -1) continue;  // -1 is a seed block which was merged to. so it doesn't need to be copied back.
@@ -834,7 +832,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
             	}
 
             	HyperBlock hb(blockMaxes, blockMins, classN);
-            	hyper_blocks.emplace_back(hb);
+            	resultingBlocks[classN].emplace_back(hb);
         	}
 
         	// Free device memory
@@ -848,6 +846,11 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         	cudaFree(d_seedQueue);
         	cudaFree(d_writeSeedQueue);
     	}
+    }
+
+    hyper_blocks.clear();
+    for(const vector<HyperBlock>& classBlocks : resultingBlocks) {
+      hyper_blocks.insert(hyper_blocks.end(), classBlocks.begin(), classBlocks.end());
     }
 }
 

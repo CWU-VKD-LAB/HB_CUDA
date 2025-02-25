@@ -91,7 +91,7 @@ void saveBasicHBsToCSV(const vector<HyperBlock>& hyper_blocks, const string& fil
      * @return largest interval
      */
 vector<DataATTR> interval_hyper(vector<vector<DataATTR>>& data_by_attr, float acc_threshold, vector<HyperBlock>& existing_hb){
-    cout << "Starting interval hyperblock" << endl;
+    //cout << "Starting interval hyperblock" << endl;
     vector<future<Interval>> intervals;
     int attr = -1;
     Interval best(-1, -1, -1, -1);
@@ -114,7 +114,7 @@ vector<DataATTR> interval_hyper(vector<vector<DataATTR>>& data_by_attr, float ac
             attr = intr.attribute;
         }
     }
-	cout << "Best.start: " << best.start << "  Best.end: " << best.end <<"  Best.size: " << best.size <<  "  Best.attribute: " << best.attribute << endl;
+	//cout << "Best.start: " << best.start << "  Best.end: " << best.end <<"  Best.size: " << best.size <<  "  Best.attribute: " << best.attribute << endl;
 
     // Construct ArrayList of data
     vector<DataATTR> longest;
@@ -126,7 +126,7 @@ vector<DataATTR> interval_hyper(vector<vector<DataATTR>>& data_by_attr, float ac
             longest.push_back(data_by_attr[attr][i]);
         }
     }
-    cout << "Finished interval hyperblock" << endl;
+    //cout << "Finished interval hyperblock" << endl;
 
     return longest;
 }
@@ -404,8 +404,8 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
 
         // Sort data by most important attribute
         for(int i = 0; i < datum.size(); i++){
-            sortByColumn(datum[i], 6);
-            sortByColumn(seed_data[i], 6);
+            sortByColumn(datum[i], 3);
+            sortByColumn(seed_data[i], 3);
         }
 
 
@@ -666,13 +666,20 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
 
     for(int i = hyper_blocks.size() - 1; i >= 0; i--) {
       for(int j = 0; j < hyper_blocks[i].minimums.size(); j++) {
-         preMadeHyperBlockMins[hyper_blocks[i].classNum].emplace_back(hyper_blocks[i].minimums[j][0]);
-         preMadeHyperBlockMaxes[hyper_blocks[i].classNum].emplace_back(hyper_blocks[i].maximums[j][0]);
+         preMadeHyperBlockMins[hyper_blocks[i].classNum].push_back(hyper_blocks[i].minimums[j][0]);
+         preMadeHyperBlockMaxes[hyper_blocks[i].classNum].push_back(hyper_blocks[i].maximums[j][0]);
       }
       hyper_blocks.pop_back();
     }
 	cout << "Added all to premademaxes" << endl;
-	cout << preMadeHyperBlockMins.size() << endl;
+	cout << preMadeHyperBlockMins[0].size() << endl;
+    cout << preMadeHyperBlockMins[1].size() << endl;
+	cout << preMadeHyperBlockMins[2].size() << endl;
+
+		cout << preMadeHyperBlockMaxes[0].size() << endl;
+    cout << preMadeHyperBlockMaxes[1].size() << endl;
+	cout << preMadeHyperBlockMaxes[2].size() << endl;
+    cout << "Hyperblocks remainiing" << hyper_blocks.size() << endl;
 
     #pragma omp parallel for num_threads(deviceCount)
     for(int deviceID = 0; deviceID < deviceCount; deviceID++){
@@ -729,10 +736,6 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
             	}
         	}
 
-        	//cout << "Current Class Index: " << currentClassIndex << endl;
-       		// cout << "Size Without HB Points: " << sizeWithoutHBpoints << endl;
-        	//cout << "Number of Blocks: " << numBlocksOfEachClass[classN] << endl;
-
         	// Process other class points
         	int otherClassIndex = 0;
         	for (int currentClass = 0; currentClass < all_data.size(); currentClass++) {
@@ -746,31 +749,17 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
             	}
         	}
 
-                /*
-        	// Add the existing blocks from interval_hyper
-        	for (auto it = hyper_blocks.begin(); it != hyper_blocks.end();) {
-            	if (it->classNum == classN) {
-                	for (int i = 0; i < it->minimums.size(); i++) {
-                    	//if (removed[i]) continue;
-                    	hyperBlockMinsC[currentClassIndex] = it->minimums[i][0];
-                    	hyperBlockMaxesC[currentClassIndex] = it->maximums[i][0];
-                    	currentClassIndex++;
-                	}
-                	it = hyper_blocks.erase(it);
-            	} else {
-                	++it;
-            	}
-        	}
-			*/
-
             cout << "Made it to adding the interval blocks" << endl;
             // Add the premade blocks of class classN to the end of the local hyperBlockMins/Maxes
 			hyperBlockMinsC.insert(hyperBlockMinsC.end(), preMadeHyperBlockMins[classN].begin(), preMadeHyperBlockMins[classN].end());
             hyperBlockMaxesC.insert(hyperBlockMaxesC.end(), preMadeHyperBlockMaxes[classN].begin(), preMadeHyperBlockMaxes[classN].end());
 
             //Add the size of however many blocks we just added as seedpoints to this class
-            currentClassIndex += hyperBlockMinsC.size();
+            currentClassIndex += preMadeHyperBlockMins[classN].size();
 
+            cout << "Current Class Index: " << currentClassIndex << endl;
+       		cout << "Size Without HB Points: " << sizeWithoutHBpoints << endl;
+        	cout << "Number of Blocks: " << numBlocksOfEachClass[classN] << endl;
             // We should do that before and then during this loop just add the result from that to the end of hyperBlockMinsC and hyperBlockMaxesC
 
         	// Allocate device memory
@@ -842,7 +831,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         	cudaMemcpy(hyperBlockMinsC.data(), d_hyperBlockMins, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
         	cudaMemcpy(hyperBlockMaxesC.data(), d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
         	cudaMemcpy(deleteFlagsC.data(), d_deleteFlags, deleteFlagsC.size() * sizeof(int), cudaMemcpyDeviceToHost);
-
+			cout << "Results have made it back. Now we will try to copy" << endl;
         	// Process results
         	for (int i = 0; i < hyperBlockMinsC.size(); i += FIELD_LENGTH) {
             	if (deleteFlagsC[i / FIELD_LENGTH] == -1) continue;  // -1 is a seed block which was merged to. so it doesn't need to be copied back.
@@ -850,31 +839,36 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
             	vector<vector<float>> blockMins(FIELD_LENGTH);
             	vector<vector<float>> blockMaxes(FIELD_LENGTH);
 
-            	int realIndex = 0;
             	for (int j = 0; j < FIELD_LENGTH; j++) {
-                    blockMins[j].push_back(hyperBlockMinsC[i + realIndex]);
-                    blockMaxes[j].push_back(hyperBlockMaxesC[i + realIndex]);
-                    realIndex++;
+                    blockMins[j].push_back(hyperBlockMinsC[i + j]);
+                    blockMaxes[j].push_back(hyperBlockMaxesC[i + j]);
             	}
 
             	HyperBlock hb(blockMaxes, blockMins, classN);
 
                 // Make this be executed on 1 thread at a time.
-                #pragma omp critical
-            	hyper_blocks.emplace_back(hb);
+                //cout << "pre pragma" << endl;
+
+                #pragma omp critical{
+                	cout << "HyperBlock created" << endl;
+            		hyper_blocks.emplace_back(hb);
+				}
+                //cout << "post pragma" << endl;
 
             }
 
+            cout << "We copied things back!" << endl;
+
         	// Free device memory
-            if(d_hyperBlockMins != nullptr) free(d_hyperBlockMins);
-        	if(d_hyperBlockMaxes != nullptr) free(d_hyperBlockMaxes);
-        	if(d_combinedMins != nullptr) free(d_combinedMins);
-        	if(d_combinedMaxes != nullptr) free(d_combinedMaxes);
-        	if(d_deleteFlags != nullptr)	free(d_deleteFlags);
-        	if(d_points != nullptr)	free(d_points);
-        	if(d_mergable != nullptr)	free(d_mergable);
-        	if(d_seedQueue != nullptr)	free(d_seedQueue);
-        	if(d_writeSeedQueue != nullptr)	free(d_writeSeedQueue);
+            if(d_hyperBlockMins != nullptr) cudaFree(d_hyperBlockMins);
+        	if(d_hyperBlockMaxes != nullptr) cudaFree(d_hyperBlockMaxes);
+        	if(d_combinedMins != nullptr) cudaFree(d_combinedMins);
+        	if(d_combinedMaxes != nullptr) cudaFree(d_combinedMaxes);
+        	if(d_deleteFlags != nullptr)	cudaFree(d_deleteFlags);
+        	if(d_points != nullptr)	cudaFree(d_points);
+        	if(d_mergable != nullptr)	cudaFree(d_mergable);
+        	if(d_seedQueue != nullptr)	cudaFree(d_seedQueue);
+        	if(d_writeSeedQueue != nullptr)	cudaFree(d_writeSeedQueue);
     	}
     }
 }

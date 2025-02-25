@@ -658,22 +658,21 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         numBlocksOfEachClass[hb.classNum]++;
     }
 
-    vector<vector<float>> preMadeHyperBlockMins;
-	vector<vector<float>> preMadeHyperBlockMaxes;
-    //TODO: ADAPT THIS TO WORK !!!!!!!! This was what was inside before
-    for (auto it = hyper_blocks.begin(); it != hyper_blocks.end();) {
-        if (it->classNum == classN) {
-            for (int i = 0; i < it->minimums.size(); i++) {
-                //if (removed[i]) continue;
-                hyperBlockMinsC[currentClassIndex] = it->minimums[i][0];
-                hyperBlockMaxesC[currentClassIndex] = it->maximums[i][0];
-                currentClassIndex++;
-            }
-            it = hyper_blocks.erase(it);
-        } else {
-            ++it;
-        }
+    vector<vector<float>> preMadeHyperBlockMins(NUM_CLASSES);
+	vector<vector<float>> preMadeHyperBlockMaxes(NUM_CLASSES);
+
+    cout << "Attempting to add on master thread" << endl;
+
+
+    for(int i = hyper_blocks.size() - 1; i >= 0; i--) {
+      for(int j = 0; j < hyper_blocks[i].minimums.size(); j++) {
+         preMadeHyperBlockMins[hyper_blocks[i].classNum].emplace_back(hyper_blocks[i].minimums[j][0]);
+         preMadeHyperBlockMaxes[hyper_blocks[i].classNum].emplace_back(hyper_blocks[i].maximums[j][0]);
+      }
+      hyper_blocks.pop_back();
     }
+	cout << "Added all to premademaxes" << endl;
+	cout << preMadeHyperBlockMins.size() << endl;
 
     #pragma omp parallel for num_threads(deviceCount)
     for(int deviceID = 0; deviceID < deviceCount; deviceID++){
@@ -763,10 +762,14 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
             	}
         	}
 			*/
-            // Add the premade blocks of class classN to the end of the local hyperBlockMins/Maxes
-			hyperBlockMinsC.insert(hyperBlockMinsC.end(), premadeHyperBlockMins[classN].begin(), premadeHyperBlockMins[classN].end());
-            hyperBlockMaxesC.insert(hyperBlockMaxesC.end(), premadeHyperBlockMaxes[classN].begin(), premadeHyperBlockMaxes[classN].end());
 
+            cout << "Made it to adding the interval blocks" << endl;
+            // Add the premade blocks of class classN to the end of the local hyperBlockMins/Maxes
+			hyperBlockMinsC.insert(hyperBlockMinsC.end(), preMadeHyperBlockMins[classN].begin(), preMadeHyperBlockMins[classN].end());
+            hyperBlockMaxesC.insert(hyperBlockMaxesC.end(), preMadeHyperBlockMaxes[classN].begin(), preMadeHyperBlockMaxes[classN].end());
+
+            //Add the size of however many blocks we just added as seedpoints to this class
+            currentClassIndex += hyperBlockMinsC.size();
 
             // We should do that before and then during this loop just add the result from that to the end of hyperBlockMinsC and hyperBlockMaxesC
 
@@ -849,35 +852,29 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
 
             	int realIndex = 0;
             	for (int j = 0; j < FIELD_LENGTH; j++) {
-                	//if (removed[j]) {
-                	 //   blockMins[j].push_back(0.0f);
-                	//    blockMaxes[j].push_back(1.0f);
-                	//} else {
-                    	blockMins[j].push_back(hyperBlockMinsC[i + realIndex]);
-                    	blockMaxes[j].push_back(hyperBlockMaxesC[i + realIndex]);
-                    	realIndex++;
-                	//}
+                    blockMins[j].push_back(hyperBlockMinsC[i + realIndex]);
+                    blockMaxes[j].push_back(hyperBlockMaxesC[i + realIndex]);
+                    realIndex++;
             	}
 
             	HyperBlock hb(blockMaxes, blockMins, classN);
 
                 // Make this be executed on 1 thread at a time.
-                #pragma omp critical{
-            		hyper_blocks.emplace_back(hb);
-                }
+                #pragma omp critical
+            	hyper_blocks.emplace_back(hb);
 
-        	}
+            }
 
         	// Free device memory
-        	cudaFree(d_hyperBlockMins);
-        	cudaFree(d_hyperBlockMaxes);
-        	cudaFree(d_combinedMins);
-        	cudaFree(d_combinedMaxes);
-        	cudaFree(d_deleteFlags);
-        	cudaFree(d_points);
-        	cudaFree(d_mergable);
-        	cudaFree(d_seedQueue);
-        	cudaFree(d_writeSeedQueue);
+            if(d_hyperBlockMins != nullptr) free(d_hyperBlockMins);
+        	if(d_hyperBlockMaxes != nullptr) free(d_hyperBlockMaxes);
+        	if(d_combinedMins != nullptr) free(d_combinedMins);
+        	if(d_combinedMaxes != nullptr) free(d_combinedMaxes);
+        	if(d_deleteFlags != nullptr)	free(d_deleteFlags);
+        	if(d_points != nullptr)	free(d_points);
+        	if(d_mergable != nullptr)	free(d_mergable);
+        	if(d_seedQueue != nullptr)	free(d_seedQueue);
+        	if(d_writeSeedQueue != nullptr)	free(d_writeSeedQueue);
     	}
     }
 }

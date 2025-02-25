@@ -824,16 +824,16 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
             	resultingBlocks[classN].emplace_back(hb);
         	}
 
-        	// Free device memory
-            if(d_hyperBlockMins != nullptr) cudaFree(d_hyperBlockMins);
-        	if(d_hyperBlockMaxes != nullptr) cudaFree(d_hyperBlockMaxes);
-        	if(d_combinedMins != nullptr) cudaFree(d_combinedMins);
-        	if(d_combinedMaxes != nullptr) cudaFree(d_combinedMaxes);
-        	if(d_deleteFlags != nullptr)	cudaFree(d_deleteFlags);
-        	if(d_points != nullptr)	cudaFree(d_points);
-        	if(d_mergable != nullptr)	cudaFree(d_mergable);
-        	if(d_seedQueue != nullptr)	cudaFree(d_seedQueue);
-        	if(d_writeSeedQueue != nullptr)	cudaFree(d_writeSeedQueue);
+           	// Free device memory
+        	cudaFree(d_hyperBlockMins);
+        	cudaFree(d_hyperBlockMaxes);
+        	cudaFree(d_combinedMins);
+        	cudaFree(d_combinedMaxes);
+        	cudaFree(d_deleteFlags);
+        	cudaFree(d_points);
+        	cudaFree(d_mergable);
+        	cudaFree(d_seedQueue);
+        	cudaFree(d_writeSeedQueue);
     	}
     }
 

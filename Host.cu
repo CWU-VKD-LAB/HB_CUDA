@@ -404,12 +404,9 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
 
         // Sort data by most important attribute
         for(int i = 0; i < datum.size(); i++){
-            sortByColumn(datum[i], 3);
-            sortByColumn(seed_data[i], 3);
+            sortByColumn(datum[i], 0);
+            sortByColumn(seed_data[i], 0);
         }
-
-
-
 
     // Call CUDA function.
     //cout << "Calling merger_cuda\n" << endl;
@@ -640,11 +637,6 @@ vector<bool> markUniformColumns(const vector<vector<vector<float>>>& data) {
 
 // Source
 void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vector<vector<vector<float>>>& all_data, vector<HyperBlock>& hyper_blocks) {
-    // Mark uniform columns
-    //vector<bool> removed = markUniformColumns(all_data);
-	int deviceCount;
-    cudaGetDeviceCount(&deviceCount);
-    cout << "Device count: " << deviceCount << endl;
 
     // Calculate total points
     int numPoints = 0;
@@ -659,183 +651,189 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
     }
 
     vector<vector<HyperBlock>> resultingBlocks(NUM_CLASSES);
-    deviceCount = NUM_CLASSES > deviceCount ? deviceCount : NUM_CLASSES;
+    
+    // get our device count, and max it so that the most we will use is numClasses if we have only 2 classes for example.
+    /* MULTI GPU BUSINESS
+    int deviceCount;
+    cudaGetDeviceCount(&deviceCount);
+    deviceCount = std::min(deviceCount, NUM_CLASSES);
+
+
+    // Process each class
+    // we have our multithreading happen here at this level. set the device to class % deviceCount
     #pragma omp parallel for num_threads(deviceCount)
-    for(int deviceID = 0; deviceID < deviceCount; deviceID++){
-		cudaSetDevice(deviceID);
+    */
 
-    	// Initialize CUDA
-    	cudaDeviceProp prop;
-    	cudaGetDeviceProperties(&prop, deviceID);
-
+    for (int classN = 0; classN < NUM_CLASSES; classN++) {
+        
+        // set our device based on class. this way even single threaded we use multiple GPUs
+        // MORE MULTI GPU BUSINESS
+        //cudaSetDevice(classN % deviceCount);
+        
         // Find best occupancy
-    	int sharedMemSize = 2 * FIELD_LENGTH * sizeof(float) + sizeof(int);
-    	int minGridSize, blockSize;
-    	cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, mergerHyperBlocks, sharedMemSize, 0);
+        int sharedMemSize = 2 * FIELD_LENGTH * sizeof(float) + sizeof(int);
+        int minGridSize, blockSize;
+        cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, mergerHyperBlocks, sharedMemSize, 0);
 
-    	// Process each class
-    	for (int classN = deviceID; classN < NUM_CLASSES; classN += deviceCount) {
+        int totalDataSetSizeFlat = numPoints * FIELD_LENGTH;
+        int sizeWithoutHBpoints = ((data_with_skips[classN].size() + numBlocksOfEachClass[classN]) * FIELD_LENGTH);
+        if (data_with_skips[classN].empty()) {
+            sizeWithoutHBpoints = numBlocksOfEachClass[classN] * FIELD_LENGTH;
+        }
 
-        	int totalDataSetSizeFlat = numPoints * FIELD_LENGTH;
-        	int sizeWithoutHBpoints = ((data_with_skips[classN].size() + numBlocksOfEachClass[classN]) * FIELD_LENGTH);
+        // Compute grid size to cover all elements. we already know our ideal block size from before.
+        int gridSize = ((sizeWithoutHBpoints / FIELD_LENGTH) + blockSize - 1) / blockSize;
 
-        	if (data_with_skips[classN].empty()) {
-            	sizeWithoutHBpoints = numBlocksOfEachClass[classN] * FIELD_LENGTH;
-        	}
+        //cout << "Grid size: " << gridSize << endl;
+        //cout << "Block size: " << blockSize << endl;
+        //cout << "Shared memory size: " << sharedMemSize << endl;
 
-        	// Compute grid size to cover all elements. we already know our ideal block size from before.
-        	int gridSize = ((sizeWithoutHBpoints / FIELD_LENGTH) + blockSize - 1) / blockSize;
+        // Allocate host memory
+        vector<float> hyperBlockMinsC(sizeWithoutHBpoints);
+        vector<float> hyperBlockMaxesC(sizeWithoutHBpoints);
+        vector<float> combinedMinsC(sizeWithoutHBpoints);
+        vector<float> combinedMaxesC(sizeWithoutHBpoints);
+        vector<int> deleteFlagsC(sizeWithoutHBpoints / FIELD_LENGTH);
 
-        	//cout << "Grid size: " << gridSize << endl;
-        	//cout << "Block size: " << blockSize << endl;
-        	//cout << "Shared memory size: " << sharedMemSize << endl;
+        int nSize = all_data[classN].size();
+        vector<float> pointsC(totalDataSetSizeFlat - (nSize * FIELD_LENGTH));
 
-        	// Allocate host memory
-        	vector<float> hyperBlockMinsC(sizeWithoutHBpoints);
-        	vector<float> hyperBlockMaxesC(sizeWithoutHBpoints);
-        	vector<float> combinedMinsC(sizeWithoutHBpoints);
-        	vector<float> combinedMaxesC(sizeWithoutHBpoints);
-        	vector<int> deleteFlagsC(sizeWithoutHBpoints / FIELD_LENGTH);
-
-        	int nSize = all_data[classN].size();
-        	vector<float> pointsC(totalDataSetSizeFlat - (nSize * FIELD_LENGTH));
-
-        	// Fill data arrays
-        	int currentClassIndex = 0;
-        	for (int currentClass = 0; currentClass < data_with_skips.size(); currentClass++) {
-            	for (const auto& point : data_with_skips[currentClass]) {
-                	if (currentClass == classN) {
-                    	for (int attr = 0; attr < FIELD_LENGTH; attr++) {
-                        	//if (removed[attr]) continue;
-                        	hyperBlockMinsC[currentClassIndex] = point[attr];
-                        	hyperBlockMaxesC[currentClassIndex] = point[attr];
-                        	currentClassIndex++;
-                    	}
-                	}
-            	}
-        	}
-
-        	// Process other class points
-        	int otherClassIndex = 0;
-        	for (int currentClass = 0; currentClass < all_data.size(); currentClass++) {
-            	if (currentClass == classN) continue;
-
-            	for (const auto& point : all_data[currentClass]) {
-                	for (int attr = 0; attr < FIELD_LENGTH; attr++) {
-                    	//if (removed[attr]) continue;
-                    	pointsC[otherClassIndex++] = point[attr];
-                	}
-            	}
-        	}
-
-        	// Add the existing blocks from interval_hyper
-        	for (auto it = hyper_blocks.begin(); it != hyper_blocks.end(); ++it) {
-            	if (it->classNum == classN) {
-                	for (int i = 0; i < it->minimums.size(); i++) {
-                    	//if (removed[i]) continue;
-                    	hyperBlockMinsC[currentClassIndex] = it->minimums[i][0];
-                    	hyperBlockMaxesC[currentClassIndex] = it->maximums[i][0];
-                    	currentClassIndex++;
-                	}
+        // Fill data arrays
+        int currentClassIndex = 0;
+        for (int currentClass = 0; currentClass < data_with_skips.size(); currentClass++) {
+            for (const auto& point : data_with_skips[currentClass]) {
+                if (currentClass == classN) {
+                    for (int attr = 0; attr < FIELD_LENGTH; attr++) {
+                        //if (removed[attr]) continue;
+                        hyperBlockMinsC[currentClassIndex] = point[attr];
+                        hyperBlockMaxesC[currentClassIndex] = point[attr];
+                        currentClassIndex++;
+                    }
                 }
             }
+        }
 
-        	// Allocate device memory
-        	float *d_hyperBlockMins, *d_hyperBlockMaxes, *d_combinedMins, *d_combinedMaxes, *d_points;
-        	int *d_deleteFlags, *d_mergable, *d_seedQueue, *d_writeSeedQueue;
+        // Process other class points
+        int otherClassIndex = 0;
+        for (int currentClass = 0; currentClass < all_data.size(); currentClass++) {
+            if (currentClass == classN) continue;
 
-        	cudaMalloc(&d_hyperBlockMins, sizeWithoutHBpoints * sizeof(float));
-        	cudaMalloc(&d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float));
-        	cudaMalloc(&d_combinedMins, sizeWithoutHBpoints * sizeof(float));
-        	cudaMalloc(&d_combinedMaxes, sizeWithoutHBpoints * sizeof(float));
-        	cudaMalloc(&d_deleteFlags, (sizeWithoutHBpoints / FIELD_LENGTH) * sizeof(int));
-        	cudaMemset(d_deleteFlags, 0, (sizeWithoutHBpoints / FIELD_LENGTH) * sizeof(int));
+            for (const auto& point : all_data[currentClass]) {
+                for (int attr = 0; attr < FIELD_LENGTH; attr++) {
+                    //if (removed[attr]) continue;
+                    pointsC[otherClassIndex++] = point[attr];
+                }
+            }
+        }
 
-        	cudaMalloc(&d_points, pointsC.size() * sizeof(float));
+        // Add the existing blocks from interval_hyper
+        for (auto it = hyper_blocks.begin(); it != hyper_blocks.end(); ++it) {
+            if (it->classNum == classN) {
+                for (int i = 0; i < it->minimums.size(); i++) {
+                    //if (removed[i]) continue;
+                    hyperBlockMinsC[currentClassIndex] = it->minimums[i][0];
+                    hyperBlockMaxesC[currentClassIndex] = it->maximums[i][0];
+                    currentClassIndex++;
+                }
+            }
+        }
 
-        	int numBlocks = hyperBlockMinsC.size() / FIELD_LENGTH;
-        	vector<int> seedQueue(numBlocks);
-   			for(int i = 0; i < numBlocks; i++){
-            	seedQueue[i] = i;
-        	}
+        // Allocate device memory
+        float *d_hyperBlockMins, *d_hyperBlockMaxes, *d_combinedMins, *d_combinedMaxes, *d_points;
+        int *d_deleteFlags, *d_mergable, *d_seedQueue, *d_writeSeedQueue;
 
-        	cudaMalloc(&d_mergable, numBlocks * sizeof(int));
-        	cudaMalloc(&d_seedQueue, numBlocks * sizeof(int));
-        	cudaMalloc(&d_writeSeedQueue, numBlocks * sizeof(int));
+        cudaMalloc(&d_hyperBlockMins, sizeWithoutHBpoints * sizeof(float));
+        cudaMalloc(&d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float));
+        cudaMalloc(&d_combinedMins, sizeWithoutHBpoints * sizeof(float));
+        cudaMalloc(&d_combinedMaxes, sizeWithoutHBpoints * sizeof(float));
+        cudaMalloc(&d_deleteFlags, (sizeWithoutHBpoints / FIELD_LENGTH) * sizeof(int));
+        cudaMemset(d_deleteFlags, 0, (sizeWithoutHBpoints / FIELD_LENGTH) * sizeof(int));
 
-        	// Copy data to device
-        	cudaMemcpy(d_hyperBlockMins, hyperBlockMinsC.data(), sizeWithoutHBpoints * sizeof(float), cudaMemcpyHostToDevice);
-        	cudaMemcpy(d_hyperBlockMaxes, hyperBlockMaxesC.data(), sizeWithoutHBpoints * sizeof(float), cudaMemcpyHostToDevice);
-        	cudaMemcpy(d_points, pointsC.data(), pointsC.size() * sizeof(float), cudaMemcpyHostToDevice);
-        	cudaMemcpy(d_seedQueue, seedQueue.data(), numBlocks * sizeof(int), cudaMemcpyHostToDevice);
+        cudaMalloc(&d_points, pointsC.size() * sizeof(float));
 
-			cout << "Launched a kernel for class: " << classN << endl;
+        int numBlocks = hyperBlockMinsC.size() / FIELD_LENGTH;
+        vector<int> seedQueue(numBlocks);
+        for(int i = 0; i < numBlocks; i++){
+            seedQueue[i] = i;
+        }
 
-        	// funky wap to swap the readQueue and writeQueue
-			int* queues[2] = {d_seedQueue, d_writeSeedQueue};
-        	for(int i = 0; i < numBlocks; i++){
-           		// swap between the two queues
-           		int* readQueue = queues[i & 1];
-    	   		int* writeQueue = queues[(i + 1) & 1];
-           		mergerHyperBlocksWrapper(
-                	i, 			// seednum
-                	readQueue,  // seedQueue
-                	numBlocks,  // number seed blocks
-                	FIELD_LENGTH,	// num attributes
-              		pointsC.size() / FIELD_LENGTH,	// num op class points
-            		d_points,						// op class points
-	    			d_hyperBlockMins,				// mins
-					d_hyperBlockMaxes,				// maxes
-					d_deleteFlags,
-					d_mergable,						// mergable flags
-                	gridSize,
-                	blockSize,
-                	sharedMemSize,
-               		d_combinedMins,
-                	d_combinedMaxes
-       	   		);
-		   		cudaDeviceSynchronize();
+        cudaMalloc(&d_mergable, numBlocks * sizeof(int));
+        cudaMemset(d_mergable, 0, numBlocks * sizeof(int));
+        cudaMalloc(&d_seedQueue, numBlocks * sizeof(int));
+        cudaMalloc(&d_writeSeedQueue, numBlocks * sizeof(int));
 
-            	// Reorder the seedblock order
-    	    	rearrangeSeedQueueWrapper(i, readQueue, writeQueue, d_deleteFlags, d_mergable, numBlocks, gridSize, blockSize);
-            	cudaDeviceSynchronize();
+        // Copy data to device
+        cudaMemcpy(d_hyperBlockMins, hyperBlockMinsC.data(), sizeWithoutHBpoints * sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_hyperBlockMaxes, hyperBlockMaxesC.data(), sizeWithoutHBpoints * sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_points, pointsC.data(), pointsC.size() * sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_seedQueue, seedQueue.data(), numBlocks * sizeof(int), cudaMemcpyHostToDevice);
 
-             	// Reset mergable flags
-           		resetMergableFlagsWrapper(d_mergable, numBlocks, gridSize, blockSize);
-           		cudaDeviceSynchronize();
-        	}
+        cout << "Launched a kernel for class: " << classN << endl;
 
-        	// Copy results back
-        	cudaMemcpy(hyperBlockMinsC.data(), d_hyperBlockMins, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
-        	cudaMemcpy(hyperBlockMaxesC.data(), d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
-        	cudaMemcpy(deleteFlagsC.data(), d_deleteFlags, deleteFlagsC.size() * sizeof(int), cudaMemcpyDeviceToHost);
-        	// Process results
-        	for (int i = 0; i < hyperBlockMinsC.size(); i += FIELD_LENGTH) {
-            	if (deleteFlagsC[i / FIELD_LENGTH] == -1) continue;  // -1 is a seed block which was merged to. so it doesn't need to be copied back.
+        // funky wap to swap the readQueue and writeQueue
+        int* queues[2] = {d_seedQueue, d_writeSeedQueue};
+        for(int i = 0; i < numBlocks; i++){
+            // swap between the two queues
+            int* readQueue = queues[i & 1];
+            int* writeQueue = queues[(i + 1) & 1];
+            mergerHyperBlocksWrapper(
+                i, 			// seednum
+                readQueue,  // seedQueue
+                numBlocks,  // number seed blocks
+                FIELD_LENGTH,	// num attributes
+                pointsC.size() / FIELD_LENGTH,	// num op class points
+                d_points,						// op class points
+                d_hyperBlockMins,				// mins
+                d_hyperBlockMaxes,				// maxes
+                d_deleteFlags,
+                d_mergable,						// mergable flags
+                gridSize,
+                blockSize,
+                sharedMemSize,
+                d_combinedMins,
+                d_combinedMaxes
+            );
+            cudaDeviceSynchronize();
 
-            	vector<vector<float>> blockMins(FIELD_LENGTH);
-            	vector<vector<float>> blockMaxes(FIELD_LENGTH);
+            // Reorder the seedblock order
+            rearrangeSeedQueueWrapper(i, readQueue, writeQueue, d_deleteFlags, d_mergable, numBlocks, gridSize, blockSize);
+            cudaDeviceSynchronize();
 
-            	for (int j = 0; j < FIELD_LENGTH; j++) {
-                    blockMins[j].push_back(hyperBlockMinsC[i + j]);
-                    blockMaxes[j].push_back(hyperBlockMaxesC[i + j]);
-            	}
+            // Reset mergable flags
+            resetMergableFlagsWrapper(d_mergable, numBlocks, gridSize, blockSize);
+            cudaDeviceSynchronize();
+        }
 
-            	HyperBlock hb(blockMaxes, blockMins, classN);
-            	resultingBlocks[classN].emplace_back(hb);
-        	}
+        // Copy results back
+        cudaMemcpy(hyperBlockMinsC.data(), d_hyperBlockMins, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(hyperBlockMaxesC.data(), d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(deleteFlagsC.data(), d_deleteFlags, deleteFlagsC.size() * sizeof(int), cudaMemcpyDeviceToHost);
+        // Process results
+        for (int i = 0; i < hyperBlockMinsC.size(); i += FIELD_LENGTH) {
+            if (deleteFlagsC[i / FIELD_LENGTH] == -1) continue;  // -1 is a seed block which was merged to. so it doesn't need to be copied back.
 
-           	// Free device memory
-        	cudaFree(d_hyperBlockMins);
-        	cudaFree(d_hyperBlockMaxes);
-        	cudaFree(d_combinedMins);
-        	cudaFree(d_combinedMaxes);
-        	cudaFree(d_deleteFlags);
-        	cudaFree(d_points);
-        	cudaFree(d_mergable);
-        	cudaFree(d_seedQueue);
-        	cudaFree(d_writeSeedQueue);
-    	}
+            vector<vector<float>> blockMins(FIELD_LENGTH);
+            vector<vector<float>> blockMaxes(FIELD_LENGTH);
+
+            for (int j = 0; j < FIELD_LENGTH; j++) {
+                blockMins[j].push_back(hyperBlockMinsC[i + j]);
+                blockMaxes[j].push_back(hyperBlockMaxesC[i + j]);
+            }
+
+            HyperBlock hb(blockMaxes, blockMins, classN);
+            resultingBlocks[classN].emplace_back(hb);
+        }
+
+        // Free device memory
+        cudaFree(d_hyperBlockMins);
+        cudaFree(d_hyperBlockMaxes);
+        cudaFree(d_combinedMins);
+        cudaFree(d_combinedMaxes);
+        cudaFree(d_deleteFlags);
+        cudaFree(d_points);
+        cudaFree(d_mergable);
+        cudaFree(d_seedQueue);
+        cudaFree(d_writeSeedQueue);
     }
 
     hyper_blocks.clear();

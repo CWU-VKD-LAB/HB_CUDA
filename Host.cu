@@ -404,8 +404,8 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
 
         // Sort data by most important attribute
         for(int i = 0; i < datum.size(); i++){
-            sortByColumn(datum[i], 0);
-            sortByColumn(seed_data[i], 0);
+            sortByColumn(datum[i], 6);
+            sortByColumn(seed_data[i], 6);
         }
 
     // Call CUDA function.
@@ -664,41 +664,46 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
     #pragma omp parallel for num_threads(deviceCount)
     */
 
+    int PADDED_LENGTH = ((FIELD_LENGTH + 3) / 4) * 4;
+    // Find best occupancy
+    int sharedMemSize = 2 * PADDED_LENGTH * sizeof(float);
+    int minGridSize, blockSize;
+    cudaError_t err = cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, mergerHyperBlocks, sharedMemSize, 0);
+    if (err != cudaSuccess) {
+        printf("CUDA error in cudaOccupancyMaxPotentialBlockSize: %s\n", cudaGetErrorString(err));
+        exit(-1);
+    }
+
     for (int classN = 0; classN < NUM_CLASSES; classN++) {
         
         // set our device based on class. this way even single threaded we use multiple GPUs
         // MORE MULTI GPU BUSINESS
         //cudaSetDevice(classN % deviceCount);
-        
-        // Find best occupancy
-        int sharedMemSize = 2 * FIELD_LENGTH * sizeof(float) + sizeof(int);
-        int minGridSize, blockSize;
-        cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, mergerHyperBlocks, sharedMemSize, 0);
 
-        int totalDataSetSizeFlat = numPoints * FIELD_LENGTH;
-        int sizeWithoutHBpoints = ((data_with_skips[classN].size() + numBlocksOfEachClass[classN]) * FIELD_LENGTH);
+        int totalDataSetSizeFlat = numPoints * PADDED_LENGTH;
+        int sizeWithoutHBpoints = ((data_with_skips[classN].size() + numBlocksOfEachClass[classN]) * PADDED_LENGTH);
         if (data_with_skips[classN].empty()) {
-            sizeWithoutHBpoints = numBlocksOfEachClass[classN] * FIELD_LENGTH;
+            sizeWithoutHBpoints = numBlocksOfEachClass[classN] * PADDED_LENGTH;
         }
 
         // Compute grid size to cover all elements. we already know our ideal block size from before.
-        int gridSize = ((sizeWithoutHBpoints / FIELD_LENGTH) + blockSize - 1) / blockSize;
+        int gridSize = ((sizeWithoutHBpoints / PADDED_LENGTH) + blockSize - 1) / blockSize;
 
-        //cout << "Grid size: " << gridSize << endl;
-        //cout << "Block size: " << blockSize << endl;
-        //cout << "Shared memory size: " << sharedMemSize << endl;
+        cout << "Grid size: " << gridSize << endl;
+        cout << "Block size: " << blockSize << endl;
+        cout << "Shared memory size: " << sharedMemSize << endl;
 
         // Allocate host memory
         vector<float> hyperBlockMinsC(sizeWithoutHBpoints);
         vector<float> hyperBlockMaxesC(sizeWithoutHBpoints);
         vector<float> combinedMinsC(sizeWithoutHBpoints);
         vector<float> combinedMaxesC(sizeWithoutHBpoints);
-        vector<int> deleteFlagsC(sizeWithoutHBpoints / FIELD_LENGTH);
+        vector<int> deleteFlagsC(sizeWithoutHBpoints / PADDED_LENGTH);
 
         int nSize = all_data[classN].size();
-        vector<float> pointsC(totalDataSetSizeFlat - (nSize * FIELD_LENGTH));
+        vector<float> pointsC(totalDataSetSizeFlat - (nSize * PADDED_LENGTH));
 
-        // Fill data arrays
+        // Fill hyperblock arrays
         int currentClassIndex = 0;
         for (int currentClass = 0; currentClass < data_with_skips.size(); currentClass++) {
             for (const auto& point : data_with_skips[currentClass]) {
@@ -707,6 +712,11 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
                         //if (removed[attr]) continue;
                         hyperBlockMinsC[currentClassIndex] = point[attr];
                         hyperBlockMaxesC[currentClassIndex] = point[attr];
+                        currentClassIndex++;
+                    }
+                    for (int leftOverAtt = FIELD_LENGTH; leftOverAtt < PADDED_LENGTH; leftOverAtt++) {
+                        hyperBlockMinsC[currentClassIndex] = -std::numeric_limits<float>::infinity();
+                        hyperBlockMaxesC[currentClassIndex] = std::numeric_limits<float>::infinity();
                         currentClassIndex++;
                     }
                 }
@@ -720,8 +730,10 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
 
             for (const auto& point : all_data[currentClass]) {
                 for (int attr = 0; attr < FIELD_LENGTH; attr++) {
-                    //if (removed[attr]) continue;
                     pointsC[otherClassIndex++] = point[attr];
+                }
+                for (int leftOverAtt = FIELD_LENGTH; leftOverAtt < PADDED_LENGTH; leftOverAtt++) {
+                    pointsC[otherClassIndex++] = -std::numeric_limits<float>::infinity();
                 }
             }
         }
@@ -735,6 +747,11 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
                     hyperBlockMaxesC[currentClassIndex] = it->maximums[i][0];
                     currentClassIndex++;
                 }
+                for (int leftOverAtt = FIELD_LENGTH; leftOverAtt < PADDED_LENGTH; leftOverAtt++) {
+                    hyperBlockMinsC[currentClassIndex] = -std::numeric_limits<float>::infinity();
+                    hyperBlockMaxesC[currentClassIndex] = std::numeric_limits<float>::infinity();
+                    currentClassIndex++;
+                }
             }
         }
 
@@ -746,12 +763,12 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         cudaMalloc(&d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float));
         cudaMalloc(&d_combinedMins, sizeWithoutHBpoints * sizeof(float));
         cudaMalloc(&d_combinedMaxes, sizeWithoutHBpoints * sizeof(float));
-        cudaMalloc(&d_deleteFlags, (sizeWithoutHBpoints / FIELD_LENGTH) * sizeof(int));
-        cudaMemset(d_deleteFlags, 0, (sizeWithoutHBpoints / FIELD_LENGTH) * sizeof(int));
+        cudaMalloc(&d_deleteFlags, (sizeWithoutHBpoints / PADDED_LENGTH) * sizeof(int));
+        cudaMemset(d_deleteFlags, 0, (sizeWithoutHBpoints / PADDED_LENGTH) * sizeof(int));
 
         cudaMalloc(&d_points, pointsC.size() * sizeof(float));
 
-        int numBlocks = hyperBlockMinsC.size() / FIELD_LENGTH;
+        int numBlocks = hyperBlockMinsC.size() / PADDED_LENGTH;
         vector<int> seedQueue(numBlocks);
         for(int i = 0; i < numBlocks; i++){
             seedQueue[i] = i;
@@ -780,8 +797,8 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
                 i, 			// seednum
                 readQueue,  // seedQueue
                 numBlocks,  // number seed blocks
-                FIELD_LENGTH,	// num attributes
-                pointsC.size() / FIELD_LENGTH,	// num op class points
+                PADDED_LENGTH,	// num attributes
+                pointsC.size() / PADDED_LENGTH,	// num op class points
                 d_points,						// op class points
                 d_hyperBlockMins,				// mins
                 d_hyperBlockMaxes,				// maxes
@@ -809,17 +826,16 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         cudaMemcpy(hyperBlockMaxesC.data(), d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
         cudaMemcpy(deleteFlagsC.data(), d_deleteFlags, deleteFlagsC.size() * sizeof(int), cudaMemcpyDeviceToHost);
         // Process results
-        for (int i = 0; i < hyperBlockMinsC.size(); i += FIELD_LENGTH) {
-            if (deleteFlagsC[i / FIELD_LENGTH] == -1) continue;  // -1 is a seed block which was merged to. so it doesn't need to be copied back.
+        for (int i = 0; i < hyperBlockMinsC.size(); i += PADDED_LENGTH) {
+            
+            if (deleteFlagsC[i / PADDED_LENGTH] == -1) continue;  // -1 is a seed block which was merged to. so it doesn't need to be copied back.
 
             vector<vector<float>> blockMins(FIELD_LENGTH);
             vector<vector<float>> blockMaxes(FIELD_LENGTH);
-
             for (int j = 0; j < FIELD_LENGTH; j++) {
                 blockMins[j].push_back(hyperBlockMinsC[i + j]);
                 blockMaxes[j].push_back(hyperBlockMaxesC[i + j]);
             }
-
             HyperBlock hb(blockMaxes, blockMins, classN);
             resultingBlocks[classN].emplace_back(hb);
         }

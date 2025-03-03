@@ -12,6 +12,7 @@
 #include "CudaUtil.h"
 #include "HyperBlock.h"
 #include "HyperBlockCuda.cuh"
+#include "LDA.cpp"
 #include <chrono>
 #include <omp.h>
 using namespace std;
@@ -878,6 +879,12 @@ int main(int argc, char* argv[]) {
     minMaxNormalization(data);
 	//print3DVector(data);
     printf("Made it past normalization");
+
+    // make our supervector from LDA
+    prepareData(data, FIELD_LENGTH);
+    computeLDA(data);
+    cout << "FINISHED LDA BUSINESS!" << endl;
+
     // Make the hyperblocks list to store the hyperblocks that are generated.
 	vector<HyperBlock> hyper_blocks;
 

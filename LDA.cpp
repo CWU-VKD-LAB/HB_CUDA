@@ -3,6 +3,8 @@
 #include <set>
 #include <iostream>
 #include <numeric>
+#include <algorithm>
+#include <cmath>
 
 // ASSUMPTIONS COMPARED TO JTABVIS VERSION:
 //      - data is already set up and normalized.
@@ -12,7 +14,6 @@
 using namespace std;
 
 vector<vector<float>> allData; // our flattened data all in one big list
-vector<int> classBreaks; // since we don't have labels, this is how we keep track of which points are for which class.
 vector<vector<float>> eigenVectors;
 vector<float> eigenValues;
 float threshold = 1e-10;
@@ -28,7 +29,6 @@ void prepareData(const vector<vector<vector<float>>>& inputData, int numAttribut
     for (auto& classGroup : inputData) {
         rows += classGroup.size();
         allData.insert(allData.end(), classGroup.begin(), classGroup.end());
-        classBreaks.push_back(classGroup.size());
     }
 
     vector<float> means(cols, 0.0);

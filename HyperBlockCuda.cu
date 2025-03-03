@@ -9,7 +9,6 @@
 __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const int numBlocks, const int numAttributes, const int numPoints, const float* __restrict__ points, float *hyperBlockMins, float *hyperBlockMaxes, int* deleteFlags, int* mergable, float* combinedMins, float* combinedMaxes){
     
     const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
-
     // get our seed block.
     const int seedBlock = readSeedQueue[seedIndex];
 

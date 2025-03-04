@@ -3,7 +3,6 @@
 
 #include <cuda_runtime.h>
 
-
 // === KERNELS: ===
 __global__ void mergerHyperBlocks(
     const int seedIndex, int *readSeedQueue, const int numBlocks,
@@ -23,6 +22,7 @@ __global__ void assignPointsToBlocks(
 
 
 // === WRAPPERS: USE THESE TO CALL THE KERNELS FROM A CPP FILE!  ===
+// ------------------------ creating hyperblocks wrapper functions --------------------------------
 void mergerHyperBlocksWrapper(
     const int seedIndex, int *readSeedQueue, const int numBlocks,
     const int numAttributes, const int numPoints, const float *opposingPoints,
@@ -32,9 +32,13 @@ void rearrangeSeedQueueWrapper(const int deadSeedNum, int *readSeedQueue, int *w
 
 void resetMergableFlagsWrapper(int *mergableFlags, const int numBlocks, int gridSize, int blockSize);
 
-void assignPointsToBlocksWrapper(
-    const float *dataPointsArray, const int numAttributes, const int numPoints,
-    const float *blockMins, const float *blockMaxes, const int *blockEdges,
-    const int numBlocks, int *dataPointBlocks);
+
+
+// --------------------------- removing useless blocks wrapper functions -------------------------
+void assignPointsToBlocksWrapper(const float *dataPointsArray, const int numAttributes, const int numPoints, const float *blockMins, const float *blockMaxes, const int *blockEdges, const int numBlocks, int *dataPointBlocks, int gridSize, int blockSize);
+
+void sumPointsPerBlockWrapper(int *dataPointBlocks, const int numPoints, int *numPointsInBlocks, int gridSize, int blockSize);
+
+void findBetterBlocksWrapper(const float *dataPointsArray, const int numAttributes, const int numPoints, const float *blockMins, const float *blockMaxes, const int *blockEdges, const int numBlocks, int *dataPointBlocks, int *numPointsInBlocks, int gridSize, int blockSize);
 
 #endif

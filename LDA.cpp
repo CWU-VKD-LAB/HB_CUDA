@@ -117,7 +117,9 @@ vector<vector<float>> matrixMultiply(const vector<vector<float>>& a, const vecto
 // has very little real mathematical meaning, but allows us to have a way of sorting attributes which would suggest who is doing the most work in our dataset.
 // the eigenvectors themselves point to the directions which give us greatest class separation, therefore, adding up all the attributes across vectors can kind of tell us
 // which guys are actually working around here.
-vector<float> computeLDA(const vector<vector<vector<float>>>& inputData) {
+vector<float> computeLDA(const vector<vector<vector<float>>>& inputData, int fieldLength) {
+
+    prepareData(inputData, fieldLength);
 
     int numClasses = inputData.size();
     int numFeatures = allData[0].size();

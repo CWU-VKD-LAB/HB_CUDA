@@ -296,7 +296,7 @@ void remove_value_from_interval(vector<DataATTR>& data_by_attr, Interval& intr, 
 
 ///////////////////////// END FUNCTIONS FOR INTERVAL_HYPER IMPLEMENTATION /////////////////////////
 
-void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_blocks){
+void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_blocks, int bestAtty){
   	// "Started generating HBS\n" << endl;
     // Hyperblocks generated with this algorithm
     vector<HyperBlock> gen_hb;
@@ -405,8 +405,8 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
 
         // Sort data by most important attribute
         for(int i = 0; i < datum.size(); i++){
-            sortByColumn(datum[i], 6);
-            sortByColumn(seed_data[i], 6);
+            sortByColumn(datum[i], bestAtty);
+            sortByColumn(seed_data[i], bestAtty);
         }
 
     // Call CUDA function.
@@ -437,9 +437,6 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
         cout << "Error in generateHBs: merger_cuda" << endl;
     }
 }
-
-
-
 
 void print3DVector(const vector<vector<vector<float>>>& vec) {
     for (int i = 0; i < vec.size(); i++) {
@@ -859,6 +856,171 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
     }
 }
 
+vector<vector<float>> flattenMinsMaxesForRUB(vector<HyperBlock>& hyper_blocks) {
+    // Declare our vectors not using the "vexing declaration"
+    vector<float> flatMinsList;
+    vector<float> flatMaxesList;
+    vector<float> blockEdges;
+    vector<float> blockClasses(hyper_blocks.size());
+
+    // First block starts at index 0
+    blockEdges.push_back(0.0f);
+
+    // Iterate over each hyper block
+    for (size_t hb = 0; hb < hyper_blocks.size(); hb++) {
+        // Use a reference so we don't copy the block
+        const HyperBlock &block = hyper_blocks[hb];
+        blockClasses[hb] = static_cast<float>(block.classNum);
+
+        int blockLength = 0;
+        // Process each attribute in this block
+        for (size_t m = 0; m < block.minimums.size(); m++) {
+            // The number of intervals for the attribute
+            float numIntervals = static_cast<float>(block.minimums[m].size());
+            blockLength += block.minimums[m].size();
+            // Push the number of intervals first, as in the Java version
+            flatMinsList.push_back(numIntervals);
+            flatMaxesList.push_back(numIntervals);
+            // Use the built-in insert method to add the interval values
+            flatMinsList.insert(flatMinsList.end(), block.minimums[m].begin(), block.minimums[m].end());
+            flatMaxesList.insert(flatMaxesList.end(), block.maximums[m].begin(), block.maximums[m].end());
+        }
+        // Add the cumulative length of this block (plus FIELD_LENGTH offset, like DV.fieldLength in Java)
+        blockEdges.push_back(blockEdges.back() + blockLength + FIELD_LENGTH);
+    }
+
+    // Assemble the result using move semantics to avoid extra copies
+    vector<vector<float>> result;
+    result.push_back(move(flatMinsList));
+    result.push_back(move(flatMaxesList));
+    result.push_back(move(blockEdges));
+    result.push_back(move(blockClasses));
+    return result;
+}
+
+vector<vector<float>> flattenDataset(vector<vector<vector<float>>>& data) {
+    vector<float> dataset;
+    vector<float> classBorder(data.size() + 1);
+    classBorder[0] = 0.0f;
+
+    // For each class
+    for (size_t classN = 0; classN < data.size(); ++classN) {
+        // Set the end index of the class in the flattened dataset.
+        // (data[classN].size() returns the number of points in that class.)
+        classBorder[classN + 1] = static_cast<float>(data[classN].size()) + classBorder[classN];
+
+        // For each point in this class, append its attributes to the dataset.
+        for (const auto& point : data[classN]) {
+            // For each attribute in the point
+            for (const auto& attribute : point) {
+                dataset.push_back(attribute);
+            }
+        }
+    }
+    vector<vector<float>> result;
+    result.push_back(move(dataset));
+    result.push_back(move(classBorder));
+    return result;
+}
+
+// runs our three kernel functions which remove useless blocks.
+void removeUselessBlocks(vector<vector<vector<float>>> &data, vector<HyperBlock>& hyper_blocks) {
+    /*
+     * The algorithm to remove useless blocks does basically this.
+     *     - take one particular point in our dataset. Find the first HB that it fits into.
+     *     - then, once everyone has found their first choice, we sum up the count of which HBs have how many points
+     *     - then, we run it again, this time starting from the block which each point chose. We pick a new HB instead, if we find one which our point falls into, and which has a higher amount of points in it than our current
+     *     - this is not a perfect way of doing it, but at least allows us to find the "most general blocks" based on the count of how many points are in each. This way we can then just delete whichever blocks we find with no *UNIQUE* points in them.
+     *     * notice how we are putting all data in, and all blocks together. this allows us to find errors as well. we may find that a block is letting in wrong class points this way.
+     */
+
+    vector<vector<float>> minMaxResult = flattenMinsMaxesForRUB(hyper_blocks);
+    vector<vector<float>> flattenedData = flattenDataset(data);
+
+    // Use references to avoid copying.
+    const vector<float>& blockMins   = minMaxResult[0];
+    const vector<float>& blockMaxes  = minMaxResult[1];
+
+    // Cast each element from the third vector (floats) into ints.
+    const vector<float> &edgesAsFloats = minMaxResult[2];
+    vector<int> blockEdges;
+    blockEdges.resize(minMaxResult[2].size());
+    // cast result [2] to ints, since this is the block edges. the array which tells us where each block starts and ends (as indexes).
+    transform(edgesAsFloats.begin(), edgesAsFloats.end(), blockEdges.begin(),
+              [](float val) -> int { return static_cast<int>(val); });
+
+    // Get the dataPointsArray (again using a reference).
+    const vector<float>& dataPointsArray = flattenedData[0];
+
+    const int numPoints = dataPointsArray.size() / FIELD_LENGTH;
+    vector<int> dataPointBlocks(numPoints, 0);              // Each point's chosen block.
+    const int numBlocks = hyper_blocks.size();                    // Number of hyperblocks.
+    vector<int> numPointsInBlocks(numBlocks, 0);              // Count of points in each hyperblock.
+
+    // Allocate device memory and copy data.
+    float *d_dataPointsArray, *d_blockMins, *d_blockMaxes;
+    int   *d_blockEdges;
+    int *d_dataPointBlocks, *d_numPointsInBlocks;
+
+    cudaMalloc((void**)&d_dataPointsArray, sizeof(float) * numPoints * FIELD_LENGTH);
+    cudaMemcpy(d_dataPointsArray, dataPointsArray.data(), sizeof(float) * numPoints * FIELD_LENGTH, cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**)&d_blockMins, sizeof(float) * blockMins.size());
+    cudaMemcpy(d_blockMins, blockMins.data(), sizeof(float) * blockMins.size(), cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**)&d_blockMaxes, sizeof(float) * blockMaxes.size());
+    cudaMemcpy(d_blockMaxes, blockMaxes.data(), sizeof(float) * blockMaxes.size(), cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**)&d_blockEdges, sizeof(int) * blockEdges.size());
+    cudaMemcpy(d_blockEdges, blockEdges.data(), sizeof(int) * blockEdges.size(), cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**)&d_dataPointBlocks, sizeof(int) * numPoints);
+    cudaMemset(d_dataPointBlocks, 0, sizeof(int) * numPoints);
+
+    cudaMalloc((void**)&d_numPointsInBlocks, sizeof(int) * numBlocks);
+    cudaMemset(d_numPointsInBlocks, 0, sizeof(int) * numBlocks);
+
+    // Determine grid and block sizes using CUDA occupancy.
+    int minGridSize, blockSize;
+    cudaError_t err = cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, assignPointsToBlocks, 0, 0);
+    if (err != cudaSuccess) {
+        printf("CUDA error in cudaOccupancyMaxPotentialBlockSize: %s\n", cudaGetErrorString(err));
+        exit(-1);
+    }
+    int gridSize = (numPoints + blockSize - 1) / blockSize;
+
+    assignPointsToBlocksWrapper(d_dataPointsArray, FIELD_LENGTH, numPoints, d_blockMins, d_blockMaxes, d_blockEdges, numBlocks, d_dataPointBlocks, gridSize, blockSize);
+    cudaDeviceSynchronize();
+
+    sumPointsPerBlockWrapper(d_dataPointBlocks, numPoints, d_numPointsInBlocks, gridSize, blockSize);
+    cudaDeviceSynchronize();
+
+    findBetterBlocksWrapper(d_dataPointsArray, FIELD_LENGTH, numPoints, d_blockMins, d_blockMaxes, d_blockEdges, numBlocks, d_dataPointBlocks, d_numPointsInBlocks, gridSize, blockSize);
+    cudaDeviceSynchronize();
+
+    // Reset the numPointsInBlocks array on the device, this is because we have now found better homes, and we are ready to recompute the sums.
+    cudaMemset(d_numPointsInBlocks, 0, sizeof(int) * numBlocks);
+    sumPointsPerBlockWrapper(d_dataPointBlocks, numPoints, d_numPointsInBlocks, gridSize, blockSize);
+    cudaDeviceSynchronize();
+
+    // Copy back the computed numPointsInBlocks.
+    cudaMemcpy(numPointsInBlocks.data(), d_numPointsInBlocks, sizeof(int) * numBlocks, cudaMemcpyDeviceToHost);
+
+    // Free device memory.
+    cudaFree((void *)d_dataPointsArray);
+    cudaFree((void *)d_blockMins);
+    cudaFree((void *)d_blockMaxes);
+    cudaFree((void *)d_blockEdges);
+    cudaFree((void *)d_dataPointBlocks);
+    cudaFree((void *)d_numPointsInBlocks);
+
+    // Remove hyperblocks that have no unique points.
+    for (int i = numPointsInBlocks.size() - 1; i >= 0; i--) {
+        if (numPointsInBlocks[i] == 0)
+            hyper_blocks.erase(hyper_blocks.begin() + i);
+    }
+}
+
 // WE WILL ASSUME WE DONT HAVE A ID COLUMN.
 // WE WILL ASSSUME THE LAST COLUMN IS A CLASS COLUMN
 int main(int argc, char* argv[]) {
@@ -881,8 +1043,16 @@ int main(int argc, char* argv[]) {
     printf("Made it past normalization");
 
     // make our supervector from LDA
-    prepareData(data, FIELD_LENGTH);
-    computeLDA(data);
+    vector<float> superVector = computeLDA(data, FIELD_LENGTH);
+
+    int bestAttribute = 0;
+    float bestVal = -69.00;
+    for(int i = 0; i < superVector.size(); i++) {
+        if (superVector[i] > bestVal) {
+            bestAttribute = i;
+            bestVal = superVector[i];
+        }
+    }
     cout << "FINISHED LDA BUSINESS!" << endl;
 
     // Make the hyperblocks list to store the hyperblocks that are generated.
@@ -891,7 +1061,7 @@ int main(int argc, char* argv[]) {
     // generate hyperblocks
     auto start = std::chrono::high_resolution_clock::now();
 
-    generateHBs(data, hyper_blocks);
+    generateHBs(data, hyper_blocks, bestAttribute);
     auto stop = std::chrono::high_resolution_clock::now();
 
  	auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
@@ -905,6 +1075,17 @@ int main(int argc, char* argv[]) {
     cout << "Finished generating HBS\n" << endl;
     cout << "Number of HBs: " << hyper_blocks.size() << endl;
 
+    // now we remove our useless blocks
+    cout << "STARTING TO REMOVE USELESS BLOCKS" << endl;
+    start = std::chrono::high_resolution_clock::now();
+    removeUselessBlocks(data, hyper_blocks);
+    stop = std::chrono::high_resolution_clock::now();
+    cout << "Finished removing useless blocks" << endl;
+    duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+    cout << "Time taken: " << duration_ms.count() << " ms" << endl;
+    cout << "After removing useless blocks we have " << hyper_blocks.size() << " blocks\n" << endl;
+
+    // now we remove our useless attributes
     saveBasicHBsToCSV(hyper_blocks, "testForDVinCPP.csv");
     return 0;
 }

@@ -6,16 +6,26 @@
 // REFACTORED MERGER HYPER BLOCKS KERNEL FUNCTION. DOESN'T NEED THE COOPERATIVE GROUPS.
 // WRAP IN A LOOP. launch mergerHyperBlocks with i up to N - 1 as seed index, each time then rearrange, then reset.
 // ------------------------------------------------------------------------------------------------
+
+#define COMPARE_FLOAT4(a, b) ( (((a).x == (b).x) && ((a).y == (b).y) && ((a).z == (b).z) && ((a).w == (b).w)) ? 0 : 1 )
 __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const int numBlocks, const int numAttributes, const int numPoints, const float* __restrict__ points, float *hyperBlockMins, float *hyperBlockMaxes, int* deleteFlags, int* mergable, float* combinedMins, float* combinedMaxes){
     
     const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
     // get our seed block.
     const int seedBlock = readSeedQueue[seedIndex];
 
-  	// Put the seed block attributes in shared memory
+    // so that we don't always have to do this division a bunch of times
+    const int numAttributesAsFours = numAttributes / 4;
+
+  	// Put the seed block attributes in shared memory using float 4's
+    // a float 4 is literally just a struct of four floats. it is faster for memory reading and writing.
     extern __shared__ float seedBlockAttributes[];
     float *seedBlockMins = &seedBlockAttributes[0];
     float *seedBlockMaxes = &seedBlockAttributes[numAttributes];
+
+    // seed block as a float 4 
+    float4 *seedBlockMins4 = (float4 *)seedBlockMins;
+    float4 *seedBlockMaxes4 = (float4 *)seedBlockMaxes;
 
     // put seed block into shared mem
     for (int index = threadIdx.x; index < numAttributes; index += blockDim.x){
@@ -32,11 +42,19 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
         // float 4 pointer to look through the dataset
         float4 *points4Pointer = (float4*)points;
 
-        // our local float4's which will actually be holding these things. 
-        float4 fourMinFloats;
-        float4 fourMaxFloats;
-        float4 fourAttributes;
-    
+        // our local float4's which will actually be holding seed mins and maxes
+        float4 fourSeedMins;
+        float4 fourSeedMaxes;
+        
+        // two for our block, and the two above are for the seed block
+        float4 fourOurMins;
+        float4 fourOurMaxes;
+
+        // we take the min and max of each attribute and put them in here to write to combined mins and maxes.
+        // the reason this is like this, is so that if we take all of the bounds from either block we already know that it will be valid and don't need to check the entire dataset.
+        float4 fourCombinedMins;
+        float4 fourCombinedMaxes;
+            
         // get our float4 pointers to point at the combined mins and maxes for this block.
         float4 *thisBlockCombinedMaxes4 = (float4*)&combinedMaxes[threadID * numAttributes];
         float4 *thisBlockCombinedMins4 = (float4*)&combinedMins[threadID * numAttributes];
@@ -46,78 +64,112 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
         float4 *hyperBlockMaxes4 = (float4*) &hyperBlockMaxes[threadID * numAttributes];
 
         // first we build our combined list.
-        for (int i = 0; i < numAttributes; i += 4){
-            fourMinFloats = hyperBlockMins4[i / 4];
-            fourMaxFloats = hyperBlockMaxes4[i / 4];
+
+        // these give us an important early out case. if we are taking an exact copy of either block, meaning that one 
+        // block is totally eating the other block, don't need to check that block anymore. obviously it is going to be valid since it is a copy of a valid block.
+        char usedSeedBlock = 0;
+        char usedOurBlock = 0; 
+
+        for (int i = 0; i < numAttributesAsFours; i++){
+            
+            // get our seed mins and maxes
+            fourSeedMins = seedBlockMins4[i];
+            fourSeedMaxes = seedBlockMaxes4[i];
+
+            // get our own hyperblock mins and maxes
+            fourOurMins = hyperBlockMins4[i];
+            fourOurMaxes = hyperBlockMaxes4[i];
 
             // update our four mins and maxes compared to seed block. that is, take the min of the two and the max of the two HBs bounds.
-            fourMinFloats.x = fminf(seedBlockMins[i], fourMinFloats.x);
-            fourMinFloats.y = fminf(seedBlockMins[i + 1], fourMinFloats.y);
-            fourMinFloats.z = fminf(seedBlockMins[i + 2], fourMinFloats.z);
-            fourMinFloats.w = fminf(seedBlockMins[i + 3], fourMinFloats.w);
-            fourMaxFloats.x = fmaxf(seedBlockMaxes[i], fourMaxFloats.x);
-            fourMaxFloats.y = fmaxf(seedBlockMaxes[i + 1], fourMaxFloats.y);
-            fourMaxFloats.z = fmaxf(seedBlockMaxes[i + 2], fourMaxFloats.z);
-            fourMaxFloats.w = fmaxf(seedBlockMaxes[i + 3], fourMaxFloats.w);
+            fourCombinedMins.w = fminf(fourSeedMins.w, fourOurMins.w);
+            fourCombinedMins.x = fminf(fourSeedMins.x, fourOurMins.x);
+            fourCombinedMins.y = fminf(fourSeedMins.y, fourOurMins.y);
+            fourCombinedMins.z = fminf(fourSeedMins.z, fourOurMins.z);
+            
+            fourCombinedMaxes.w = fmaxf(fourSeedMaxes.w, fourOurMaxes.w);
+            fourCombinedMaxes.x = fmaxf(fourSeedMaxes.x, fourOurMaxes.x);
+            fourCombinedMaxes.y = fmaxf(fourSeedMaxes.y, fourOurMaxes.y);
+            fourCombinedMaxes.z = fmaxf(fourSeedMaxes.z, fourOurMaxes.z);
+            
+            // now if they are not exactly the same one way or the other we can set the flag which tells us to check the dataset.
+            
+            // Check for discrepancies.
+            // If the combined min for any component doesn't equal the seed's corresponding value,
+            // then we know the seed value was not used for that bound. This means of course that we used OURS.
+            // this is helpful because if EITHER FLAG IS FALSE AFTER THIS WE DON'T CHECK THE DATASET.
+            // THIS IS BECAUSE BOTH SEEDBLOCK AND OUR HYPERBLOCK ARE VALID TO BEGIN WITH, SO TAKING AN EXACT COPY OF COURSE IS STILL VALID! SAVES TIME!
+            usedOurBlock |= COMPARE_FLOAT4(fourCombinedMins, fourOurMins);
+            usedOurBlock |= COMPARE_FLOAT4(fourCombinedMaxes, fourOurMaxes);
 
-            // throw those four mins and maxes into our combined mins and maxes
-            thisBlockCombinedMins4[i / 4] = fourMinFloats;
-            thisBlockCombinedMaxes4[i / 4] = fourMaxFloats;
+            usedSeedBlock |= COMPARE_FLOAT4(fourCombinedMins, fourSeedMins);
+            usedSeedBlock |= COMPARE_FLOAT4(fourCombinedMaxes, fourSeedMaxes);
+
+            thisBlockCombinedMins4[i] = fourCombinedMins;
+            thisBlockCombinedMaxes4[i] = fourCombinedMaxes;
         }
 
         
-        char allPassed = 1;                         // sentinel value which tells us if we passed all points
-        unsigned char outMask;                      // one particular comparison value of if our wrong class point is in bounds of four attributes 
-        unsigned char someAttributeOutside = 0;     // sentinel value for each particular point at an iteration.
+        char allPassed = 1; // sentinel value which tells us if we passed all points
 
-        // Check all wrong class data points for falling into new bounds
-        for (int point = 0; point < numPoints; point++) {
+        // if we did use both blocks, so we made a new set of bounds, we now have to check the dataset.
+        if (usedOurBlock && usedSeedBlock){
             
-            // get our correct point for our points4 pointer
-            points4Pointer = (float4*)&points[point * numAttributes];
-            someAttributeOutside = 0;
-            // loop through one point and check until we find an attribute that is out of bounds
-            // i steps by one because we are just using float 4's therefore we just run it numAttributes / 4 times. or until we have found an attribute outside.
-            for (int i = 0; i < numAttributes / 4 && !someAttributeOutside; i++) {
-                outMask = 0; 
-                // Load four attributes and their min/max bounds
-                fourAttributes = points4Pointer[i];
-                fourMinFloats = thisBlockCombinedMins4[i];
-                fourMaxFloats = thisBlockCombinedMaxes4[i];
+            // Check all opposing class data points for falling into new bounds
+            unsigned char outMask;                      // one particular comparison value of if our wrong class point is in bounds of four attributes 
+            unsigned char someAttributeOutside = 0;     // sentinel value for each particular point at an iteration.
+            float4 fourAttributes;                      // for the checking attributes. 
 
-                // Bitmask to track out-of-bounds attributes
-                // any of these true is going to result in someAttributeOutside not equaling 0. 
-                outMask |= (fourAttributes.x < fourMinFloats.x) << 0;
-                outMask |= (fourAttributes.x > fourMaxFloats.x) << 1;
-                outMask |= (fourAttributes.y < fourMinFloats.y) << 2;
-                outMask |= (fourAttributes.y > fourMaxFloats.y) << 3;
-                outMask |= (fourAttributes.z < fourMinFloats.z) << 4;
-                outMask |= (fourAttributes.z > fourMaxFloats.z) << 5;
-                outMask |= (fourAttributes.w < fourMinFloats.w) << 6;
-                outMask |= (fourAttributes.w > fourMaxFloats.w) << 7;
+            for (int point = 0; point < numPoints; point++) {
+                
+                // get our correct point for our points4 pointer
+                points4Pointer = (float4*)&points[point * numAttributes];
+                someAttributeOutside = 0;
+                // loop through one point and check until we find an attribute that is out of bounds
+                // i steps by one because we are just using float 4's therefore we just run it numAttributes / 4 times. or until we have found an attribute outside.
+                for (int i = 0; i < numAttributesAsFours && !someAttributeOutside; i++) {
+                    
+                    outMask = 0; 
+                    // Load four attributes and their min/max bounds
+                    fourAttributes = points4Pointer[i];
+                    fourOurMins = thisBlockCombinedMins4[i];
+                    fourOurMaxes = thisBlockCombinedMaxes4[i];
 
-                // if any of those don't give us 0, then we have an attribute that is out of bounds.
-                someAttributeOutside |= outMask;
-            }
+                    // Bitmask to track out-of-bounds attributes
+                    // any of these true is going to result in someAttributeOutside not equaling 0. 
+                    outMask |= (fourAttributes.x < fourOurMins.x) << 0;
+                    outMask |= (fourAttributes.x > fourOurMaxes.x) << 1;
+                    outMask |= (fourAttributes.y < fourOurMins.y) << 2;
+                    outMask |= (fourAttributes.y > fourOurMaxes.y) << 3;
+                    outMask |= (fourAttributes.z < fourOurMins.z) << 4;
+                    outMask |= (fourAttributes.z > fourOurMaxes.z) << 5;
+                    outMask |= (fourAttributes.w < fourOurMins.w) << 6;
+                    outMask |= (fourAttributes.w > fourOurMaxes.w) << 7;
 
-            // If all attributes are within bounds, merging is not possible
-            // so if this is 0, we have passed. if not, we have failed.
-            if (!someAttributeOutside) {
-                allPassed = 0;
-                break;
+                    // if any of those don't give us 0, then we have an attribute that is out of bounds.
+                    someAttributeOutside |= outMask;
+                }
+
+                // If all attributes are within bounds, merging is not possible
+                // so if this is 0, we have passed. if not, we have failed.
+                if (!someAttributeOutside) {
+                    allPassed = 0;
+                    break;
+                }
             }
         }
 
         // if we did pass all the points, that means we can merge, and we can set the updated mins and maxes for this point to be the combined attributes instead.
         if (allPassed){
             // copy the combined mins and maxes into the original array
-            for (int i = 0; i < numAttributes / 4; i++){
+            for (int i = 0; i < numAttributesAsFours; i++){
                 // copy the mins and maxes over
                 hyperBlockMins4[i] = thisBlockCombinedMins4[i];
                 hyperBlockMaxes4[i] = thisBlockCombinedMaxes4[i];
             }
             // set the flag to -1 for seedBlock, meaning he is garbage.
             deleteFlags[seedBlock] = -1;
+
+            // set our own flag that we DID merge.
             mergable[threadID] = 1;
         }
     }

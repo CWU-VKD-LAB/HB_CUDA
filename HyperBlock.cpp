@@ -29,3 +29,30 @@ HyperBlock::HyperBlock(std::vector<std::vector<std::vector<float>>>& hb_data, in
     minimums = mins;
     classNum = cls;
 }
+
+bool HyperBlock::inside_HB(int numAttributes, const float* point){
+    bool inside = true;
+
+    // Go through all attributes
+    for (int i = 0; i < numAttributes; i++)
+    {
+        bool inAnInterval = false;
+
+        // Go through all intervals the hyperblock allows for the attribute
+        for(int j = 0; j < maximums[i].size(); j++){
+            // If the datapoints value falls inside one of the intervals.
+            if (point[i] >= minimums[i][j] && point[i] <= maximums[i][j]) {
+                inAnInterval = true;
+                break;
+            }
+        }
+
+        if (!inAnInterval) {
+            inside = false;
+            break;
+        }
+    }
+
+    // Should return true if the point is inside at least 1 interval for all attributes.
+    return inside;
+}

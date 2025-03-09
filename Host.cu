@@ -296,7 +296,7 @@ void remove_value_from_interval(vector<DataATTR>& data_by_attr, Interval& intr, 
 
 ///////////////////////// END FUNCTIONS FOR INTERVAL_HYPER IMPLEMENTATION /////////////////////////
 
-void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_blocks, int bestAtty){
+void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_blocks, vector<int> bestAttributes){
   	// "Started generating HBS\n" << endl;
     // Hyperblocks generated with this algorithm
     vector<HyperBlock> gen_hb;
@@ -313,101 +313,101 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
 
     // Initially generate blocks
 
-        //cout << "Starting while loop to generate hyperblocks\n";
-		//cout << "data_by_attr[0].size() = " << data_by_attr[0].size() << endl;
+    //cout << "Starting while loop to generate hyperblocks\n";
+    //cout << "data_by_attr[0].size() = " << data_by_attr[0].size() << endl;
 
-        while(data_by_attr[0].size() > 0){
-			//cout << "Attempting to go into interval_hyper " << endl;
+    while(data_by_attr[0].size() > 0){
+        //cout << "Attempting to go into interval_hyper " << endl;
 
-            vector<DataATTR> intv = interval_hyper(data_by_attr, 100, gen_hb);
-            all_intv.push_back(intv);
-			//cout << "Pushed to back of all intervals" << endl;
+        vector<DataATTR> intv = interval_hyper(data_by_attr, 100, gen_hb);
+        all_intv.push_back(intv);
+        //cout << "Pushed to back of all intervals" << endl;
 
-            // if hyperblock is unique then add
-            if(intv.size() > 1){
-                //cout << "making hb and intv_data" << endl;
-                vector<vector<vector<float>>> hb_data;
-                vector<vector<float>> intv_data;
-
-
-                // Add the points from real data that are in the intervals
-                for(DataATTR& dataAttr : intv){
-                    /*cout << "Trying to add a dataATTR. " << endl;
-
-					if(dataAttr.classNum > 1 || dataAttr.classNum < 0){
-                    	cout << "Invalid classNum: " << dataAttr.classNum << endl;
-                        cout << "Value: " << dataAttr.value << endl;
-                        continue;
-                    }
+        // if hyperblock is unique then add
+        if(intv.size() > 1){
+            //cout << "making hb and intv_data" << endl;
+            vector<vector<vector<float>>> hb_data;
+            vector<vector<float>> intv_data;
 
 
-                    if(dataAttr.classIndex > data[dataAttr.classNum].size() - 1 || dataAttr.classIndex < 0){
-                    	cout << "Invalid class index: " << dataAttr.classIndex << endl;
-                        continue;
-                    }
-					*/
-                    intv_data.push_back(data[dataAttr.classNum][dataAttr.classIndex]);
+            // Add the points from real data that are in the intervals
+            for(DataATTR& dataAttr : intv){
+                /*cout << "Trying to add a dataATTR. " << endl;
+
+                if(dataAttr.classNum > 1 || dataAttr.classNum < 0){
+                    cout << "Invalid classNum: " << dataAttr.classNum << endl;
+                    cout << "Value: " << dataAttr.value << endl;
+                    continue;
                 }
 
-                //cout << "Made it past the points from real data thingy" << endl << endl;
-                // add data and hyperblock
-                hb_data.push_back(intv_data);
-                //cout << "Added intv data to hb_data" << endl << endl;
 
-                HyperBlock hb(hb_data, intv[0].classNum);
-                //cout << "Made the hyperblock for this interval thing" << endl << endl;
-
-                gen_hb.push_back(hb);
-                //cout << "Added results from last interval_hyper" << endl << endl;
-            }else{
-                //cout << "Breaking because the intv size is < 1" << endl;
-                break;
-            }
-        }
-
-        // Add all hbs from gen_hb to hyper_blocks
-        hyper_blocks.insert(hyper_blocks.end(), gen_hb.begin(), gen_hb.end());
-
-        // All data: go through each class and add points from data
-        for(const vector<vector<float>>& classData : data){
-            datum.push_back(classData);
-            seed_data.push_back(vector<vector<float>>());
-            skips.push_back(vector<int>());
-        }
-
-        // find which data to skip
-        for(const vector<DataATTR>& dataAttrs : all_intv){
-            for(const DataATTR& dataAttr : dataAttrs){
-                skips[dataAttr.classNum].push_back(dataAttr.classIndex);
-            }
-        }
-        // Sort the skips
-        for(vector<int>& skip : skips){
-            sort(skip.begin(), skip.end());
-        }
-
-        for(int i = 0; i < data.size(); i++){
-            for(int j = 0; j < data[i].size(); j++){
-                if(skips[i].size() > 0){
-                    if(j != skips[i][0]){
-                        seed_data[i].push_back(data[i][j]);
-                    }
-                    else{
-                      	// remove first element from skips[i]
-                        skips[i].erase(skips[i].begin());
-                    }
+                if(dataAttr.classIndex > data[dataAttr.classNum].size() - 1 || dataAttr.classIndex < 0){
+                    cout << "Invalid class index: " << dataAttr.classIndex << endl;
+                    continue;
                 }
-                else{
+                */
+                intv_data.push_back(data[dataAttr.classNum][dataAttr.classIndex]);
+            }
+
+            //cout << "Made it past the points from real data thingy" << endl << endl;
+            // add data and hyperblock
+            hb_data.push_back(intv_data);
+            //cout << "Added intv data to hb_data" << endl << endl;
+
+            HyperBlock hb(hb_data, intv[0].classNum);
+            //cout << "Made the hyperblock for this interval thing" << endl << endl;
+
+            gen_hb.push_back(hb);
+            //cout << "Added results from last interval_hyper" << endl << endl;
+        }else{
+            //cout << "Breaking because the intv size is < 1" << endl;
+            break;
+        }
+    }
+
+    // Add all hbs from gen_hb to hyper_blocks
+    hyper_blocks.insert(hyper_blocks.end(), gen_hb.begin(), gen_hb.end());
+
+    // All data: go through each class and add points from data
+    for(const vector<vector<float>>& classData : data){
+        datum.push_back(classData);
+        seed_data.push_back(vector<vector<float>>());
+        skips.push_back(vector<int>());
+    }
+
+    // find which data to skip
+    for(const vector<DataATTR>& dataAttrs : all_intv){
+        for(const DataATTR& dataAttr : dataAttrs){
+            skips[dataAttr.classNum].push_back(dataAttr.classIndex);
+        }
+    }
+    // Sort the skips
+    for(vector<int>& skip : skips){
+        sort(skip.begin(), skip.end());
+    }
+
+    for(int i = 0; i < data.size(); i++){
+        for(int j = 0; j < data[i].size(); j++){
+            if(skips[i].size() > 0){
+                if(j != skips[i][0]){
                     seed_data[i].push_back(data[i][j]);
                 }
+                else{
+                    // remove first element from skips[i]
+                    skips[i].erase(skips[i].begin());
+                }
+            }
+            else{
+                seed_data[i].push_back(data[i][j]);
             }
         }
+    }
 
-        // Sort data by most important attribute
-        for(int i = 0; i < datum.size(); i++){
-            sortByColumn(datum[i], bestAtty);
-            sortByColumn(seed_data[i], bestAtty);
-        }
+    // Sort data by most important attribute
+    for(int i = 0; i < datum.size(); i++){
+        sortByColumn(datum[i], bestAttributes[i]);
+        sortByColumn(seed_data[i], bestAttributes[i]);
+    }
 
     // Call CUDA function.
     //cout << "Calling merger_cuda\n" << endl;
@@ -1042,16 +1042,38 @@ int main(int argc, char* argv[]) {
 	//print3DVector(data);
     printf("Made it past normalization");
 
-    // make our supervector from LDA
-    vector<float> superVector = computeLDA(data, FIELD_LENGTH);
-
-    int bestAttribute = 0;
-    float bestVal = -69.00;
-    for(int i = 0; i < superVector.size(); i++) {
-        if (superVector[i] > bestVal) {
-            bestAttribute = i;
-            bestVal = superVector[i];
+    // get our best vector for each class. then we make a list of indices for each class so we can sort them. 
+    const vector<vector<float>> &bestVectors = linearDiscriminantAnalysis(data);
+    vector<vector<int>> bestVectorsIndexes(NUM_CLASSES, vector<int>(FIELD_LENGTH, 0));
+    vector<int> eachClassBestVectorIndex(NUM_CLASSES);
+    for (int i = 0; i < NUM_CLASSES; i++) {
+        for (int j = 0; j < FIELD_LENGTH; j++) {
+            bestVectorsIndexes[i][j] = j;
         }
+        // sort this classes attributes smallest to biggest, so that we can get a sense of the order to try and remove attributes in.
+        sort(bestVectorsIndexes[i].begin(), 
+              bestVectorsIndexes[i].end(),
+              [&](int a, int b) {
+                  // sort smallest to biggest
+                  return fabs(bestVectors[i][a]) < fabs(bestVectors[i][b]);
+              });
+        
+        eachClassBestVectorIndex[i] = bestVectorsIndexes[i][0];
+    }
+
+    cout << endl;
+    // sort each class's best vector list, using the indices to keep track of who is who
+    for(const vector<float>&bestVector : bestVectors){
+        //print the vector
+        for(const float f : bestVector){
+            cout << f << " ";
+        }
+        cout << endl;
+    }
+
+    cout << endl;
+    for(int i = 0; i < NUM_CLASSES; i++){
+        cout << "Class " << i << " best vector index: " << eachClassBestVectorIndex[i] << endl;
     }
     cout << "FINISHED LDA BUSINESS!" << endl;
 
@@ -1061,7 +1083,7 @@ int main(int argc, char* argv[]) {
     // generate hyperblocks
     auto start = std::chrono::high_resolution_clock::now();
 
-    generateHBs(data, hyper_blocks, bestAttribute);
+    generateHBs(data, hyper_blocks, eachClassBestVectorIndex);
     auto stop = std::chrono::high_resolution_clock::now();
 
  	auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
@@ -1078,10 +1100,14 @@ int main(int argc, char* argv[]) {
     // now we remove our useless blocks
     cout << "STARTING TO REMOVE USELESS BLOCKS" << endl;
     start = std::chrono::high_resolution_clock::now();
+    
     removeUselessBlocks(data, hyper_blocks);
+    
     stop = std::chrono::high_resolution_clock::now();
     cout << "Finished removing useless blocks" << endl;
+    
     duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+    
     cout << "Time taken: " << duration_ms.count() << " ms" << endl;
     cout << "After removing useless blocks we have " << hyper_blocks.size() << " blocks\n" << endl;
 

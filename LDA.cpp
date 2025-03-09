@@ -1,78 +1,41 @@
 #include <vector>
 #include <unordered_map>
-#include <set>
 #include <iostream>
 #include <numeric>
-#include <algorithm>
 #include <cmath>
-
-// ASSUMPTIONS COMPARED TO JTABVIS VERSION:
-//      - data is already set up and normalized.
-//      - we have the class label stripped off already.
-//      - Data is already grouped by class in input data, the 3D array.
+#include <algorithm>
 
 using namespace std;
 
-vector<vector<float>> allData; // our flattened data all in one big list
-vector<vector<float>> eigenVectors;
-vector<float> eigenValues;
-float threshold = 1e-10;
-int maxIterations = 100;
+// --------------------------------------
+// 1. Some utility functions
+// --------------------------------------
 
-// prepare our data
-void prepareData(const vector<vector<vector<float>>>& inputData, int numAttributes){
-
-    int cols = numAttributes;
-    int rows = 0;
-
-    // Flatten inputData into allData
-    for (auto& classGroup : inputData) {
-        rows += classGroup.size();
-        allData.insert(allData.end(), classGroup.begin(), classGroup.end());
-    }
-
-    vector<float> means(cols, 0.0);
-    // Calculate means using accumulate for each column
-    for (int j = 0; j < cols; j++) {
-        float sum = accumulate(allData.begin(), allData.end(), 0.0f,
-            [j](float acc, const vector<float>& row) {
-                return acc + row[j];
-            });
-        means[j] = sum / float(rows);
-    }
-
-    // center the data
-    for(int j = 0; j < cols; j++) {
-        for (int i = 0; i < rows; i++) {
-            allData[i][j] -= means[j];
-        }
-    }
-}
-
-// lda helpers.
+// Matrix inverse using naive Gauss-Jordan elimination
 vector<vector<float>> inverse(const vector<vector<float>>& matrix) {
     int n = matrix.size();
-    vector<vector<float>> augmented(n, vector<float>(2 * n, 0.0));
+    vector<vector<float>> augmented(n, vector<float>(2 * n, 0.0f));
 
     // Create augmented matrix
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
             augmented[i][j] = matrix[i][j];
         }
-        augmented[i][i + n] = 1.0;  // Identity matrix
+        augmented[i][i + n] = 1.0f;  // identity portion
     }
 
     // Forward elimination
     for (int i = 0; i < n; i++) {
         float pivot = augmented[i][i];
-        if (pivot == 0) {
-            cerr << "Matrix is singular and cannot be inverted.\n";
+        if (fabs(pivot) < 1e-12) {
+            cerr << "Matrix is singular or near-singular.\n";
             exit(EXIT_FAILURE);
         }
+        // Normalize pivot row
         for (int j = 0; j < 2 * n; j++) {
             augmented[i][j] /= pivot;
         }
-
+        // Eliminate down
         for (int k = 0; k < n; k++) {
             if (k != i) {
                 float factor = augmented[k][i];
@@ -83,190 +46,162 @@ vector<vector<float>> inverse(const vector<vector<float>>& matrix) {
         }
     }
 
-    // Extract inverse matrix
-    vector<vector<float>> inverse(n, vector<float>(n, 0.0));
+    // Extract inverse
+    vector<vector<float>> inv(n, vector<float>(n, 0.0f));
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
-            inverse[i][j] = augmented[i][j + n];
+            inv[i][j] = augmented[i][j + n];
         }
     }
-
-    return inverse;
+    return inv;
 }
 
-vector<vector<float>> matrixMultiply(const vector<vector<float>>& a, const vector<vector<float>>& b) {
-    int m = a.size();
-    int n = b[0].size();
-    int p = a[0].size();
-
-    vector<vector<float>> result(m, vector<float>(n, 0.0));
-
-    for (int i = 0; i < m; i++) {
-        for (int j = 0; j < n; j++) {
-            for (int k = 0; k < p; k++) {
-                result[i][j] += a[i][k] * b[k][j];
-            }
+// Simple matrix-vector multiply
+vector<float> matrixVectorMultiply(const vector<vector<float>>& A, const vector<float>& v) {
+    int rows = A.size();
+    int cols = A[0].size();
+    vector<float> result(rows, 0.0f);
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < cols; j++) {
+            result[i] += A[i][j] * v[j];
         }
     }
-
     return result;
 }
 
-// returns our SUPERVECTOR!!!
-// the vector corresponding to the sum of each attribute in our list of eigenvectors.
-// has very little real mathematical meaning, but allows us to have a way of sorting attributes which would suggest who is doing the most work in our dataset.
-// the eigenvectors themselves point to the directions which give us greatest class separation, therefore, adding up all the attributes across vectors can kind of tell us
-// which guys are actually working around here.
-vector<float> computeLDA(const vector<vector<vector<float>>>& inputData, int fieldLength) {
+// --------------------------------------
+// 2. Core two-class LDA function
+// --------------------------------------
+/**
+ * Computes a single LDA vector w that separates two classes:
+ *   classA vs. classB
+ * Returns a vector of dimension [numFeatures].
+ */
+vector<float> computeBinaryLDA(const vector<vector<float>>& classA,
+                                const vector<vector<float>>& classB)
+{
 
-    prepareData(inputData, fieldLength);
+    int numFeatures = classA[0].size();
 
-    int numClasses = inputData.size();
-    int numFeatures = allData[0].size();
-    int numSamples = allData.size();
-
-    // Initialize within-class scatter matrix Sw and between-class scatter matrix Sb
-    vector<vector<float>> Sw(numFeatures, vector<float>(numFeatures, 0.0f));
-
-    // Compute class means and within-class scatter matrix Sw
-    unordered_map<int, vector<float>> classMeans;
-    for (int classId = 0; classId < numClasses; classId++) {
-        const auto& classPoints = inputData[classId];
-
-        vector<float> classMean(numFeatures, 0.0f);
-
-        // Compute class mean
-        for (const auto& point : classPoints) {
-            for (int j = 0; j < numFeatures; j++) {
-                classMean[j] += point[j];
-            }
-        }
+    // 1. Compute mean vectors of class A and class B
+    vector<float> meanA(numFeatures, 0.0f);
+    for (auto& row : classA) {
         for (int j = 0; j < numFeatures; j++) {
-            classMean[j] /= classPoints.size();
-        }
-        classMeans[classId] = classMean;
-
-        // Compute within-class scatter matrix Sw
-        for (const auto& point : classPoints) {
-            for (int j = 0; j < numFeatures; j++) {
-                for (int k = 0; k < numFeatures; k++) {
-                    Sw[j][k] += (point[j] - classMean[j]) * (point[k] - classMean[k]);
-                }
-            }
-        }
-    }
-
-    // Compute global mean
-    vector<float> globalMean(numFeatures, 0.0f);
-    for (const auto& row : allData) {
-        for (int j = 0; j < numFeatures; j++) {
-            globalMean[j] += row[j];
+            meanA[j] += row[j];
         }
     }
     for (int j = 0; j < numFeatures; j++) {
-        globalMean[j] /= numSamples;
+        meanA[j] /= (float)classA.size();
     }
 
-    // Compute between-class scatter matrix Sb
-    vector<vector<float>> Sb(numFeatures, vector<float>(numFeatures, 0.0f));
-    for (int classId = 0; classId < numClasses; classId++){
-
-        // grab each class one by one
-        const auto& classPoints = inputData[classId];
-        const auto& classMean = classMeans[classId];
-
+    vector<float> meanB(numFeatures, 0.0f);
+    for (auto& row : classB) {
         for (int j = 0; j < numFeatures; j++) {
-            for (int k = 0; k < numFeatures; k++) {
-                Sb[j][k] += classPoints.size() * (classMean[j] - globalMean[j]) * (classMean[k] - globalMean[k]);
-            }
+            meanB[j] += row[j];
         }
     }
+    for (int j = 0; j < numFeatures; j++) {
+        meanB[j] /= (float)classB.size();
+    }
 
-    // Solve generalized eigenvalue problem: Sb * v = λ * Sw * v
-    // We use Sw^-1 * Sb to approximate the solution (inverse computation not included here)
-
-    // Placeholder for solving the eigenvalue problem
-    vector<vector<float>> SwInvSb = matrixMultiply(inverse(Sw),Sb);
-
-    // Eigen decomposition using power iteration (simplified)
-    int maxComponents = min(numClasses - 1, numFeatures);
-    vector<vector<float>> eigenvectors(numFeatures, vector<float>(maxComponents, 0.0f));
-    vector<float> eigenvalues(maxComponents, 0.0f);
-
-    for (int i = 0; i < maxComponents; i++) {
-        vector<float> v(numFeatures, 0.0f);
-        v[i] = 1.0f;
-
-        for (int iter = 0; iter < maxIterations; iter++) { // Assume maxIterations = 100
-            vector<float> newVector(numFeatures, 0.0f); // = MATRIXX VECTOR MULTIPLY HERE <<<---------------------                 double[] newVector = matrixVectorMultiply(SwInvSb, vector);
-
-            for (int j = 0; j < numFeatures; j++) {
-                for (int k = 0; k < numFeatures; k++) {
-
-                    // v = vector in java code.
-                    // make sure that we are doing that normalizing step properly.
-                    // make sure that we are checking convergence the right way.
-                    newVector[j] += SwInvSb[j][k] * v[k];
+    // 2. Compute within-class scatter Sw = S_A + S_B
+    vector<vector<float>> Sw(numFeatures, vector<float>(numFeatures, 0.0f));
+    auto addScatter = [&](const vector<vector<float>>& data, const vector<float>& mean) {
+        for (auto& x : data) {
+            for (int i = 0; i < numFeatures; i++) {
+                for (int j = 0; j < numFeatures; j++) {
+                    Sw[i][j] += (x[i] - mean[i]) * (x[j] - mean[j]);
                 }
             }
-
-            // Normalize
-            float norm = sqrt(inner_product(newVector.begin(), newVector.end(), newVector.begin(), 0.0f));
-            if (norm > 0) {
-                transform(newVector.begin(), newVector.end(), newVector.begin(), [norm](float val) { return val / norm; });
-            }
-
-            if (equal(v.begin(), v.end(), newVector.begin(), [](float a, float b) { return fabs(a - b) < threshold; })) {
-                break;
-            }
-            v = newVector;
         }
+    };
 
-        // Store eigenvector
-        for (int j = 0; j < numFeatures; j++) {
-            eigenvectors[j][i] = v[j];
-        }
+    addScatter(classA, meanA);
+    addScatter(classB, meanB);
 
-        // Compute eigenvalue
-        // make sure this is equivalent to the matrixvector multiply.
-        // make sure we also get the dot product correct at the bottom.
-        vector<float> Av(numFeatures, 0.0f);
-        for (int j = 0; j < numFeatures; j++) {
-            for (int k = 0; k < numFeatures; k++) {
-                Av[j] += SwInvSb[j][k] * v[k];
-            }
-        }
-        // check this as compared to dot product.
-        eigenvalues[i] = inner_product(v.begin(), v.end(), Av.begin(), 0.0f);
+    // 3. Compute w = Sw^-1 * (meanB - meanA)
+    vector<vector<float>> SwInv = inverse(Sw);
 
-        // Deflate matrix
-        for (int j = 0; j < numFeatures; j++) {
-            for (int k = 0; k < numFeatures; k++) {
-                SwInvSb[j][k] -= eigenvalues[i] * v[j] * v[k];
-            }
-        }
-    }
-    // Output for verification (can be removed)
-    cout << "Computed " << maxComponents << " eigenvectors for LDA." << endl;
-
-    // print all our eigenvectors.
-    for (const auto& eigenvector : eigenvectors) {
-        for (float i : eigenvector) {
-            cout << i << "\t";
-        }
-        cout << endl;
+    // meanDiff = (meanB - meanA)
+    vector<float> meanDiff(numFeatures, 0.0f);
+    for (int j = 0; j < numFeatures; j++) {
+        meanDiff[j] = meanB[j] - meanA[j];
     }
 
-    cout << "FINAL COMBINED SUPER EIGENVECTOR" << endl;
-    vector<float> superVector(numFeatures, 0.0f);
-    for (int i = 0; i < eigenvectors.size(); i++) {
-        for (int j = 0; j < maxComponents; j++) {
-            // add the value squared of this particular feature in this particular eigenvector. this gives us a sense of who is doing the heavy lifting
-            // to seperate the classes in each eigenvector. not perfect, but a way of determining which attributes aren't doing anything. which is what we care about.
-            superVector[i] += eigenvectors[i][j] * eigenvectors[i][j];
-        }
-        cout << "SUPERVECTOR ATTRIBUTE " << i << " " << superVector[i] << endl;
+    // Multiply: w = SwInv * meanDiff
+    vector<float> w = matrixVectorMultiply(SwInv, meanDiff);
+
+    // 4. Normalize w
+    float normVal = 0.0f;
+    for (float val : w) {
+        normVal += val * val;
     }
-    cout << endl;
-    return superVector;
+    normVal = sqrt(normVal);
+    if (normVal > 1e-12) {
+        for (float &val : w) {
+            val /= normVal;
+        }
+    }
+
+    return w;
 }
+
+// --------------------------------------
+// 3. “One-vs-Rest” LDA for multi-class
+// --------------------------------------
+/**
+ * Given inputData where inputData[i] = all samples of class i,
+ * run a 2-class LDA for each class i vs. all other classes combined.
+ *
+ * Returns a vector of LDA vectors, one per class.
+ */
+
+vector<vector<float>> linearDiscriminantAnalysis(const vector<vector<vector<float>>>& inputData) {
+    int numClasses = inputData.size();
+    vector<vector<float>> ldaVectors(numClasses); // one discriminant vector per class
+
+    // For each class i, gather its samples in classA
+    // and gather all other samples in classB
+    for (int i = 0; i < numClasses; i++) {
+        // classA = the samples of class i
+        const auto& classA = inputData[i];
+
+        // classB = union of samples of all other classes
+        vector<vector<float>> classB;
+        // put in all our classes that are not classA.
+        for (int j = 0; j < numClasses; j++) {
+            if (j == i) continue; // skip class i
+            classB.insert(classB.end(), inputData[j].begin(), inputData[j].end());
+        }
+
+        // Compute the 2-class LDA vector for i vs rest
+        vector<float> w = computeBinaryLDA(classA, classB);
+
+        // store our vector which best separates the class.
+        ldaVectors[i] = w;
+    }
+    
+    // Normalize each resulting vector between 0 and 1, then apply arccos to each value,
+    // and convert the result from radians to degrees.
+    for (auto &vec : ldaVectors) {
+        // Find min and max of the vector.
+        float minVal = *std::min_element(vec.begin(), vec.end());
+        float maxVal = *std::max_element(vec.begin(), vec.end());
+        
+        // Prevent division by zero if all values are identical.
+        float range = (maxVal - minVal);
+        if (range < 1e-12) {
+            range = 1;  // Alternatively, you could set all normalized values to 0.5.
+        }
+        
+        // Normalize each element to [0, 1], apply arccos, and then convert to degrees.
+        for (float &val : vec) {
+            float normalized = (val - minVal) / range;
+            // Apply arccos (result is in radians) and convert to degrees.
+            val = std::acos(normalized) * (180.0f / M_PI);
+        }
+    }
+
+    return ldaVectors;
+}
+

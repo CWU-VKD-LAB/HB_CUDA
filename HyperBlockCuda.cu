@@ -390,6 +390,107 @@ __global__ void findBetterBlocks(const float *dataPointsArray, const int numAttr
     }
 }
 
+// -------------------------------------------------------------------
+// Removing useless attributes functions
+/*
+ *
+ *
+ *
+ */
+__global__ void removeUselessAttributes(float* mins, float* maxes, const int* intervalCounts, const int minMaxLen, const int* blockEdges, const int numBlocks, const int* blockClasses, char* attrRemoveFlags, const int fieldLen, const float* dataset, const int numPoints, const int* classBorder, const int numClasses, const int *attributeOrder) {
+
+    int threadID = blockIdx.x * blockDim.x + threadIdx.x;
+    if(threadID >= numBlocks) return;
+
+    // Get block-specific data
+    float* blockMins = &mins[blockEdges[threadID]];
+    float* blockMaxes = &maxes[blockEdges[threadID]];
+    const int* blockIntervalCounts = &intervalCounts[threadID * fieldLen];
+    int classNum = blockClasses[threadID];
+
+    // Class boundaries
+    const int startClass = classBorder[classNum] * fieldLen;
+    const int endClass = classBorder[classNum+1] * fieldLen;
+
+    // Try removing each attribute
+    for(int removedIndex = 0; removedIndex < fieldLen; removedIndex++) {
+        // we are using the attribute order with different orderings per class. therefore, we must offset into our own class.
+        int removed = attributeOrder[fieldLen * classNum + removedIndex];
+
+        // Calculate offset to the start of this attribute's intervals
+        int checkOffset = 0;
+        for(int i = 0; i < removed; i++) {
+            checkOffset += blockIntervalCounts[i];
+        }
+
+        // Skip if this attribute is already marked as removed (checking first interval)
+        if(blockMins[checkOffset] == 0.0 && blockMaxes[checkOffset] == 1.0) {
+            continue;
+        }
+
+        bool someOneInBounds = false;
+        // Check all points from other classes
+        for(int j = 0; j < numPoints * fieldLen; j += fieldLen) {
+            if(j < endClass && j >= startClass) continue;
+
+            bool pointInside = true;
+            int totalOffset = 0;
+
+            // Check each attribute
+            for(int attr = 0; attr < fieldLen; attr++) {
+                if(attr == removed) {
+                    totalOffset += blockIntervalCounts[attr];
+                    continue;
+                }
+
+                const float attrValue = dataset[j + attr];
+                bool inAnInterval = false;
+
+                for(int intv = 0; intv < blockIntervalCounts[attr]; intv++) {
+                    float min = blockMins[totalOffset + intv];
+                    float max = blockMaxes[totalOffset + intv];
+
+                    if(attrValue <= max && attrValue >= min) {
+                        inAnInterval = true;
+                        break;
+                    }
+                }
+
+                if(!inAnInterval) {
+                    pointInside = false;
+                    break;
+                }
+
+                totalOffset += blockIntervalCounts[attr];
+            }
+
+            if(pointInside) {
+                someOneInBounds = true;
+                break;
+            }
+        }
+
+        // If no points from other classes fall in, we can remove this attribute
+        if(!someOneInBounds) {
+            int removeOffset = 0;
+            for(int i = 0; i < removed; i++) {
+                removeOffset += blockIntervalCounts[i];
+            }
+
+            // Reset intervals for removed attribute to [0,1]
+            for(int i = 0; i < blockIntervalCounts[removed]; i++) {
+                blockMins[removeOffset + i] = 0.0;
+                blockMaxes[removeOffset + i] = 1.0;
+            }
+
+            // Mark attribute as removed
+            attrRemoveFlags[fieldLen * threadID + removed] = 1;
+        }
+    }
+}
+
+
+
 void mergerHyperBlocksWrapper(const int seedIndex, int *readSeedQueue, const int numBlocks, const int numAttributes, const int numPoints, const float *opposingPoints,float *hyperBlockMins, float *hyperBlockMaxes, int *deleteFlags, int *mergable, int gridSize, int blockSize, int sharedMemSize, float* combinedMins, float* combinedMaxes){
 	mergerHyperBlocks<<<gridSize, blockSize, sharedMemSize>>>(
             seedIndex,
@@ -429,3 +530,10 @@ void findBetterBlocksWrapper(const float *dataPointsArray, const int numAttribut
     findBetterBlocks<<<gridSize, blockSize>>>(dataPointsArray, numAttributes, numPoints, blockMins, blockMaxes, blockEdges, numBlocks, dataPointBlocks, numPointsInBlocks);
 }
 
+/*
+ * Wrapper functions for the removing useless attributes.
+ * */
+
+void removeUselessAttributesWrapper(float* mins, float* maxes, const int* intervalCounts, const int minMaxLen, const int* blockEdges, const int numBlocks, const int* blockClasses, char* attrRemoveFlags, const int fieldLen, const float* dataset, const int numPoints, const int* classBorder, const int numClasses, const int *attributeOrder, int gridSize, int blockSize){
+   removeUselessAttributes<<<gridSize, blockSize>>>(mins, maxes, intervalCounts, minMaxLen, blockEdges, numBlocks, blockClasses, attrRemoveFlags, fieldLen, dataset, numPoints, classBorder, numClasses, attributeOrder);
+}

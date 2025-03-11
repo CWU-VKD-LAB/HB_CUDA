@@ -567,8 +567,8 @@ void minMaxNormalization(vector<vector<vector<float>>>& dataset) {
     int num_classes = dataset.size();
 
     // Min and max values for each attribute
-    vector<float> min_vals(FIELD_LENGTH, std::numeric_limits<float>::infinity());
-    vector<float> max_vals(FIELD_LENGTH, -std::numeric_limits<float>::infinity());
+    vector<float> min_vals(FIELD_LENGTH, numeric_limits<float>::infinity());
+    vector<float> max_vals(FIELD_LENGTH, -numeric_limits<float>::infinity());
 
     // Step 1: Find min and max for each attribute
     for (const auto& class_data : dataset) {
@@ -654,7 +654,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
     /* MULTI GPU BUSINESS
     int deviceCount;
     cudaGetDeviceCount(&deviceCount);
-    deviceCount = std::min(deviceCount, NUM_CLASSES);
+    deviceCount = min(deviceCount, NUM_CLASSES);
 
 
     // Process each class
@@ -713,8 +713,8 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
                         currentClassIndex++;
                     }
                     for (int leftOverAtt = FIELD_LENGTH; leftOverAtt < PADDED_LENGTH; leftOverAtt++) {
-                        hyperBlockMinsC[currentClassIndex] = -std::numeric_limits<float>::infinity();
-                        hyperBlockMaxesC[currentClassIndex] = std::numeric_limits<float>::infinity();
+                        hyperBlockMinsC[currentClassIndex] = -numeric_limits<float>::infinity();
+                        hyperBlockMaxesC[currentClassIndex] = numeric_limits<float>::infinity();
                         currentClassIndex++;
                     }
                 }
@@ -731,7 +731,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
                     pointsC[otherClassIndex++] = point[attr];
                 }
                 for (int leftOverAtt = FIELD_LENGTH; leftOverAtt < PADDED_LENGTH; leftOverAtt++) {
-                    pointsC[otherClassIndex++] = -std::numeric_limits<float>::infinity();
+                    pointsC[otherClassIndex++] = -numeric_limits<float>::infinity();
                 }
             }
         }
@@ -746,8 +746,8 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
                     currentClassIndex++;
                 }
                 for (int leftOverAtt = FIELD_LENGTH; leftOverAtt < PADDED_LENGTH; leftOverAtt++) {
-                    hyperBlockMinsC[currentClassIndex] = -std::numeric_limits<float>::infinity();
-                    hyperBlockMaxesC[currentClassIndex] = std::numeric_limits<float>::infinity();
+                    hyperBlockMinsC[currentClassIndex] = -numeric_limits<float>::infinity();
+                    hyperBlockMaxesC[currentClassIndex] = numeric_limits<float>::infinity();
                     currentClassIndex++;
                 }
             }
@@ -1021,6 +1021,173 @@ void removeUselessBlocks(vector<vector<vector<float>>> &data, vector<HyperBlock>
     }
 }
 
+// our function to flatten our list of HBs without encoding lengths in. this is what we use for removing attirbutes
+vector<vector<float>> flatMinMaxNoEncode(vector<HyperBlock> hyper_blocks) {
+
+    int size = hyper_blocks.size();
+    vector<float> flatMinsList;
+    vector<float> flatMaxesList;
+    vector<float> blockEdges(size + 1, 0.0f);
+    vector<float> blockClasses(size, 0.0f);
+    vector<float> intervalCounts(size * FIELD_LENGTH, 0.0f);
+
+    // First block starts at 0.
+    blockEdges[0] = 0.0f;
+    int idx = 0;
+
+    // Process each hyper block
+    for (size_t hb = 0; hb < size; hb++) {
+        HyperBlock& block = hyper_blocks[hb];
+        // cast the classNum as a float so that we can put it in the vector of floats we are returning
+        blockClasses[hb] = static_cast<float>(block.classNum);
+        int length = 0;
+
+        // Iterate through each attribute in the block
+        for (size_t m = 0; m < block.minimums.size(); m++) {
+            // Number of possible MIN/MAX values for the attribute
+            size_t numIntervals = block.minimums[m].size();
+            length += static_cast<int>(numIntervals);
+
+            // Record the count of intervals for the current attribute
+            intervalCounts[idx] = static_cast<float>(numIntervals);
+            idx++;
+
+            // Add all intervals for the current attribute.
+            for (size_t i = 0; i < numIntervals; i++) {
+                flatMinsList.push_back(block.minimums[m][i]);
+                flatMaxesList.push_back(block.maximums[m][i]);
+            }
+        }
+        // Mark the end of the block by accumulating the length.
+        blockEdges[hb + 1] = blockEdges[hb] + length;
+    }
+
+    // Return the five arrays in a vector (order matches the original Java return)
+    return { flatMinsList, flatMaxesList, blockEdges, blockClasses, intervalCounts };
+}
+
+void removeUselessAttributesCUDA(vector<HyperBlock> &hyper_blocks, vector<vector<vector<float>>> & data, vector<vector<int>> &attributeOrderings) {
+    // Prepare host data by flattening your data structures.
+    auto fMinMaxResult = flatMinMaxNoEncode(hyper_blocks);
+    auto fDataResult = flattenDataset(data);
+
+    // Build host arrays from the flattened results:
+    vector<float> mins = fMinMaxResult[0];
+    vector<float> maxes = fMinMaxResult[1];
+    int minMaxLen = static_cast<int>(mins.size());
+
+    vector<int> blockEdges(fMinMaxResult[2].size());
+    for (size_t i = 0; i < fMinMaxResult[2].size(); i++) {
+        blockEdges[i] = static_cast<int>(fMinMaxResult[2][i]);
+    }
+    int numBlocks = static_cast<int>(hyper_blocks.size());
+
+    vector<int> blockClasses(fMinMaxResult[3].size());
+    for (size_t i = 0; i < fMinMaxResult[3].size(); i++) {
+        blockClasses[i] = static_cast<int>(fMinMaxResult[3][i]);
+    }
+
+    vector<int> intervalCounts(fMinMaxResult[4].size());
+    for (size_t i = 0; i < fMinMaxResult[4].size(); i++) {
+        intervalCounts[i] = static_cast<int>(fMinMaxResult[4][i]);
+    }
+
+    // Create flags array (initialize to 0).
+    vector<char> attrRemoveFlags(hyper_blocks.size() * FIELD_LENGTH, 0);
+
+    // Prepare the dataset.
+    vector<float> dataset = fDataResult[0];
+    int numPoints = static_cast<int>(dataset.size() / FIELD_LENGTH);
+
+    vector<int> classBorder(fDataResult[1].size());
+    for (size_t i = 0; i < fDataResult[1].size(); i++) {
+        classBorder[i] = static_cast<int>(fDataResult[1][i]);
+    }
+    int numClasses = static_cast<int>(hyper_blocks.size());
+
+    vector<int> attributeOrderingsFlattened(attributeOrderings.size() * FIELD_LENGTH, 0);
+    for (int i = 0; i < attributeOrderings.size(); i++) {
+        copy(attributeOrderings[i].begin(), attributeOrderings[i].end(),
+            attributeOrderingsFlattened.begin() + i * FIELD_LENGTH);
+    }
+
+    // Device pointers.
+    float* d_mins = nullptr;
+    float* d_maxes = nullptr;
+    int* d_intervalCounts = nullptr;
+    int* d_blockEdges = nullptr;
+    int* d_blockClasses = nullptr;
+    char* d_attrRemoveFlags = nullptr;
+    float* d_dataset = nullptr;
+    int* d_classBorder = nullptr;
+    int *d_attributeOrderingsFlattened = nullptr;
+
+    // Allocate device memory.
+    cudaMalloc((void**)&d_mins, mins.size() * sizeof(float));
+    cudaMalloc((void**)&d_maxes, maxes.size() * sizeof(float));
+    cudaMalloc((void**)&d_intervalCounts, intervalCounts.size() * sizeof(int));
+    cudaMalloc((void**)&d_blockEdges, blockEdges.size() * sizeof(int));
+    cudaMalloc((void**)&d_blockClasses, blockClasses.size() * sizeof(int));
+    cudaMalloc((void**)&d_attrRemoveFlags, attrRemoveFlags.size() * sizeof(char));
+    cudaMalloc((void**)&d_dataset, dataset.size() * sizeof(float));
+    cudaMalloc((void**)&d_classBorder, classBorder.size() * sizeof(int));
+    cudaMalloc((void**)&d_attributeOrderingsFlattened, attributeOrderingsFlattened.size() * sizeof(int));
+
+    // Copy host data to device.
+    cudaMemcpy(d_mins, mins.data(), mins.size() * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_maxes, maxes.data(), maxes.size() * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_intervalCounts, intervalCounts.data(), intervalCounts.size() * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_blockEdges, blockEdges.data(), blockEdges.size() * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_blockClasses, blockClasses.data(), blockClasses.size() * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_attrRemoveFlags, attrRemoveFlags.data(), attrRemoveFlags.size() * sizeof(char), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_dataset, dataset.data(), dataset.size() * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_classBorder, classBorder.data(), classBorder.size() * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_attributeOrderingsFlattened, attributeOrderingsFlattened.data(), attributeOrderingsFlattened.size() * sizeof(int), cudaMemcpyHostToDevice);
+
+    // Determine execution configuration.
+    int blockSize;
+    int gridSize;
+
+    cudaError_t err = cudaOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, mergerHyperBlocks, 0, 0);
+    gridSize = (numBlocks + blockSize - 1) / blockSize;
+
+    // Launch the kernel.
+    removeUselessAttributesWrapper(d_mins, d_maxes, d_intervalCounts, minMaxLen, d_blockEdges, numBlocks, d_blockClasses, d_attrRemoveFlags, FIELD_LENGTH, d_dataset, numPoints, d_classBorder, numClasses, d_attributeOrderingsFlattened, gridSize, blockSize);
+    cudaDeviceSynchronize();
+
+    // Copy results from device (flags) back to host.
+    cudaMemcpy(attrRemoveFlags.data(), d_attrRemoveFlags, attrRemoveFlags.size() * sizeof(char), cudaMemcpyDeviceToHost);
+
+    // Free device memory.
+    cudaFree(d_mins);
+    cudaFree(d_maxes);
+    cudaFree(d_intervalCounts);
+    cudaFree(d_blockEdges);
+    cudaFree(d_blockClasses);
+    cudaFree(d_attrRemoveFlags);
+    cudaFree(d_dataset);
+    cudaFree(d_classBorder);
+    cudaFree(d_attributeOrderingsFlattened);
+
+    // Update the hyper_blocks based on the flags.
+    for (size_t hb = 0; hb < hyper_blocks.size(); hb++) {
+        HyperBlock &block = hyper_blocks[hb];
+        // For each attribute in the block (assumes FIELD_LENGTH attributes per block)
+        for (int attr = 0; attr < FIELD_LENGTH; attr++) {
+            int index = hb * FIELD_LENGTH + attr;
+            if (attrRemoveFlags[index] == 1) {
+                // Remove the attribute intervals and reset to default values.
+                if (attr < block.minimums.size() && attr < block.maximums.size()) {
+                    block.minimums[attr].clear();
+                    block.maximums[attr].clear();
+                    block.minimums[attr].push_back(0.0f);
+                    block.maximums[attr].push_back(1.0f);
+                }
+            }
+        }
+    }
+}
+
 // WE WILL ASSUME WE DONT HAVE A ID COLUMN.
 // WE WILL ASSSUME THE LAST COLUMN IS A CLASS COLUMN
 int main(int argc, char* argv[]) {
@@ -1033,14 +1200,8 @@ int main(int argc, char* argv[]) {
     cout << "NUM ATTRIBUTES : " << FIELD_LENGTH << endl;
     cout << "NUM CLASSES    : " << NUM_CLASSES << endl;
 
-    cout << "Number elements in class 0: " << data[0].size() << endl;
-    cout << "Number elements in class 1: " << data[1].size() << endl;
- 	// normalize the data
-
-
     minMaxNormalization(data);
 	//print3DVector(data);
-    printf("Made it past normalization");
 
     // get our best vector for each class. then we make a list of indices for each class so we can sort them. 
     const vector<vector<float>> &bestVectors = linearDiscriminantAnalysis(data);
@@ -1061,37 +1222,21 @@ int main(int argc, char* argv[]) {
         eachClassBestVectorIndex[i] = bestVectorsIndexes[i][0];
     }
 
-    cout << endl;
-    // sort each class's best vector list, using the indices to keep track of who is who
-    for(const vector<float>&bestVector : bestVectors){
-        //print the vector
-        for(const float f : bestVector){
-            cout << f << " ";
-        }
-        cout << endl;
-    }
-
-    cout << endl;
-    for(int i = 0; i < NUM_CLASSES; i++){
-        cout << "Class " << i << " best vector index: " << eachClassBestVectorIndex[i] << endl;
-    }
-    cout << "FINISHED LDA BUSINESS!" << endl;
-
     // Make the hyperblocks list to store the hyperblocks that are generated.
 	vector<HyperBlock> hyper_blocks;
 
     // generate hyperblocks
-    auto start = std::chrono::high_resolution_clock::now();
+    auto start = chrono::high_resolution_clock::now();
 
     generateHBs(data, hyper_blocks, eachClassBestVectorIndex);
-    auto stop = std::chrono::high_resolution_clock::now();
+    auto stop = chrono::high_resolution_clock::now();
 
- 	auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
-    std::cout << "Time taken: " << duration_ms.count() << " ms\n";
+ 	auto duration_ms = chrono::duration_cast<chrono::milliseconds>(stop - start);
+    cout << "Time taken: " << duration_ms.count() << " ms\n";
 
     // Calculate duration in seconds
-    auto duration_sec = std::chrono::duration_cast<std::chrono::seconds>(stop - start);
-    std::cout << "Time taken: " << duration_sec.count() << " s\n";
+    auto duration_sec = chrono::duration_cast<chrono::seconds>(stop - start);
+    cout << "Time taken: " << duration_sec.count() << " s\n";
 	cout << "HyperBlocks : " << hyper_blocks.size() << endl;
 
     cout << "Finished generating HBS\n" << endl;
@@ -1099,17 +1244,38 @@ int main(int argc, char* argv[]) {
 
     // now we remove our useless blocks
     cout << "STARTING TO REMOVE USELESS BLOCKS" << endl;
-    start = std::chrono::high_resolution_clock::now();
-    
+    start = chrono::high_resolution_clock::now();
+
+
+    removeUselessAttributesCUDA(hyper_blocks, data, bestVectorsIndexes);
+
     removeUselessBlocks(data, hyper_blocks);
     
-    stop = std::chrono::high_resolution_clock::now();
+    stop = chrono::high_resolution_clock::now();
     cout << "Finished removing useless blocks" << endl;
     
-    duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+    duration_ms = chrono::duration_cast<chrono::milliseconds>(stop - start);
     
     cout << "Time taken: " << duration_ms.count() << " ms" << endl;
     cout << "After removing useless blocks we have " << hyper_blocks.size() << " blocks\n" << endl;
+
+    int totalClauses = 0;
+    for(HyperBlock &hyperBlock : hyper_blocks) {
+        for(int i = 0; i < FIELD_LENGTH; i++){
+            if (hyperBlock.minimums[i][0] == 0 && hyperBlock.maximums[i][0] == 1.0f){
+                continue;
+            }
+            else
+              totalClauses += hyperBlock.minimums[i].size();
+        }
+    }
+    int totalPoints = 0;
+    for(vector<vector<float>> & c : data){
+        totalPoints += c.size();
+    }
+
+    cout << "After removing useless blocks and attributes we have: " << totalClauses << " clauses" << endl;
+    cout << "We had: " << totalPoints << " points" << endl;
 
     // now we remove our useless attributes
     saveBasicHBsToCSV(hyper_blocks, "testForDVinCPP.csv");

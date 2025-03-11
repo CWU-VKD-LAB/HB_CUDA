@@ -632,7 +632,24 @@ void findMinMaxValuesInDataset(const vector<vector<vector<float>>>& dataset, vec
 * A function to normalize the test set using the given mins/maxes that were used to normalize the initial set
 */
 void normalizeTestSet(vector<vector<vector<float>>>& testSet, const vector<float>& minValues, const vector<float>& maxValues) {
-    if (testSet.empty()) return;
+    if (testSet.empty()){
+      cout << "Test set was empty when trying to normalize" << endl;
+      return;
+	}
+
+    // Print out the min and max values first 20
+    for (int i = 0; i < 30; i++) {
+      cout << minValues[i] << endl;
+    }
+    cout << endl;
+
+    cout << "Maxes" << endl;
+
+
+    for (int i = 0; i < 30; i++) {
+      cout << maxValues[i] << ",";
+    }
+    cout << endl;
 
     for (auto& class_data : testSet) {
         for (auto& point : class_data) {
@@ -647,7 +664,7 @@ void normalizeTestSet(vector<vector<vector<float>>>& testSet, const vector<float
     }
 }
 
-void minMaxNormalization(vector<vector<vector<float>>>& dataset) {
+void minMaxNormalization(vector<vector<vector<float>>>& dataset, const vector<float>& minValues, const vector<float>& maxValues) {
     //cout << "Starting min-max normalization\n" << endl;
 
     if (dataset.empty()) return;
@@ -655,11 +672,11 @@ void minMaxNormalization(vector<vector<vector<float>>>& dataset) {
     int num_classes = dataset.size();
 
     // Min and max values for each attribute
-    vector<float> minValues(FIELD_LENGTH, std::numeric_limits<float>::infinity());
-    vector<float> maxValues(FIELD_LENGTH, -std::numeric_limits<float>::infinity());
+    //vector<float> minValues(FIELD_LENGTH, std::numeric_limits<float>::infinity());
+    //vector<float> maxValues(FIELD_LENGTH, -std::numeric_limits<float>::infinity());
 
     // Step 1: Find min and max for each attribute
-	findMinMaxValuesInDataset(dataset, minValues, maxValues);
+	//findMinMaxValuesInDataset(dataset, minValues, maxValues);
 
     // Step 2: Apply Min-Max normalization
     for (auto& class_data : dataset) {
@@ -987,10 +1004,19 @@ void saveNormalizedVersionToCsv(string fileName, vector<vector<vector<float>>>& 
 * Keep track of overall accuracy of a block, along with somehow tag points in a way that we can keep track
 * of how many total points were misclassified and where.
 */
-vector<vector<int>> testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, vector<vector<vector<float>>> testSet){
+vector<vector<long>> testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, vector<vector<vector<float>>> testSet){
 
 	// Make a n x n matrix for the confusion matrix
-	vector<vector<int>> ultraConfusionMatrix(NUM_CLASSES, vector<int>(NUM_CLASSES, 0));
+	vector<vector<long>> ultraConfusionMatrix(NUM_CLASSES, vector<long>(NUM_CLASSES, 0));
+
+    cout << "Testing on " << hyperBlocks.size() << " hyperblocks" << endl;
+    cout << "Testing on " << testSet.size() << " classes" << endl;
+    cout << "Testing on " << testSet[0].size() << " points in first class." << endl;
+    cout << "Testing on " << NUM_CLASSES << " classes" << endl;
+    cout << "Testing on " << FIELD_LENGTH << " attributes" << endl;
+
+
+    bool anyPointWasInside = false;
 
     // Go through all the blocks
 	for(int hb = 0; hb < hyperBlocks.size(); hb++){
@@ -1002,29 +1028,23 @@ vector<vector<int>> testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, v
            		const vector<float>& point = testSet[cls][pnt];
 
                 if(currBlock.inside_HB(point.size(), point.data())){
+                    cout << "classNum" << currBlock.classNum << endl;
 					ultraConfusionMatrix[cls][currBlock.classNum]++;
+                    anyPointWasInside = true;
                 }
                 else{
                 	// don't know what to put here because it might not have a good
-
                 }
         	}
      	}
     }
 
-
+	cout << "Any point was inside" << anyPointWasInside <<  endl;
     return ultraConfusionMatrix;
 }
 
 
-
-
-
-
-
-
-void print2DMatrix(vector<vector<int>>& data){
-  cout << "Printing a 2D Matrix for you" << endl;
+void print2DMatrix(vector<vector<long>>& data){
   for(int i = 0; i < data.size(); i++){
     for(int j = 0; j < data[i].size(); j++){
       cout << data[i][j] << ",";
@@ -1052,64 +1072,56 @@ void waitForEnter() {
 void displayMainMenu() {
     clearScreen();
     cout << "=== HyperBlock Classification System ===\n\n";
-    cout << "1. Import training data\n";
-    cout << "2. Import existing hyperblocks\n";
-    cout << "3. Generate new hyperblocks\n";
-    cout << "4. Test hyperblocks on dataset\n";
-    cout << "5. Simplify hyperblocks\n";
-    cout << "6. Save normalized data\n";
-    cout << "7. Exit\n\n";
-    cout << "Enter your choice: ";
+    cout << "1. Import training data.\n";
+    cout << "2. Import testing data.\n";
+    cout << "3. Save normalized training data.\n";
+    cout << endl;
+    cout << "4. Import existing hyperblocks.\n";
+    cout << "5. Export existing hyperblocks.\n";
+    cout << "6. Generate new hyperblocks.\n";
+    cout << "7. Simplify hyperblocks.\n";
+    cout << "8. Test hyperblocks on dataset.\n";
+    cout << endl;
+    cout << "9. Exit\n\n";
 }
 
 
-// WE WILL ASSUME WE DONT HAVE A ID COLUMN.
-// WE WILL ASSSUME THE LAST COLUMN IS A CLASS COLUMN
+/**
+* 	 Assume these for now, implement a better handler later.
+*
+*    printf("USER WARNING :: ENSURE THAT THERE IS NO ID COLUMN\n");
+*    printf("USER WARNING :: ENSURE THAT THE LAST COLUMN IS A CLASS COLUMN\n");
+*/
 int main(int argc, char* argv[]) {
-    printf("USER WARNING :: ENSURE THAT THERE IS NO ID COLUMN\n");
-    printf("USER WARNING :: ENSURE THAT THE LAST COLUMN IS A CLASS COLUMN\n");
 
-    if(argc < 2) {
-      cout << "Usage: " << argv[0] << " <inputFile>" << endl;
-    }
+  	/* File names */
+  	string normalizedSaveFile;
+	string hyperBlocksImportFileName;
+    string trainingDataFileName;
+    string testingDataFileName;
+	string hyperBlocksExportFileName;
 
-    // Pull in the Training Data
-    vector<vector<vector<float>>> trainingData = dataSetup(argv[1]);
+    vector<vector<vector<float>>> testData;
+    vector<vector<vector<float>>> trainingData;
+
+    vector<float> minValues(1);	/* Holds the min attribute vals used for normalization */
+    vector<float> maxValues(1); /* Holds the max attribute vals used for normalization */
+
+    vector<HyperBlock> hyperBlocks;	/* Store the HyperBlocks we generate or import */
 
 
-    string testSetFileName = argv[2];
-    // Pull in the test data
-    vector<vector<vector<float>>> testData = dataSetup(testSetFileName);
-
-
-    if(argc == 4){
-        COMMAND_LINE_ARGS_CLASS = stoi(argv[3]);
+    if(argc == 2){
+        COMMAND_LINE_ARGS_CLASS = stoi(argv[1]);
         cout << "Running on class index " << COMMAND_LINE_ARGS_CLASS << endl;
     }
 
-   																																//cout << "NUM ATTRIBUTES : " << FIELD_LENGTH << endl; //cout << "NUM CLASSES    : " << NUM_CLASSES << endl;  // cout << "Number elements in class 0: " << data[0].size() << endl;//cout << "Number elements in class 1: " << data[1].size() << endl;// normalize the data
-    minMaxNormalization(trainingData);
+	// In other ML models single point usaully is classified as 1 class only.
+    // But in HyperBlocks, a point can be in multiple blocks at the same time
+    // thus, we need a more complex matrix to track all of these point classifications.
+	vector<vector<long>> ultraConfusionMatrix;
 
-    vector<float> minValues(FIELD_LENGTH, std::numeric_limits<float>::infinity());
-    vector<float> maxValues(FIELD_LENGTH, -std::numeric_limits<float>::infinity());
-	findMinMaxValuesInDataset(trainingData, minValues, maxValues);
-
-    normalizeTestSet(testData, minValues, maxValues);
-
-    printf("Made it past normalization");
-
-
-    // Now i want to pull in the blocks from the csv file we have saved
-    vector<HyperBlock> hyperBlocks = loadBasicHBsFromCSV("storedHBs.csv");
-
-
-	// Now test the accuracy
-	vector<vector<int>> ultraConfusionMatrix = testAccuracyOfHyperBlocks(hyperBlocks, testData);
-    print2DMatrix(ultraConfusionMatrix);
-
-
-    bool running = true;
-	int choice;
+    bool running = true;	// Loop
+	int choice;				// Main menu user input "choice"
 
     while(running){
        displayMainMenu();
@@ -1118,20 +1130,64 @@ int main(int argc, char* argv[]) {
        cin.ignore(numeric_limits<streamsize>::max(), '\n');
 
 	   switch (choice) {
-           case 1:	// IMPORT TRAINING DATA
+          case 1:	// IMPORT TRAINING DATA
 			   cout << "Enter training data filename: " << endl;
-               getline(cin, testSetFileName);
+               system("ls");
+               getline(cin, trainingDataFileName);
 
                // Attempt to read from the file
-               testData = dataSetup(testSetFileName);
-               break;
-            case 2:	// IMPORT EXISTING HYPERBLOCKS
-                cout << "Enter existing hyperblocks file name: " << endl;
-                getline(cin, hyperBlocksFileName);
+               trainingData = dataSetup(trainingDataFileName);
 
-                hyperBlocks = loadBasicHBsFromCSV(hyperBlocksFileName);
+                    // Reassign them with the correct field length
+               minValues.assign(FIELD_LENGTH, std::numeric_limits<float>::infinity());
+               maxValues.assign(FIELD_LENGTH, -std::numeric_limits<float>::infinity());
+               findMinMaxValuesInDataset(trainingData, minValues, maxValues);
+
+               minMaxNormalization(trainingData, minValues, maxValues);
+
+			   waitForEnter();
+               break;
+
+          case 2:	// IMPORT TESTING DATA
+		  	 cout << "Enter testing data filename: " << endl;
+             system("ls");
+             getline(cin, testingDataFileName);
+
+             testData = dataSetup(testingDataFileName);
+             normalizeTestSet(testData, minValues, maxValues);
+
+             waitForEnter();
+
+		     break;
+          case 3:		// SAVE NORMALIZED TRAINING DATA
+              cout << "Enter the file to save the normalized training data to: " << endl;
+
+               // Save to the file they input
+               getline(cin, normalizedSaveFile);
+               saveNormalizedVersionToCsv(normalizedSaveFile, trainingData);
+
+               cout << "Saved normalized training data to: " << normalizedSaveFile << endl;
+               waitForEnter();
+               break;
+          case 4:	// IMPORT EXISTING HYPERBLOCKS
+                cout << "Enter existing hyperblocks file name: " << endl;
+                getline(cin, hyperBlocksImportFileName);
+
+                hyperBlocks = loadBasicHBsFromCSV(hyperBlocksImportFileName);
+
+                cout << "HyperBlocks imported from file " << hyperBlocksImportFileName << " successfully" << endl;
+                waitForEnter();
                 break;
-            case 3:	// GENERATE NEW HYPERBLOCKS
+          case 5: // EXPORT HYPERBLOCKS
+            	cout << "Enter the file to save HyperBlocks to: " << endl;
+
+               // Save to the file they input
+               getline(cin, hyperBlocksExportFileName);
+
+
+			   saveBasicHBsToCSV(hyperBlocks, hyperBlocksExportFileName);
+               break;
+          case 6:	// GENERATE NEW HYPERBLOCKS
                 if (trainingData.empty()) {
                     cout << "\nError: Please import training data first." << endl;
                     waitForEnter();
@@ -1143,62 +1199,24 @@ int main(int argc, char* argv[]) {
 
                 waitForEnter();
                 break;
-            case 4:		// TEST HYPERBLOCKS ON DATASET
-                ultraConfusionMatrix = testAccuracyOfHyperBlocks(hyperBlocks, testData);
-                print2DMatrix(ultraConfusionMatrix);
-                waitForEnter();
-                break;
-            case 5:		// SIMPLIFY HYPERBLOCKS
-                //hyperBlocks = simplifyExistingHyperBlocks(hyperBlocks);
-                break;
-            case 6:		// SAVE NORMALIZED TRAINING DATA
-                //saveNormalizedData(trainingData);
-                break;
-            case 7:		// EXIT
-                running = false;
-                break;
-            default:
-                cout << "\nInvalid choice. Please try again." << endl;
-                waitForEnter();
-                break;
+          case 7:		// SIMPLIFY HYPERBLOCKS
+               cout << "Simplifications Interface Not Yet Implemented. " << endl;
+               //hyperBlocks = simplifyExistingHyperBlocks(hyperBlocks);
+               break;
+          case 8:		// TEST HYPERBLOCKS ON DATASET
+             cout << "Testing hyperblocks on testing dataset" << endl;
+             ultraConfusionMatrix = testAccuracyOfHyperBlocks(hyperBlocks, testData);
+             print2DMatrix(ultraConfusionMatrix);
+             waitForEnter();
+             break;
+          case 9:		// EXIT
+             running = false;
+             break;
+          default:
+             cout << "\nInvalid choice. Please try again." << endl;
+             waitForEnter();
+             break;
         }
-
-
-
-
-
-
-    }
-
-
-
-
-
-    /*
-    // Make the hyperblocks list to store the hyperblocks that are generated.
-	vector<HyperBlock> hyperBlocks;
-
-    // generate hyperblocks
-    auto start = std::chrono::high_resolution_clock::now();
-
-    generateHBs(data, hyperBlocks);
-    auto stop = std::chrono::high_resolution_clock::now();
-
- 	auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
-    std::cout << "Time taken: " << duration_ms.count() << " ms\n";
-
-    // Calculate duration in seconds
-    auto duration_sec = std::chrono::duration_cast<std::chrono::seconds>(stop - start);
-    std::cout << "Time taken: " << duration_sec.count() << " s\n";
-	cout << "HyperBlocks : " << hyperBlocks.size() << endl;
-
-    cout << "Finished generating HBS\n" << endl;
-    cout << "Number of HBs: " << hyperBlocks.size() << endl;
-
-
-    string fileName = string(argv[2]) + "OUTPUT.csv";
-    saveBasicHBsToCSV(hyperBlocks, fileName);
-
-     */
+	}
     return 0;
 }

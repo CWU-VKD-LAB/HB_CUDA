@@ -14,12 +14,19 @@
 #include "HyperBlockCuda.cuh"
 #include <chrono>
 #include <omp.h>
+#include <iomanip>  // For setw
+#include <algorithm> // For max
 using namespace std;
 
 int NUM_CLASSES;   // Number of classes in the dataset
 int NUM_POINTS;    // Total number of points in the dataset
 int FIELD_LENGTH;  // Number of attributes in the dataset
 int COMMAND_LINE_ARGS_CLASS = -1;
+
+
+map<string, int> CLASS_MAP_TRAINING;
+map<string, int> CLASS_MAP_TESTING;
+
 
 // Struct version of DataATTR xrecord
 struct DataATTR {
@@ -459,12 +466,9 @@ void print3DVector(const vector<vector<vector<float>>>& vec) {
 /*  Returns a class seperated version of the dataset
  *  Each class has an entry in the outer vector with a 2-d vector of its points
  */
-vector<vector<vector<float>>> dataSetup(const string filepath) {
+vector<vector<vector<float>>> dataSetup(const string filepath, map<string, int>& classMap) {
     // 3D vector: data[class][point][attribute]
     vector<vector<vector<float>>> data;
-
-    // Map class labels to indices in `data`
-    map<string, int> classMap;
 
     ifstream file(filepath);
     if (!file.is_open()) {
@@ -522,8 +526,6 @@ vector<vector<vector<float>>> dataSetup(const string filepath) {
     // Set global variables
     FIELD_LENGTH = data.empty() ? 0 : static_cast<int>(data[0][0].size());
     NUM_CLASSES = classNum;
-
-    //cout << "Finished setting up data\n" << endl;
 
     return data;
 }
@@ -999,12 +1001,17 @@ void saveNormalizedVersionToCsv(string fileName, vector<vector<vector<float>>>& 
 
 
 /**
-* Go through all the blocks.
-*
-* Keep track of overall accuracy of a block, along with somehow tag points in a way that we can keep track
-* of how many total points were misclassified and where.
+* We generate a confusion matrix, but allow for points to fall into multiple blocks at a time
+* that is why we go through blocks on outerloop and whole dataset on the inside.
 */
 vector<vector<long>> testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, vector<vector<vector<float>>> testSet){
+
+  	// Keep track of which points were never inside of a block
+    vector<set<int>> pointsNotClassified(CLASS_MAP_TESTING.size(), set<int>(0));
+    for(int i = 0; i < CLASS_MAP_TESTING.size(); i++){
+    	set.
+    }
+
 
 	// Make a n x n matrix for the confusion matrix
 	vector<vector<long>> ultraConfusionMatrix(NUM_CLASSES, vector<long>(NUM_CLASSES, 0));
@@ -1014,6 +1021,18 @@ vector<vector<long>> testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, 
     cout << "Testing on " << testSet[0].size() << " points in first class." << endl;
     cout << "Testing on " << NUM_CLASSES << " classes" << endl;
     cout << "Testing on " << FIELD_LENGTH << " attributes" << endl;
+
+    vector<string> listTraining(NUM_CLASSES);
+    for (const auto& entry : CLASS_MAP_TRAINING) {
+        int index = entry.second;
+        listTraining[index] = entry.first;
+    }
+
+    vector<string> listTesting(CLASS_MAP_TESTING.size());
+    for (const auto& entry : CLASS_MAP_TESTING) {
+        int index = entry.second;
+        listTesting[index] = entry.first;
+    }
 
 
     bool anyPointWasInside = false;
@@ -1028,9 +1047,16 @@ vector<vector<long>> testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, 
            		const vector<float>& point = testSet[cls][pnt];
 
                 if(currBlock.inside_HB(point.size(), point.data())){
-                    cout << "classNum" << currBlock.classNum << endl;
-					ultraConfusionMatrix[cls][currBlock.classNum]++;
-                    anyPointWasInside = true;
+                    // Get the actual class name from the training data class index
+					string trainingClassName = listTraining[currBlock.classNum];
+
+					// Find what index this class has in the testing data
+					int trainingClassIndexInTestingOrder = CLASS_MAP_TESTING[trainingClassName];
+
+					// The testingClassIndex is just cls (the current class we're testing)
+					int testingClassIndex = cls;
+
+					ultraConfusionMatrix[testingClassIndex][trainingClassIndexInTestingOrder]++;
                 }
                 else{
                 	// don't know what to put here because it might not have a good
@@ -1043,14 +1069,112 @@ vector<vector<long>> testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, 
     return ultraConfusionMatrix;
 }
 
-
+/*
 void print2DMatrix(vector<vector<long>>& data){
+	vector<string> listTraining(NUM_CLASSES);
+
+    for (const auto& entry : CLASS_MAP_TRAINING) {
+        int index = entry.second;
+        listTraining[index] = entry.first;
+    }
+
+
+  for(const auto& string: listTraining){
+    cout << string << "\t" <<endl;
+  }
+
   for(int i = 0; i < data.size(); i++){
+	cout << listTraining[i] << "\t"
     for(int j = 0; j < data[i].size(); j++){
-      cout << data[i][j] << ",";
+      cout << data[i][j] << "\t";
     }
     cout << endl;
   }
+}
+
+ */
+
+
+
+// Computes the accuracy of the points classifed
+void confusionMatrixAccuracy(){
+
+
+}
+
+
+
+void print2DMatrix(vector<vector<long>>& data) {
+    vector<string> classLabels(NUM_CLASSES);
+
+    vector<float> accuracies(NUM_CLASSES, 0.0);
+
+    // Calculate the accuracies of each of the rows.
+    // Only the diagonal values are correct predictions
+
+for (int i = 0; i < NUM_CLASSES; ++i) {
+    long correct = 0;
+    long incorrect = 0;
+    long totalClassifications = 0;
+
+    for (int j = 0; j < NUM_CLASSES; ++j) {
+        totalClassifications += data[i][j];
+        if (i == j) {
+            correct += data[i][j];  // Diagonal value indicates correct predictions
+        } else {
+            incorrect += data[i][j];  // Off-diagonal values are incorrect predictions
+        }
+    }
+
+    if (totalClassifications > 0) {
+        accuracies[i] = (float)correct / totalClassifications;
+    }
+}
+
+
+    for (const auto& entry : CLASS_MAP_TESTING) {
+        int index = entry.second;
+        classLabels[index] = entry.first;
+    }
+
+    // Calculate column width based on the longest class name and largest number
+    size_t maxWidth = 8; // Minimum width
+
+    for (const auto& name : classLabels) {
+        maxWidth = max(maxWidth, name.length() + 2);
+    }
+
+    for (const auto& row : data) {
+        for (const auto& cell : row) {
+            string numStr = to_string(cell);
+            maxWidth = max(maxWidth, numStr.length() + 2);
+        }
+    }
+
+    // Print header row with "Actual\Predicted" in the corner
+    cout << setw(maxWidth) << "Act\\Pred" << " |";
+    for (const auto& name : classLabels) {
+        cout << setw(maxWidth) << name << " |";
+    }
+    cout << endl;
+
+    // Print separator line
+    cout << string(maxWidth, '-') << "-+";
+    for (size_t i = 0; i < classLabels.size(); i++) {
+        cout << string(maxWidth, '-') << "-+";
+    }
+    cout << endl;
+
+    // Print each row with row label
+    for (size_t i = 0; i < data.size(); i++) {
+        cout << setw(maxWidth) << classLabels[i] << " |";
+
+        for (size_t j = 0; j < data[i].size(); j++) {
+            cout << setw(maxWidth) << data[i][j] << " |";
+        }
+
+        cout << accuracies[i] << endl;
+    }
 }
 
 // Function to clear the console screen (cross-platform)
@@ -1123,6 +1247,11 @@ int main(int argc, char* argv[]) {
     bool running = true;	// Loop
 	int choice;				// Main menu user input "choice"
 
+    // Option to use the command line running style
+    if(argc > 1){
+
+    }
+
     while(running){
        displayMainMenu();
        cin >> choice;
@@ -1136,9 +1265,9 @@ int main(int argc, char* argv[]) {
                getline(cin, trainingDataFileName);
 
                // Attempt to read from the file
-               trainingData = dataSetup(trainingDataFileName);
+               trainingData = dataSetup(trainingDataFileName, CLASS_MAP_TRAINING);
 
-                    // Reassign them with the correct field length
+                // Reassign them with the correct field length
                minValues.assign(FIELD_LENGTH, std::numeric_limits<float>::infinity());
                maxValues.assign(FIELD_LENGTH, -std::numeric_limits<float>::infinity());
                findMinMaxValuesInDataset(trainingData, minValues, maxValues);
@@ -1153,7 +1282,7 @@ int main(int argc, char* argv[]) {
              system("ls");
              getline(cin, testingDataFileName);
 
-             testData = dataSetup(testingDataFileName);
+             testData = dataSetup(testingDataFileName, CLASS_MAP_TESTING);
              normalizeTestSet(testData, minValues, maxValues);
 
              waitForEnter();

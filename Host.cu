@@ -48,7 +48,6 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
 void saveBasicHBsToCSV(const vector<HyperBlock>& hyper_blocks);
 void print3DVector(const vector<vector<vector<float>>>& vec);
 
-
 /***
 * We want to go through the hyper_blocks that were generated and write them to a file.
 *

@@ -119,6 +119,12 @@ vector<float> computeBinaryLDA(const vector<vector<float>>& classA,
     addScatter(classA, meanA);
     addScatter(classB, meanB);
 
+    // REGULARIZE TO AVOID THE MATRIX BEING SINGULAR. YOU JUST ADD A SMALL LAMBDA VALUE DOWN THE PIVOTS!
+    float lambda = 1e-4f; // maybe needs some tuning.
+    for (int i = 0; i < numFeatures; i++) {
+        Sw[i][i] += lambda;
+    }
+
     // 3. Compute w = Sw^-1 * (meanB - meanA)
     vector<vector<float>> SwInv = inverse(Sw);
 

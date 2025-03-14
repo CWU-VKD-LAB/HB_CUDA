@@ -1,15 +1,11 @@
 #include <vector>
-#include <unordered_map>
 #include <iostream>
-#include <numeric>
 #include <cmath>
 #include <algorithm>
+#include <cassert>
+#include <limits>
 
 using namespace std;
-
-// --------------------------------------
-// 1. Some utility functions
-// --------------------------------------
 
 // Matrix inverse using naive Gauss-Jordan elimination
 vector<vector<float>> inverse(const vector<vector<float>>& matrix) {
@@ -69,18 +65,34 @@ vector<float> matrixVectorMultiply(const vector<vector<float>>& A, const vector<
     return result;
 }
 
-// --------------------------------------
-// 2. Core two-class LDA function
-// --------------------------------------
-/**
- * Computes a single LDA vector w that separates two classes:
- *   classA vs. classB
- * Returns a vector of dimension [numFeatures].
- */
-vector<float> computeBinaryLDA(const vector<vector<float>>& classA,
-                                const vector<vector<float>>& classB)
-{
+// Helper: dot product of two vectors
+inline float dotProduct(const vector<float>& a, const vector<float>& b) {
+    assert(a.size() == b.size());
+    float sum = 0.0f;
+    for (size_t i = 0; i < a.size(); i++) {
+        sum += a[i] * b[i];
+    }
+    return sum;
+}
 
+// --------------------------------------
+// 2. Core two-class LDA function (with bias computation)
+// --------------------------------------
+
+// Define a struct to hold both the weight vector and its bias.
+struct LDAClassifier {
+    vector<float> w;
+    float bias;
+};
+
+/**
+ * Computes a single LDA vector w (and bias) that separates two classes:
+ *   classA vs. classB
+ * Returns an LDAClassifier containing the weight vector and bias.
+ */
+LDAClassifier computeBinaryLDA(const vector<vector<float>>& classA,
+                               const vector<vector<float>>& classB)
+{
     int numFeatures = classA[0].size();
 
     // 1. Compute mean vectors of class A and class B
@@ -119,22 +131,18 @@ vector<float> computeBinaryLDA(const vector<vector<float>>& classA,
     addScatter(classA, meanA);
     addScatter(classB, meanB);
 
-    // REGULARIZE TO AVOID THE MATRIX BEING SINGULAR. YOU JUST ADD A SMALL LAMBDA VALUE DOWN THE PIVOTS!
-    float lambda = 1e-4f; // maybe needs some tuning.
+    // REGULARIZE TO AVOID THE MATRIX BEING SINGULAR.
+    float lambda = 1e-3f; // adjust as needed.
     for (int i = 0; i < numFeatures; i++) {
         Sw[i][i] += lambda;
     }
 
     // 3. Compute w = Sw^-1 * (meanB - meanA)
     vector<vector<float>> SwInv = inverse(Sw);
-
-    // meanDiff = (meanB - meanA)
     vector<float> meanDiff(numFeatures, 0.0f);
     for (int j = 0; j < numFeatures; j++) {
         meanDiff[j] = meanB[j] - meanA[j];
     }
-
-    // Multiply: w = SwInv * meanDiff
     vector<float> w = matrixVectorMultiply(SwInv, meanDiff);
 
     // 4. Normalize w
@@ -149,65 +157,96 @@ vector<float> computeBinaryLDA(const vector<vector<float>>& classA,
         }
     }
 
-    return w;
+    // 5. Compute bias: use the midpoint between the projections of the class means
+    float projMeanA = dotProduct(w, meanA);
+    float projMeanB = dotProduct(w, meanB);
+    float bias = (projMeanA + projMeanB) / 2.0f;
+
+    // Flip w and bias if the target class's projection is lower than the other
+    if (projMeanA < projMeanB) {
+        for (float &val : w) {
+            val = -val;
+        }
+        bias = -bias;
+    }
+
+    LDAClassifier classifier;
+    classifier.w = w;
+    classifier.bias = bias;
+    return classifier;
 }
 
+// predictClass: for a given sample, compute the adjusted score for each classifier
+// (w^T x - bias) and return the class with the highest score.
+int predictClass(const vector<LDAClassifier>& classifiers, const vector<float>& sample) {
+    int bestClass = -1;
+    float bestScore = -1e9f; // a very low starting score
+    for (size_t i = 0; i < classifiers.size(); i++) {
+        float score = dotProduct(classifiers[i].w, sample) - classifiers[i].bias;
+        if (score > bestScore) {
+            bestScore = score;
+            bestClass = static_cast<int>(i);
+        }
+    }
+    return bestClass;
+}
+
+
+// testMultiClassAccuracy: loops over each sample in inputData (labeled by class),
+// predicts its class using predictClass, and computes overall accuracy.
+void testMultiClassAccuracy(const vector<LDAClassifier>& classifiers,
+                            const vector<vector<vector<float>>>& inputData) {
+    int numClasses = inputData.size();
+    int totalSamples = 0;
+    int correct = 0;
+
+    for (int i = 0; i < numClasses; i++) {
+        for (const auto &sample : inputData[i]) {
+            int predicted = predictClass(classifiers, sample);
+            if (predicted == i) {
+                correct++;
+            }
+            totalSamples++;
+        }
+    }
+
+    float accuracy = static_cast<float>(correct) / totalSamples;
+    cout << "Overall multi-class accuracy: " << accuracy * 100.0f << "%" << endl;
+}
+
+
 // --------------------------------------
-// 3. “One-vs-Rest” LDA for multi-class
+// “One-vs-Rest” LDA for multi-class
 // --------------------------------------
 /**
  * Given inputData where inputData[i] = all samples of class i,
  * run a 2-class LDA for each class i vs. all other classes combined.
  *
- * Returns a vector of LDA vectors, one per class.
+ * Returns a vector of LDAClassifier, one per class.
  */
-
 vector<vector<float>> linearDiscriminantAnalysis(const vector<vector<vector<float>>>& inputData) {
     int numClasses = inputData.size();
-    vector<vector<float>> ldaVectors(numClasses); // one discriminant vector per class
+    vector<LDAClassifier> classifiers(numClasses); // one classifier per class
 
     // For each class i, gather its samples in classA
     // and gather all other samples in classB
     for (int i = 0; i < numClasses; i++) {
         // classA = the samples of class i
         const auto& classA = inputData[i];
-
         // classB = union of samples of all other classes
         vector<vector<float>> classB;
-        // put in all our classes that are not classA.
         for (int j = 0; j < numClasses; j++) {
             if (j == i) continue; // skip class i
             classB.insert(classB.end(), inputData[j].begin(), inputData[j].end());
         }
-
-        // Compute the 2-class LDA vector for i vs rest
-        vector<float> w = computeBinaryLDA(classA, classB);
-
-        // store our vector which best separates the class.
-        ldaVectors[i] = w;
+        // Compute the 2-class LDA classifier for i vs. rest
+        classifiers[i] = computeBinaryLDA(classA, classB);
     }
-    
-    // Normalize each resulting vector between 0 and 1, then apply arccos to each value,
-    // and convert the result from radians to degrees.
-    for (auto &vec : ldaVectors) {
-        // Find min and max of the vector.
-        float minVal = *std::min_element(vec.begin(), vec.end());
-        float maxVal = *std::max_element(vec.begin(), vec.end());
-        
-        // Prevent division by zero if all values are identical.
-        float range = (maxVal - minVal);
-        if (range < 1e-12) {
-            range = 1;  // Alternatively, you could set all normalized values to 0.5.
-        }
-        
-        // Normalize each element to [0, 1], apply arccos, and then convert to degrees.
-        for (float &val : vec) {
-            float normalized = (val - minVal) / range;
-            // Apply arccos (result is in radians) and convert to degrees.
-            val = std::acos(normalized) * (180.0f / M_PI);
-        }
+    vector<vector<float>> separationVectors;
+    for (LDAClassifier &classifier : classifiers) {
+        separationVectors.push_back(classifier.w);
     }
 
-    return ldaVectors;
+    testMultiClassAccuracy(classifiers, inputData);
+    return separationVectors;
 }
-

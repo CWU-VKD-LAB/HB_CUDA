@@ -1198,11 +1198,10 @@ int main(int argc, char* argv[]) {
 
     cout << "NUM ATTRIBUTES : " << FIELD_LENGTH << endl;
     cout << "NUM CLASSES    : " << NUM_CLASSES << endl;
-
     minMaxNormalization(data);
 	//print3DVector(data);
 
-    // get our best vector for each class. then we make a list of indices for each class so we can sort them. 
+    // get our best vector for each class. then we make a list of indices for each class so we can sort them.
     const vector<vector<float>> &bestVectors = linearDiscriminantAnalysis(data);
     vector<vector<int>> bestVectorsIndexes(NUM_CLASSES, vector<int>(FIELD_LENGTH, 0));
     vector<int> eachClassBestVectorIndex(NUM_CLASSES);
@@ -1217,7 +1216,6 @@ int main(int argc, char* argv[]) {
                   // sort smallest to biggest
                   return fabs(bestVectors[i][a]) < fabs(bestVectors[i][b]);
               });
-        
         eachClassBestVectorIndex[i] = bestVectorsIndexes[i][0];
     }
 
@@ -1258,6 +1256,7 @@ int main(int argc, char* argv[]) {
     cout << "Time taken: " << duration_ms.count() << " ms" << endl;
     cout << "After removing useless blocks we have " << hyper_blocks.size() << " blocks\n" << endl;
 
+    // count our clauses in all our blocks.
     int totalClauses = 0;
     for(HyperBlock &hyperBlock : hyper_blocks) {
         for(int i = 0; i < FIELD_LENGTH; i++){

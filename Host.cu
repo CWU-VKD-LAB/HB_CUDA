@@ -693,8 +693,6 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         // Allocate host memory
         vector<float> hyperBlockMinsC(sizeWithoutHBpoints);
         vector<float> hyperBlockMaxesC(sizeWithoutHBpoints);
-        vector<float> combinedMinsC(sizeWithoutHBpoints);
-        vector<float> combinedMaxesC(sizeWithoutHBpoints);
         vector<int> deleteFlagsC(sizeWithoutHBpoints / PADDED_LENGTH);
 
         int nSize = all_data[classN].size();
@@ -753,13 +751,11 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         }
 
         // Allocate device memory
-        float *d_hyperBlockMins, *d_hyperBlockMaxes, *d_combinedMins, *d_combinedMaxes, *d_points;
+        float *d_hyperBlockMins, *d_hyperBlockMaxes, *d_points;
         int *d_deleteFlags, *d_mergable, *d_seedQueue, *d_writeSeedQueue;
 
         cudaMalloc(&d_hyperBlockMins, sizeWithoutHBpoints * sizeof(float));
         cudaMalloc(&d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float));
-        cudaMalloc(&d_combinedMins, sizeWithoutHBpoints * sizeof(float));
-        cudaMalloc(&d_combinedMaxes, sizeWithoutHBpoints * sizeof(float));
         cudaMalloc(&d_deleteFlags, (sizeWithoutHBpoints / PADDED_LENGTH) * sizeof(int));
         cudaMemset(d_deleteFlags, 0, (sizeWithoutHBpoints / PADDED_LENGTH) * sizeof(int));
 
@@ -803,9 +799,7 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
                 d_mergable,						// mergable flags
                 gridSize,
                 blockSize,
-                sharedMemSize,
-                d_combinedMins,
-                d_combinedMaxes
+                sharedMemSize
             );
             cudaDeviceSynchronize();
 
@@ -840,8 +834,6 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         // Free device memory
         cudaFree(d_hyperBlockMins);
         cudaFree(d_hyperBlockMaxes);
-        cudaFree(d_combinedMins);
-        cudaFree(d_combinedMaxes);
         cudaFree(d_deleteFlags);
         cudaFree(d_points);
         cudaFree(d_mergable);

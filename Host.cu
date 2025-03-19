@@ -3,6 +3,7 @@
 #include <string>
 #include <map>
 #include <fstream>
+#include <unordered_map>
 #include <iostream>
 #include <sstream>
 #include <algorithm>
@@ -15,11 +16,21 @@
 #include "LDA.cpp"
 #include <chrono>
 #include <omp.h>
+#include <iomanip>  // For setw
+#include <algorithm> // For max
+#include <queue>
 using namespace std;
 
 int NUM_CLASSES;   // Number of classes in the dataset
 int NUM_POINTS;    // Total number of points in the dataset
 int FIELD_LENGTH;  // Number of attributes in the dataset
+int COMMAND_LINE_ARGS_CLASS = -1;
+
+map<string, int> CLASS_MAP;
+map<string, int> CLASS_MAP_TESTING;
+
+map<int, string> CLASS_MAP_INT;
+map<int, string> CLASS_MAP_TESTING_INT;
 
 // Struct version of DataATTR xrecord
 struct DataATTR {
@@ -40,66 +51,111 @@ struct Interval{
     Interval(int s, int st, int e, int a) : size(s), start(st), end(e), attribute(a) {}
 };
 
-Interval longest_interval(vector<DataATTR>& data_by_attr, float acc_threshold, vector<HyperBlock>& existing_hb, int attr);
-void remove_value_from_interval(vector<DataATTR>& data_by_attr, Interval& intr, float value);
-int skip_value_in_interval(vector<DataATTR>& data_by_attr, int i, float value);
-bool check_interval_overlap(vector<DataATTR>& data_by_attr, Interval& intr, int attr, vector<HyperBlock>& existing_hb);
-void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vector<vector<vector<float>>>& all_data, vector<HyperBlock>& hyper_blocks);
-void saveBasicHBsToCSV(const vector<HyperBlock>& hyper_blocks);
-void print3DVector(const vector<vector<vector<float>>>& vec);
+Interval longestInterval(vector<DataATTR>& dataByAttribute, float accThreshold, vector<HyperBlock>& existingHB, int attr);
+void removeValueFromInterval(vector<DataATTR>& dataByAttribute, Interval& intr, float value);
+int skipValueInInterval(vector<DataATTR>& dataByAttribute, int i, float value);
+bool checkIntervalOverlap(vector<DataATTR>& dataByAttribute, Interval& intr, int attr, vector<HyperBlock>& existingHB);
+void merger_cuda(const vector<vector<vector<float>>>& dataWithSkips, const vector<vector<vector<float>>>& allData, vector<HyperBlock>& hyperBlocks);
+void saveBasicHBsToCSV(const vector<HyperBlock>& hyperBlocks, const string& fileName);
+void printDataset(const vector<vector<vector<float>>>& vec);
+void printConfusionMatrix(vector<vector<long>>& data);
+float euclideanDistance(const vector<float>& vec1, const vector<float>& vec2);
+vector<vector<long>> kNN(vector<vector<vector<float>>> unclassifiedData, vector<HyperBlock>& hyperBlocks, int k);
+
+// Function to reorder testing dataset based on training class mapping
+vector<vector<vector<float>>> reorderTestingDataset(
+    const vector<vector<vector<float>>>& testingData,
+    const map<string, int>& CLASS_MAP_TRAINING,
+    const map<string, int>& CLASS_MAP_TESTING
+) {
+    // Create a new vector with the same size as the testing data
+    vector<vector<vector<float>>> reorderedTestingData(testingData.size());
+
+    // Create a mapping from testing indices to training indices
+    map<int, int> indexMap;
+    // For each (className → trainingIndex) in the training map
+    for (const auto& entry : CLASS_MAP_TRAINING) {
+        const std::string& className   = entry.first;
+        int               trainingIndex = entry.second;
+
+        // Find the same class in the testing map
+        auto it = CLASS_MAP_TESTING.find(className);
+        if (it != CLASS_MAP_TESTING.end()) {
+            int testingIndex = it->second;
+            indexMap[testingIndex] = trainingIndex;
+
+            // Ensure our output vector is big enough
+            if (trainingIndex >= reorderedTestingData.size()) {
+                reorderedTestingData.resize(trainingIndex + 1);
+            }
+        }
+    }
+
+
+    // Reorder the testing data
+    for (int testingIndex = 0; testingIndex < testingData.size(); testingIndex++) {
+        auto it = indexMap.find(testingIndex);
+        if (it != indexMap.end()) {
+            int trainingIndex = it->second;
+            reorderedTestingData[trainingIndex] = testingData[testingIndex];
+        }
+    }
+
+    return reorderedTestingData;
+}
 
 /***
-* We want to go through the hyper_blocks that were generated and write them to a file.
+* We want to go through the hyperBlocks that were generated and write them to a file.
 *
 *
 * This print isn't caring about disjunctive blocks.
 */
-void saveBasicHBsToCSV(const vector<HyperBlock>& hyper_blocks, const string& file_name){
+void saveBasicHBsToCSV(const vector<HyperBlock>& hyperBlocks, const string& fileName){
 	// Open file for writing
-    ofstream file(file_name);
+    ofstream file(fileName);
     if (!file.is_open()) {
-        cerr << "Error opening file: " << file_name << endl;
+        cerr << "Error opening file: " << fileName << endl;
         return;
     }
 
 	// min1, min2, min3, ..., minN, max1, max2, max3, ..., maxN, class
-	for (const auto& hyper_block : hyper_blocks) {
+	for (const auto& hyperBlock : hyperBlocks) {
         // Write minimums
-        for (const vector<float>& min : hyper_block.minimums) {
+        for (const vector<float>& min : hyperBlock.minimums) {
             file << min[0] << ",";
         }
 
         // Write maximums
-        for (const vector<float>& max : hyper_block.maximums) {
+        for (const vector<float>& max : hyperBlock.maximums) {
             file << max[0] << ",";
         }
 
         // Write the class number
-        file << hyper_block.classNum << "\n";
+        file << hyperBlock.classNum << "\n";
     }
 
     file.close();
 }
 
-///////////////////////// FUNCTIONS FOR INTERVAL_HYPER IMPLEMENTATION /////////////////////////
+///////////////////////// FUNCTIONS FOR intervalHyper IMPLEMENTATION /////////////////////////
 
  /**
      * Finds largest interval across all dimensions of a set of data.
-     * @param data_by_attr all data split by attribute
-     * @param acc_threshold accuracy threshold for interval
-     * @param existing_hb existing hyperblocks to check for overlap
+     * @param dataByAttribute all data split by attribute
+     * @param accThreshold accuracy threshold for interval
+     * @param existingHB existing hyperblocks to check for overlap
      * @return largest interval
      */
-vector<DataATTR> interval_hyper(vector<vector<DataATTR>>& data_by_attr, float acc_threshold, vector<HyperBlock>& existing_hb){
+vector<DataATTR> intervalHyper(vector<vector<DataATTR>>& dataByAttribute, float accThreshold, vector<HyperBlock>& existingHB){
     //cout << "Starting interval hyperblock" << endl;
     vector<future<Interval>> intervals;
     int attr = -1;
     Interval best(-1, -1, -1, -1);
 
    // Search each attribute
-    for (int i = 0; i < data_by_attr.size(); i++) {
+    for (int i = 0; i < dataByAttribute.size(); i++) {
         // Launch async task
-        intervals.emplace_back(async(launch::async, longest_interval, ref(data_by_attr[i]), acc_threshold, ref(existing_hb), i));
+        intervals.emplace_back(async(launch::async, longestInterval, ref(dataByAttribute[i]), accThreshold, ref(existingHB), i));
     }
 
     // Wait for results then find largest interval
@@ -120,10 +176,10 @@ vector<DataATTR> interval_hyper(vector<vector<DataATTR>>& data_by_attr, float ac
     vector<DataATTR> longest;
     if(best.size != -1){
         for(int i = best.start; i <= best.end; i++){
-          	//cout << "Data by attribute printing time: " << data_by_attr[attr][i].classNum << " " << data_by_attr[attr][i].classIndex << "\n";
+          	//cout << "Data by attribute printing time: " << dataByAttribute[attr][i].classNum << " " << dataByAttribute[attr][i].classIndex << "\n";
             //cout << attr << endl;
 
-            longest.push_back(data_by_attr[attr][i]);
+            longest.push_back(dataByAttribute[attr][i]);
         }
     }
     //cout << "Finished interval hyperblock" << endl;
@@ -173,41 +229,41 @@ void sortByColumn(vector<vector<float>>& classData, int colIndex) {
 
 /***
  * Finds the longest interval in a sorted list of data by attribute.
- * @param data_by_attr sorted data by attribute
- * @param acc_threshold accuracy threshold for interval
- * @param existing_hb existing hyperblocks to check for overlap
+ * @param dataByAttribute sorted data by attribute
+ * @param accThreshold accuracy threshold for interval
+ * @param existingHB existing hyperblocks to check for overlap
  * @param attr attribute to find interval on
  * @return longest interval
 */
-Interval longest_interval(vector<DataATTR>& data_by_attr, float acc_threshold, vector<HyperBlock>& existing_hb, int attr){
+Interval longestInterval(vector<DataATTR>& dataByAttribute, float accThreshold, vector<HyperBlock>& existingHB, int attr){
     //cout << "Started longest interval \n" << endl;
 
     Interval intr(1, 0, 0, attr);
     Interval max_intr(-1, -1, -1, attr);
 
-    int n = data_by_attr.size();
+    int n = dataByAttribute.size();
     float misclassified = 0;
 
     for(int i = 1; i < n; i++){
         // If current class matches with next
-        if(data_by_attr[intr.start].classNum == data_by_attr[i].classNum){
+        if(dataByAttribute[intr.start].classNum == dataByAttribute[i].classNum){
             intr.size++;
         }
-        else if( (misclassified+1) / intr.size > acc_threshold){
+        else if( (misclassified+1) / intr.size > accThreshold){
             // ^ i think this is a poor way to check. but not changing rn for the translation from java
             misclassified++;
             intr.size++;
         }
         else{
             // Remove value from interval if accuracy is below threshold.
-            if(data_by_attr[i-1].value == data_by_attr[i].value){
+            if(dataByAttribute[i-1].value == dataByAttribute[i].value){
                 // remove then skip overlapped values
-                remove_value_from_interval(data_by_attr, intr, data_by_attr[i].value);
-                i = skip_value_in_interval(data_by_attr, i, data_by_attr[i].value);
+                removeValueFromInterval(dataByAttribute, intr, dataByAttribute[i].value);
+                i = skipValueInInterval(dataByAttribute, i, dataByAttribute[i].value);
             }
 
             // Update longest interval if it doesn't overlap
-            if(intr.size > max_intr.size && check_interval_overlap(data_by_attr, intr, attr, existing_hb)){
+            if(intr.size > max_intr.size && checkIntervalOverlap(dataByAttribute, intr, attr, existingHB)){
                 max_intr.start = intr.start;
                 max_intr.end = intr.end;
                 max_intr.size = intr.size;
@@ -223,7 +279,7 @@ Interval longest_interval(vector<DataATTR>& data_by_attr, float acc_threshold, v
     }
 
     // final check update longest interval if it doesn't overlap
-    if(intr.size > max_intr.size && check_interval_overlap(data_by_attr, intr, attr, existing_hb)){
+    if(intr.size > max_intr.size && checkIntervalOverlap(dataByAttribute, intr, attr, existingHB)){
         max_intr.start = intr.start;
         max_intr.end = intr.end;
         max_intr.size = intr.size;
@@ -235,18 +291,18 @@ Interval longest_interval(vector<DataATTR>& data_by_attr, float acc_threshold, v
 }
 
 
-bool check_interval_overlap(vector<DataATTR>& data_by_attr, Interval& intr, int attr, vector<HyperBlock>& existing_hb){
+bool checkIntervalOverlap(vector<DataATTR>& dataByAttribute, Interval& intr, int attr, vector<HyperBlock>& existingHB){
     //cout << "Started check interval overlap\n" << endl;
     // interval range of vals
-    float intv_min = data_by_attr[intr.start].value;
-    float intv_max = data_by_attr[intr.end].value;
+    float intv_min = dataByAttribute[intr.start].value;
+    float intv_max = dataByAttribute[intr.end].value;
    
     /*
     *   check if interval range overlaps with any existing hyperblocks
     * to not overlap the interval maximum must be below all existing hyperblock minimums
     * or the interval minimum must be above all existing hyperblock maximums
     */
-    for(const HyperBlock& hb : existing_hb){
+    for(const HyperBlock& hb : existingHB){
         if (!(intv_max < hb.minimums.at(attr).at(0) || intv_min > hb.maximums.at(attr).at(0))){
             return false;
         }
@@ -258,12 +314,12 @@ bool check_interval_overlap(vector<DataATTR>& data_by_attr, Interval& intr, int 
     return true;
 }
 
-//skip_value_in_interval
-int skip_value_in_interval(vector<DataATTR>& data_by_attr, int i, float value){
+//skipValueInInterval
+int skipValueInInterval(vector<DataATTR>& dataByAttribute, int i, float value){
     //cout << "Starting skip value in interval\n" << endl;
 
-    while(data_by_attr[i].value == value){
-        if(i < data_by_attr.size() - 1){
+    while(dataByAttribute[i].value == value){
+        if(i < dataByAttribute.size() - 1){
             i++;
         }
         else{
@@ -277,10 +333,10 @@ int skip_value_in_interval(vector<DataATTR>& data_by_attr, int i, float value){
 }
 
 
-//remove_value_from_interval
-void remove_value_from_interval(vector<DataATTR>& data_by_attr, Interval& intr, float value){
+//removeValueFromInterval
+void removeValueFromInterval(vector<DataATTR>& dataByAttribute, Interval& intr, float value){
     //cout << "Starting remove value from intervals\n" << endl;
-    while(data_by_attr[intr.end].value == value){
+    while(dataByAttribute[intr.end].value == value){
         if(intr.end > intr.start){
             intr.size--;
             intr.end--;
@@ -293,15 +349,14 @@ void remove_value_from_interval(vector<DataATTR>& data_by_attr, Interval& intr, 
     //cout << "Finished remove value from intervals\n" << endl;
 }
 
-///////////////////////// END FUNCTIONS FOR INTERVAL_HYPER IMPLEMENTATION /////////////////////////
-
-void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_blocks, vector<int> bestAttributes){
+///////////////////////// END FUNCTIONS FOR intervalHyper IMPLEMENTATION /////////////////////////
+void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyperBlocks, vector<int> &bestAttributes){
   	// "Started generating HBS\n" << endl;
     // Hyperblocks generated with this algorithm
     vector<HyperBlock> gen_hb;
 
     // Get data to create hyperblocks
-    vector<vector<DataATTR>> data_by_attr = separateByAttribute(data);
+    vector<vector<DataATTR>> dataByAttribute = separateByAttribute(data);
     vector<vector<DataATTR>> all_intv;
 
     // Create dataset without data from interval HyperBlocks
@@ -313,12 +368,12 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
     // Initially generate blocks
 
     //cout << "Starting while loop to generate hyperblocks\n";
-    //cout << "data_by_attr[0].size() = " << data_by_attr[0].size() << endl;
+		//cout << "dataByAttribute[0].size() = " << dataByAttribute[0].size() << endl;
 
-    while(data_by_attr[0].size() > 0){
-        //cout << "Attempting to go into interval_hyper " << endl;
+        while(dataByAttribute[0].size() > 0){
+			//cout << "Attempting to go into intervalHyper " << endl;
 
-        vector<DataATTR> intv = interval_hyper(data_by_attr, 100, gen_hb);
+            vector<DataATTR> intv = intervalHyper(dataByAttribute, 100, gen_hb);
         all_intv.push_back(intv);
         //cout << "Pushed to back of all intervals" << endl;
 
@@ -357,15 +412,15 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
             //cout << "Made the hyperblock for this interval thing" << endl << endl;
 
             gen_hb.push_back(hb);
-            //cout << "Added results from last interval_hyper" << endl << endl;
+                //cout << "Added results from last intervalHyper" << endl << endl;
         }else{
             //cout << "Breaking because the intv size is < 1" << endl;
             break;
         }
     }
 
-    // Add all hbs from gen_hb to hyper_blocks
-    hyper_blocks.insert(hyper_blocks.end(), gen_hb.begin(), gen_hb.end());
+        // Add all hbs from gen_hb to hyperBlocks
+        hyperBlocks.insert(hyperBlocks.end(), gen_hb.begin(), gen_hb.end());
 
     // All data: go through each class and add points from data
     for(const vector<vector<float>>& classData : data){
@@ -413,7 +468,7 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
 
     try{
         //cout << "Printing interval hyperblocks:\n\n" << endl;
-        //for(const auto& hb : hyper_blocks){
+        //for(const auto& hb : hyperBlocks){
         //    for(const auto& min : hb.minimums){
         //        cout << min[0] << " ";
         //    }
@@ -426,18 +481,55 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyper_
         //}
         //cout << "End interval hyperblocks:\n\n" << endl;
 		//cout << "DATUM BEING PASSED INTO MERGING:" << endl;
-		//print3DVector(datum);
+		//printDataset(datum);
 
         //cout << "SEED DATA BEING PASSED INTO MERGING:" << endl;
-		//print3DVector(seed_data);
+		//printDataset(seed_data);
 
-        merger_cuda(seed_data, datum, hyper_blocks);
+        merger_cuda(seed_data, datum, hyperBlocks);
     }catch (exception e){
         cout << "Error in generateHBs: merger_cuda" << endl;
     }
 }
 
-void print3DVector(const vector<vector<vector<float>>>& vec) {
+/*
+
+    What I need to do.
+
+    ********************************************************************************
+     Find how many points and which points are classified into multiple classes
+    ********************************************************************************
+
+
+          - Right now I am using a set for each class and removing a point when it is classified, however
+          - maybe i should do something else for this.
+
+          - Maybe i want some form of set that maintains the use of each point index. However, we will also
+          - keep track of where it was classified each time. So we could have the <pointClassIndex : Int, Pair(array[num_classes], totalClassifications: Int)>
+
+
+
+    ************************************************
+     Use the K-NN approach on unclassified points
+    ************************************************
+
+        Need a algorithm that will turn each HB into a single point, use the middle maybe.     (later do some weighting possibly? based on where the average actually is)
+
+        We will essentially take unclassified points, and find the k nearest neighbor blocks, we will then check if there is a majority of any class in this.
+        If there is we wil classify that point into the class that was a majority.
+
+        (Can either refuse to classify points that don't have a majority or continue with a higher k value)
+
+ */
+
+
+
+
+
+
+
+
+void printDataset(const vector<vector<vector<float>>>& vec) {
     for (int i = 0; i < vec.size(); i++) {
         cout << "Class " << i << ":" << endl;
         for (const auto& row : vec[i]) {
@@ -455,12 +547,9 @@ void print3DVector(const vector<vector<vector<float>>>& vec) {
 /*  Returns a class seperated version of the dataset
  *  Each class has an entry in the outer vector with a 2-d vector of its points
  */
-vector<vector<vector<float>>> dataSetup(const string filepath) {
+vector<vector<vector<float>>> dataSetup(const string filepath, map<string, int>& classMap, map<int, string>& reversedClassMap) {
     // 3D vector: data[class][point][attribute]
     vector<vector<vector<float>>> data;
-
-    // Map class labels to indices in `data`
-    map<string, int> classMap;
 
     ifstream file(filepath);
     if (!file.is_open()) {
@@ -513,13 +602,14 @@ vector<vector<vector<float>>> dataSetup(const string filepath) {
         data[classIndex].push_back(point);
     }
 
+    for (const auto& pair : classMap) {
+        reversedClassMap[pair.second] = pair.first;
+    }
     file.close();
 
     // Set global variables
     FIELD_LENGTH = data.empty() ? 0 : static_cast<int>(data[0][0].size());
     NUM_CLASSES = classNum;
-
-    //cout << "Finished setting up data\n" << endl;
 
     return data;
 }
@@ -558,7 +648,109 @@ void saveHyperBlocksToFile(const string& filepath, const vector<vector<vector<fl
 }
 
 
-void minMaxNormalization(vector<vector<vector<float>>>& dataset) {
+vector<HyperBlock> loadBasicHBsFromCSV(const string& fileName) {
+    ifstream file(fileName);
+    vector<HyperBlock> hyperBlocks;
+
+    if (!file.is_open()) {
+        cerr << "Error opening file: " << fileName << endl;
+        return hyperBlocks;
+    }
+
+    string line;
+    while (getline(file, line)) {
+        stringstream ss(line);
+        vector<vector<float>> minimums, maximums;
+        string value;
+        vector<float> temp_vals;
+
+        while (getline(ss, value, ',')) {
+            value.erase(0, value.find_first_not_of(" \t"));
+            value.erase(value.find_last_not_of(" \t") + 1);
+
+            if (!value.empty()) {
+                temp_vals.push_back(stof(value));
+            }
+        }
+
+        if (temp_vals.empty()) continue;
+
+        int num_attributes = temp_vals.size() / 2;
+        int classNum = static_cast<int>(temp_vals.back());
+        temp_vals.pop_back(); // Remove classNum from the list
+
+        for (int i = 0; i < num_attributes; ++i) {
+            minimums.push_back({ temp_vals[i] });
+            maximums.push_back({ temp_vals[i + num_attributes] });
+        }
+
+        hyperBlocks.emplace_back(maximums, minimums, classNum);
+    }
+
+    file.close();
+    return hyperBlocks;
+}
+
+
+
+
+/**
+* Find the min/max values in each column of data across the dataset.
+* Can use this in normalization and also for making sure test set is normalized with
+* the same values as the training set.
+*/
+void findMinMaxValuesInDataset(const vector<vector<vector<float>>>& dataset, vector<float>& minValues, vector<float>& maxValues) {
+    // Step 1: Find min and max for each attribute
+    for (const auto& class_data : dataset) {
+        for (const auto& point : class_data) {
+            for (int k = 0; k < FIELD_LENGTH; k++) {
+                minValues[k] = min(minValues[k], point[k]);
+                maxValues[k] = max(maxValues[k], point[k]);
+            }
+        }
+    }
+}
+
+
+
+
+/**
+* A function to normalize the test set using the given mins/maxes that were used to normalize the initial set
+*/
+void normalizeTestSet(vector<vector<vector<float>>>& testSet, const vector<float>& minValues, const vector<float>& maxValues) {
+    if (testSet.empty()){
+      cout << "Test set was empty when trying to normalize" << endl;
+      return;
+	}
+
+    // Print out the min and max values first 20
+    for (int i = 0; i < FIELD_LENGTH; i++) {
+      cout << minValues[i] << endl;
+    }
+    cout << endl;
+
+    cout << "Maxes" << endl;
+
+
+    for (int i = 0; i < FIELD_LENGTH; i++) {
+      cout << maxValues[i] << ",";
+    }
+    cout << endl;
+
+    for (auto& class_data : testSet) {
+        for (auto& point : class_data) {
+            for (int k = 0; k < FIELD_LENGTH; k++) {
+                if (maxValues[k] != minValues[k]) {
+                    point[k] = (point[k] - minValues[k]) / (maxValues[k] - minValues[k]);
+                } else {
+                    point[k] = 0.5f;
+                }
+            }
+        }
+    }
+}
+
+void minMaxNormalization(vector<vector<vector<float>>>& dataset, const vector<float>& minValues, const vector<float>& maxValues) {
     //cout << "Starting min-max normalization\n" << endl;
 
     if (dataset.empty()) return;
@@ -566,26 +758,19 @@ void minMaxNormalization(vector<vector<vector<float>>>& dataset) {
     int num_classes = dataset.size();
 
     // Min and max values for each attribute
-    vector<float> min_vals(FIELD_LENGTH, numeric_limits<float>::infinity());
-    vector<float> max_vals(FIELD_LENGTH, -numeric_limits<float>::infinity());
+    //vector<float> minValues(FIELD_LENGTH, numeric_limits<float>::infinity());
+    //vector<float> maxValues(FIELD_LENGTH, -numeric_limits<float>::infinity());
 
     // Step 1: Find min and max for each attribute
-    for (const auto& class_data : dataset) {
-        for (const auto& point : class_data) {
-            for (int k = 0; k < FIELD_LENGTH; k++) {
-                min_vals[k] = min(min_vals[k], point[k]);
-                max_vals[k] = max(max_vals[k], point[k]);
-            }
-        }
-    }
+	//findMinMaxValuesInDataset(dataset, minValues, maxValues);
 
     // Step 2: Apply Min-Max normalization
     for (auto& class_data : dataset) {
         for (auto& point : class_data) {
             for (int k = 0; k < FIELD_LENGTH; k++) {
                 // Avoid div/0
-                if (max_vals[k] != min_vals[k]) {
-                    point[k] = (point[k] - min_vals[k]) / (max_vals[k] - min_vals[k]);
+                if (maxValues[k] != minValues[k]) {
+                    point[k] = (point[k] - minValues[k]) / (maxValues[k] - minValues[k]);
                 } else {
                     //cout << "Column found with useless values" << endl;
                     point[k] = 0.5f;
@@ -593,7 +778,6 @@ void minMaxNormalization(vector<vector<vector<float>>>& dataset) {
             }
         }
     }
-
     //cout << "Finished min-max normalization\n" << endl;
 }
 
@@ -633,17 +817,17 @@ vector<bool> markUniformColumns(const vector<vector<vector<float>>>& data) {
 }
 
 // Source
-void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vector<vector<vector<float>>>& all_data, vector<HyperBlock>& hyper_blocks) {
+void merger_cuda(const vector<vector<vector<float>>>& dataWithSkips, const vector<vector<vector<float>>>& allData, vector<HyperBlock>& hyperBlocks) {
 
     // Calculate total points
     int numPoints = 0;
-    for (const auto& classData : all_data) {
+    for (const auto& classData : allData) {
         numPoints += classData.size();
     }
 
     // Count blocks per class
     vector<int> numBlocksOfEachClass(NUM_CLASSES, 0);
-    for (const auto& hb : hyper_blocks) {
+    for (const auto& hb : hyperBlocks) {
         numBlocksOfEachClass[hb.classNum]++;
     }
 
@@ -671,37 +855,47 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         exit(-1);
     }
 
-    for (int classN = 0; classN < NUM_CLASSES; classN++) {
+
+    int temp = 0;
+    int goToClass = NUM_CLASSES;
+    if (COMMAND_LINE_ARGS_CLASS != -1){
+         temp = COMMAND_LINE_ARGS_CLASS;
+         goToClass = COMMAND_LINE_ARGS_CLASS + 1;
+    }
+
+    for (int classN = temp; classN < goToClass; classN++) {
         
         // set our device based on class. this way even single threaded we use multiple GPUs
         // MORE MULTI GPU BUSINESS
         //cudaSetDevice(classN % deviceCount);
 
         int totalDataSetSizeFlat = numPoints * PADDED_LENGTH;
-        int sizeWithoutHBpoints = ((data_with_skips[classN].size() + numBlocksOfEachClass[classN]) * PADDED_LENGTH);
-        if (data_with_skips[classN].empty()) {
+        int sizeWithoutHBpoints = ((dataWithSkips[classN].size() + numBlocksOfEachClass[classN]) * PADDED_LENGTH);
+        if (dataWithSkips[classN].empty()) {
             sizeWithoutHBpoints = numBlocksOfEachClass[classN] * PADDED_LENGTH;
         }
 
         // Compute grid size to cover all elements. we already know our ideal block size from before.
         int gridSize = ((sizeWithoutHBpoints / PADDED_LENGTH) + blockSize - 1) / blockSize;
 
+        #ifdef DEBUG
         cout << "Grid size: " << gridSize << endl;
         cout << "Block size: " << blockSize << endl;
         cout << "Shared memory size: " << sharedMemSize << endl;
+        #endif
 
         // Allocate host memory
         vector<float> hyperBlockMinsC(sizeWithoutHBpoints);
         vector<float> hyperBlockMaxesC(sizeWithoutHBpoints);
         vector<int> deleteFlagsC(sizeWithoutHBpoints / PADDED_LENGTH);
 
-        int nSize = all_data[classN].size();
+        int nSize = allData[classN].size();
         vector<float> pointsC(totalDataSetSizeFlat - (nSize * PADDED_LENGTH));
 
         // Fill hyperblock arrays
         int currentClassIndex = 0;
-        for (int currentClass = 0; currentClass < data_with_skips.size(); currentClass++) {
-            for (const auto& point : data_with_skips[currentClass]) {
+        for (int currentClass = 0; currentClass < dataWithSkips.size(); currentClass++) {
+            for (const auto& point : dataWithSkips[currentClass]) {
                 if (currentClass == classN) {
                     for (int attr = 0; attr < FIELD_LENGTH; attr++) {
                         //if (removed[attr]) continue;
@@ -720,10 +914,10 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
 
         // Process other class points
         int otherClassIndex = 0;
-        for (int currentClass = 0; currentClass < all_data.size(); currentClass++) {
+        for (int currentClass = 0; currentClass < allData.size(); currentClass++) {
             if (currentClass == classN) continue;
 
-            for (const auto& point : all_data[currentClass]) {
+            for (const auto& point : allData[currentClass]) {
                 for (int attr = 0; attr < FIELD_LENGTH; attr++) {
                     pointsC[otherClassIndex++] = point[attr];
                 }
@@ -733,8 +927,8 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
             }
         }
 
-        // Add the existing blocks from interval_hyper
-        for (auto it = hyper_blocks.begin(); it != hyper_blocks.end(); ++it) {
+        // Add the existing blocks from intervalHyper
+        for (auto it = hyperBlocks.begin(); it != hyperBlocks.end(); ++it) {
             if (it->classNum == classN) {
                 for (int i = 0; i < it->minimums.size(); i++) {
                     //if (removed[i]) continue;
@@ -841,13 +1035,413 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
         cudaFree(d_writeSeedQueue);
     }
 
-    hyper_blocks.clear();
+    hyperBlocks.clear();
     for(const vector<HyperBlock>& classBlocks : resultingBlocks) {
-      hyper_blocks.insert(hyper_blocks.end(), classBlocks.begin(), classBlocks.end());
+      hyperBlocks.insert(hyperBlocks.end(), classBlocks.begin(), classBlocks.end());
     }
 }
 
-vector<vector<float>> flattenMinsMaxesForRUB(vector<HyperBlock>& hyper_blocks) {
+
+/**
+* This will save the normalized dataset back so that we can use the same one in DV with the same normalization.
+*/
+void saveNormalizedVersionToCsv(string fileName, vector<vector<vector<float>>>& data) {
+    ofstream outFile(fileName);
+
+    if (!outFile.is_open()) {
+        cerr << "Error opening file: " << fileName << endl;
+        return;
+    }
+
+    // Assuming all classes have at least one point, get feature count from the first point of the first class
+    int featureCount = data[0][0].size();
+
+    // Write the header
+    for (int i = 0; i < featureCount; i++) {
+        outFile << "x" << i << ",";
+    }
+    outFile << "label\n";  // Add label column
+
+    // Iterate through classes
+    for (int i = 0; i < data.size(); i++) {
+        // Iterate through points in class
+        for (int j = 0; j < data[i].size(); j++) {
+            // Iterate through attributes of a point
+            for (int k = 0; k < data[i][j].size(); k++) {
+                outFile << data[i][j][k] << ",";
+            }
+            outFile << i << "\n";  // Append class label
+        }
+    }
+
+    outFile.close();
+}
+
+
+/**
+* We generate a confusion matrix, but allow for points to fall into multiple blocks at a time
+* that is why we go through blocks on outerloop and whole dataset on the inside.
+*/
+vector<vector<long>> testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, vector<vector<vector<float>>> testSet){
+
+  	// Keep track of which points were never inside of a block, when a point is classifed we increment the map internal vectors correct positon
+    // there should be CLASS_NUM unordered_maps or just hashmaps, in each will hold a vector<point_index, vector<int> of len(class_num)>
+    vector<unordered_map<int, vector<int>>> pointsNotClassified(CLASS_MAP.size());
+
+    // Go through each class
+    for(int cls = 0; cls < NUM_CLASSES; cls++){
+        // Put the index of each point in each class into a set, this is how we will track which points were never classified.
+        for(int j = 0; j < testSet[cls].size(); j++){
+            pointsNotClassified[cls][j] = vector<int>(NUM_CLASSES);
+        }
+    }
+
+
+	// Make a n x n matrix for the confusion matrix
+	vector<vector<long>> ultraConfusionMatrix(NUM_CLASSES, vector<long>(NUM_CLASSES, 0));
+    vector<vector<long>> regularConfusionMatrix(NUM_CLASSES, vector<long>(NUM_CLASSES, 0));
+
+
+    cout << "Testing on " << hyperBlocks.size() << " hyperblocks" << endl;
+    cout << "Testing on " << testSet.size() << " classes" << endl;
+    cout << "Testing on " << testSet[0].size() << " points in first class." << endl;
+    cout << "Testing on " << NUM_CLASSES << " classes" << endl;
+    cout << "Testing on " << FIELD_LENGTH << " attributes" << endl;
+
+    bool anyPointWasInside = false;
+
+    // Go through all the blocks
+	for(int hb = 0; hb < hyperBlocks.size(); hb++){
+        HyperBlock& currBlock = hyperBlocks[hb];
+        // Go through all the classes in the testSet
+		for(int cls = 0; cls < NUM_CLASSES; cls++){
+            // go through all the points in a clases
+        	for(int pnt = 0; pnt < testSet[cls].size(); pnt++){
+           		const vector<float>& point = testSet[cls][pnt];
+
+                if(currBlock.inside_HB(point.size(), point.data())){
+
+					ultraConfusionMatrix[cls][currBlock.classNum]++;
+
+
+                    // Go to the actual class, to the right points entry, and increment the "predicted" class (the hb it was in).
+                    pointsNotClassified[cls][pnt][currBlock.classNum]++;
+                }
+        	}
+     	}
+    }
+
+    for(int i = 0; i < NUM_CLASSES; i++){
+        cout << pointsNotClassified[0][0][i] << endl;
+    }
+
+    // Lets count how many points fell into blocks of multiple classes
+    for(int i = 0; i < NUM_CLASSES; i++){
+       int numPointsInMultipleClasses = 0;
+       int numPointsInNoBlocks = 0;
+
+       // Go through all the points in a class.
+       for(int pnt = 0; pnt < testSet[i].size(); pnt++){
+           char in = 0;
+
+           // Go through the classification vector for the point
+           for(int cls = 0; cls < NUM_CLASSES; cls++){
+               if(pointsNotClassified[i][pnt][cls] > 0){
+                  in++;
+               }
+
+               // Means it fell into multiple of the same.
+               if(in > 1){
+                   break;
+               }
+           }
+
+           if(in > 1) numPointsInMultipleClasses++;
+
+           if(in == 0) numPointsInNoBlocks++;
+       }
+
+       cout << "CLASS: " << CLASS_MAP_INT[i] << "NUM POINTS IN MULTIPLE CLASSES BLOCKS: " << numPointsInMultipleClasses << endl;
+       cout << "CLASS: " << CLASS_MAP_INT[i] << "NUM POINTS IN NO BLOCKS: " << numPointsInNoBlocks << endl;
+    }
+
+
+
+
+    vector<vector<vector<float>>> unclassifiedPointVec(NUM_CLASSES, vector<vector<float>>()); // [class][pointIdx][attr]
+
+    // Lets count how many points fell into blocks of multiple classes
+    for(int i = 0; i < NUM_CLASSES; i++){
+        // Go through all the points in a class.
+        for(int pnt = 0; pnt < testSet[i].size(); pnt++){
+            int majorityClass = -1;
+            int max = 0;
+
+            // Go through the classification vector for the point
+            for(int cls = 0; cls < NUM_CLASSES; cls++){
+                if(pointsNotClassified[i][pnt][cls] > max){
+                   max = pointsNotClassified[i][pnt][cls];
+                   majorityClass = cls;
+                }
+            }
+
+            // The majority was the one they are actually predicted to be in
+            if(majorityClass != -1){
+                regularConfusionMatrix[i][majorityClass]++;
+
+            }else{
+                // Put the point that wasn't classified into the vector to go to Knn
+                unclassifiedPointVec[i].push_back(testSet[i][pnt]);
+            }
+        }
+    }
+
+    cout << "\n\n\n\n" << endl;
+    cout << "============================ REGULAR CONFUSION MATRIX ==================" << endl;
+    printConfusionMatrix(regularConfusionMatrix);
+    cout << "============================ END CONFUSION MATRIX ======================" << endl;
+
+	cout << "Any point was inside" << anyPointWasInside <<  endl;
+
+    cout << "\n\n\n\n" << endl;
+    cout << "============================ K-NN CONFUSION MATRIX ==================" << endl;
+    vector<vector<long>> secondConfusionMatrix = kNN(unclassifiedPointVec, hyperBlocks, 5);
+    printConfusionMatrix(secondConfusionMatrix);
+    cout << "============================ END K-NN MATRIX ======================" << endl;
+    for (int i = 0; i < NUM_CLASSES; i++) {
+        for (int j = 0; j < NUM_CLASSES; j++) {
+            regularConfusionMatrix[i][j] = regularConfusionMatrix[i][j] + secondConfusionMatrix[i][j];
+        }
+    }
+
+    cout << "\n\n\n\n" << endl;
+    cout << "============================ DISTINCT POINT CONFUSION MATRIX ==================" << endl;
+    printConfusionMatrix(regularConfusionMatrix);
+    cout << "============================ END DISTINCE POINT MATRIX ======================" << endl;
+    cout << "\n\n\n\n" << endl;
+
+    return ultraConfusionMatrix;
+}
+
+
+void printConfusionMatrix(vector<vector<long>>& data) {
+    vector<string> classLabels(NUM_CLASSES);
+
+    vector<float> accuracies(NUM_CLASSES, 0.0);
+
+    // Calculate the accuracies of each of the rows.
+    // Only the diagonal values are correct predictions
+    long overallCorrect = 0;
+    long overallIncorrect = 0;
+    long overallTotalClassifications = 0;
+    for (int i = 0; i < NUM_CLASSES; ++i) {
+        long correct = 0;
+        long incorrect = 0;
+        long totalClassifications = 0;
+
+        for (int j = 0; j < NUM_CLASSES; ++j) {
+            totalClassifications += data[i][j];
+            if (i == j) {
+                correct += data[i][j];  // Diagonal value indicates correct predictions
+            } else {
+                incorrect += data[i][j];  // Off-diagonal values are incorrect predictions
+            }
+        }
+
+        if (totalClassifications > 0) {
+            accuracies[i] = (float)correct / totalClassifications;
+        }
+
+        overallCorrect += correct;
+        overallIncorrect += incorrect;
+        overallTotalClassifications += totalClassifications;
+    }
+
+    // Overall Accuracy, prevent divide by 0 with the ternary
+    float overallAccuracy = (overallTotalClassifications != 0) ? ((float)overallCorrect / overallTotalClassifications) : 0;
+
+    // Calculate column width based on the longest class name and largest number
+    size_t maxWidth = 8; // Minimum width
+
+    for (const auto& name : classLabels) {
+        maxWidth = max(maxWidth, name.length() + 2);
+    }
+
+    for (const auto& row : data) {
+        for (const auto& cell : row) {
+            string numStr = to_string(cell);
+            maxWidth = max(maxWidth, numStr.length() + 2);
+        }
+    }
+
+    // Print header row with "Actual\Predicted" in the corner
+    cout << setw(maxWidth) << "Act\\Pred" << " |";
+    for (int i = 0; i < NUM_CLASSES; i++) {
+        cout << setw(maxWidth) << CLASS_MAP_INT[i] << " |";
+    }
+    cout << endl;
+
+    // Print separator line
+    cout << string(maxWidth, '-') << "-+";
+    for (size_t i = 0; i < CLASS_MAP_INT.size(); i++) {
+        cout << string(maxWidth, '-') << "-+";
+    }
+    cout << endl;
+
+    // Print each row with row label
+    for (size_t i = 0; i < data.size(); i++) {
+        cout << setw(maxWidth) << CLASS_MAP_INT[i] << " |";
+
+        for (size_t j = 0; j < data[i].size(); j++) {
+            cout << setw(maxWidth) << data[i][j] << " |";
+        }
+
+        cout << accuracies[i] << endl;
+    }
+
+    cout << "The overall accuracy is " << overallAccuracy << endl;
+}
+
+// Function to clear the console screen (cross-platform)
+void clearScreen() {
+    #ifdef _WIN32
+        system("cls");
+    #else
+        system("clear");
+    #endif
+}
+
+#ifdef _WIN32
+    const string PATH_SEPARATOR = "\\";
+#else
+    const string PATH_SEPARATOR = "/";
+#endif
+
+// Function to wait for user input before continuing
+void waitForEnter() {
+    cout << "\nPress Enter to continue...";
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+}
+
+// Function to display the main menu
+void displayMainMenu() {
+    clearScreen();
+    cout << "=== HyperBlock Classification System ===\n\n";
+    cout << "1. Import training data.\n";
+    cout << "2. Import testing data.\n";
+    cout << "3. Save normalized training data.\n";
+    cout << endl;
+    cout << "4. Import existing hyperblocks.\n";
+    cout << "5. Export existing hyperblocks.\n";
+    cout << "6. Generate new hyperblocks.\n";
+    cout << "7. Simplify hyperblocks.\n";
+    cout << "8. Test hyperblocks on dataset.\n";
+    cout << endl;
+    cout << "9. Exit\n\n";
+}
+
+
+
+/**
+*    This is the function we will use to classify data that was outside the bounds of all hyperBlocks
+*
+*    We will take a point and find its K Nearest Neigbors and then use a simple voting majority of these
+*    to assign the point to the correct class.
+*
+*/
+vector<vector<long>> kNN(vector<vector<vector<float>>> unclassifiedData, vector<HyperBlock>& hyperBlocks, int k){
+
+    if(k > hyperBlocks.size()) k = (int) sqrt(hyperBlocks.size());
+
+
+    // Keep track of assignments with something
+    vector<vector<float>> classifications(NUM_CLASSES);    // [class][pointIndex]
+    for(int i = 0; i < NUM_CLASSES; i++){
+      classifications[i] = vector<float>(unclassifiedData[i].size());    // Put the vector for each class
+    }
+
+    // Flatten out the hyperBlocks into their centers
+    vector<vector<vector<float>>> hyperBlockCentroids(NUM_CLASSES);    //[class][block][attribute]
+
+    for(const auto& hyperBlock : hyperBlocks){
+        // Get the center of the block
+        vector<float> blockCenter(FIELD_LENGTH, 0);
+        for(int i = 0; i < FIELD_LENGTH; i++){
+            blockCenter[i] = (hyperBlock.maximums[i][0] + hyperBlock.minimums[i][0]) / 2.0f;
+        }
+
+        hyperBlockCentroids[hyperBlock.classNum].push_back(blockCenter);
+    }
+
+
+
+
+    // For each class of points
+    for(int i = 0; i < NUM_CLASSES; i++){
+
+        // For each point in unclassified points
+        for(int point = 0; point < unclassifiedData[i].size(); point++){
+            // Use a priority queue to keep track of the top k best distances
+            priority_queue<pair<float, int>> kNearest;
+
+
+            // Go through all the blocks and find the distances to their centers
+            for(int blockClass = 0; blockClass < NUM_CLASSES; blockClass++){
+                for(const auto& currHBCenter : hyperBlockCentroids[blockClass]){
+                    // Find the distance between the HB center and the unclassified data point
+                    float distance = euclideanDistance(currHBCenter, unclassifiedData[i][point]);
+
+                    if(kNearest.size() < k){    // always add when queue is not at k yet.
+                        kNearest.push(make_pair(distance, blockClass));
+                    }
+                    else if(distance < kNearest.top().first){ // Queue is big enough, and this distance is better than the worst in queue
+                        kNearest.pop();    // pop the max (worst distance)
+                        kNearest.push(make_pair(distance, blockClass));    // push the better distance.
+                    }
+                }
+            }
+
+            // Count votes for each class
+            vector<int> votes(NUM_CLASSES, 0);
+            while(!kNearest.empty()){
+                votes[kNearest.top().second]++;
+                kNearest.pop();
+            }
+
+            cout << "real class: " << i << " :  ";
+            for(const auto vote: votes){
+               cout << vote << ", ";
+            }
+            cout << endl;
+            int majorityClass = 5;
+            int maxVotes = 0;
+
+            for(int c = 0; c < NUM_CLASSES; c++){
+                if(votes[c] > maxVotes){
+                   maxVotes = votes[c];
+                   majorityClass = c;
+                }
+            }
+
+            // WE WILL ASSUME WE DONT HAVE A ID COLUMN.
+            // WE WILL ASSSUME THE LAST COLUMN IS A CLASS COLUMN
+            classifications[i][point] = majorityClass;
+        }
+    }
+
+    vector<vector<long>> regularConfusionMatrix(NUM_CLASSES, vector<long>(NUM_CLASSES, 0));
+
+    // Go through the classes.
+    for(int classN = 0; classN < NUM_CLASSES; classN++){
+        for(int point = 0; point < classifications[classN].size(); point++){
+            regularConfusionMatrix[classN][classifications[classN][point]]++;
+        }
+    }
+
+    return regularConfusionMatrix;
+}
+
+vector<vector<float>> flattenMinsMaxesForRUB(vector<HyperBlock>& hyper_blocks){
     // Declare our vectors not using the "vexing declaration"
     vector<float> flatMinsList;
     vector<float> flatMaxesList;
@@ -1179,95 +1773,219 @@ void removeUselessAttributesCUDA(vector<HyperBlock> &hyper_blocks, vector<vector
     }
 }
 
-// WE WILL ASSUME WE DONT HAVE A ID COLUMN.
-// WE WILL ASSSUME THE LAST COLUMN IS A CLASS COLUMN
-int main(int argc, char* argv[]) {
-    printf("USER WARNING :: ENSURE THAT THERE IS NO ID COLUMN\n");
-    printf("USER WARNING :: ENSURE THAT THE LAST COLUMN IS A CLASS COLUMN\n");
+/**
+ *     EUCLIDEAN DISTANCE OF TWO VECTORS.
+ */
+float euclideanDistance(const vector<float>& hbCenter, const vector<float>& point){
+    float sumSquaredDifference = 0.0f;
 
-    // dimension 1 is the class, then it is just a list of points, since each point is a list of floats.
-    vector<vector<vector<float>>> data = dataSetup(argv[1]);
-
-    cout << "NUM ATTRIBUTES : " << FIELD_LENGTH << endl;
-    cout << "NUM CLASSES    : " << NUM_CLASSES << endl;
-    minMaxNormalization(data);
-	//print3DVector(data);
-
-    // get our best vector for each class. then we make a list of indices for each class so we can sort them.
-    const vector<vector<float>> &bestVectors = linearDiscriminantAnalysis(data);
-    vector<vector<int>> bestVectorsIndexes(NUM_CLASSES, vector<int>(FIELD_LENGTH, 0));
-    vector<int> eachClassBestVectorIndex(NUM_CLASSES);
-    for (int i = 0; i < NUM_CLASSES; i++) {
-        for (int j = 0; j < FIELD_LENGTH; j++) {
-            bestVectorsIndexes[i][j] = j;
-        }
-        // sort this classes attributes smallest to biggest, so that we can get a sense of the order to try and remove attributes in.
-        sort(bestVectorsIndexes[i].begin(), 
-              bestVectorsIndexes[i].end(),
-              [&](int a, int b) {
-                  // sort smallest to biggest
-                  return fabs(bestVectors[i][a]) < fabs(bestVectors[i][b]);
-              });
-        eachClassBestVectorIndex[i] = bestVectorsIndexes[i][0];
+    for(int i = 0; i < FIELD_LENGTH; i++){
+        float diff = hbCenter[i] - point[i];
+        sumSquaredDifference += diff * diff;
     }
 
-    // Make the hyperblocks list to store the hyperblocks that are generated.
-	vector<HyperBlock> hyper_blocks;
+    return sqrt(sumSquaredDifference);
+}
 
-    // generate hyperblocks
-    auto start = chrono::high_resolution_clock::now();
+vector<int> runSimplifications(vector<HyperBlock> &hyperBlocks, vector<vector<vector<float>>> &trainData, vector<vector<int>> &bestAttributeOrderings){
 
-    generateHBs(data, hyper_blocks, eachClassBestVectorIndex);
-    auto stop = chrono::high_resolution_clock::now();
-
- 	auto duration_ms = chrono::duration_cast<chrono::milliseconds>(stop - start);
-    cout << "Time taken: " << duration_ms.count() << " ms\n";
-
-    // Calculate duration in seconds
-    auto duration_sec = chrono::duration_cast<chrono::seconds>(stop - start);
-    cout << "Time taken: " << duration_sec.count() << " s\n";
-	cout << "HyperBlocks : " << hyper_blocks.size() << endl;
-
-    cout << "Finished generating HBS\n" << endl;
-    cout << "Number of HBs: " << hyper_blocks.size() << endl;
-
-    // now we remove our useless blocks
-    cout << "STARTING TO REMOVE USELESS BLOCKS" << endl;
-    start = chrono::high_resolution_clock::now();
-
-
-    removeUselessAttributesCUDA(hyper_blocks, data, bestVectorsIndexes);
-
-    removeUselessBlocks(data, hyper_blocks);
-    
-    stop = chrono::high_resolution_clock::now();
-    cout << "Finished removing useless blocks" << endl;
-    
-    duration_ms = chrono::duration_cast<chrono::milliseconds>(stop - start);
-    
-    cout << "Time taken: " << duration_ms.count() << " ms" << endl;
-    cout << "After removing useless blocks we have " << hyper_blocks.size() << " blocks\n" << endl;
-
-    // count our clauses in all our blocks.
+    int runCount = 0;
     int totalClauses = 0;
-    for(HyperBlock &hyperBlock : hyper_blocks) {
-        for(int i = 0; i < FIELD_LENGTH; i++){
-            if (hyperBlock.minimums[i][0] == 0 && hyperBlock.maximums[i][0] == 1.0f){
-                continue;
+    int updatedClauses = 0;
+
+    do{
+        // set our count of what we have to start
+        totalClauses = updatedClauses;
+        runCount++; // counter so we can show how many iterations this took.
+
+        // simplification functions
+        removeUselessAttributesCUDA(hyperBlocks, trainData, bestAttributeOrderings);
+        removeUselessBlocks(trainData, hyperBlocks);
+
+        // count how many we have after simplifications.
+        updatedClauses = 0;
+        for(HyperBlock &hyperBlock : hyperBlocks) {
+            for(int i = 0; i < FIELD_LENGTH; i++){
+                if (hyperBlock.minimums[i][0] == 0 && hyperBlock.maximums[i][0] == 1.0f){
+                    continue;
+                }
+                else
+                    updatedClauses += hyperBlock.minimums[i].size();
             }
-            else
-              totalClauses += hyperBlock.minimums[i].size();
+        }
+
+    // iteratively call the simplifications until we don't remove any more clauses.
+    } while(updatedClauses != totalClauses);
+    return { runCount, totalClauses };
+}
+
+int main(int argc, char* argv[]) {
+    /* File names */
+    string normalizedSaveFile;
+    string hyperBlocksImportFileName;
+    string trainingDataFileName;
+    string testingDataFileName;
+    string hyperBlocksExportFileName;
+
+    // 3-D datasets
+    vector<vector<vector<float>>> testData;
+    vector<vector<vector<float>>> trainingData;
+
+    // Normalization vectors (will be resized later)
+    vector<float> minValues;
+    vector<float> maxValues;
+
+    // Store our HyperBlocks
+    vector<HyperBlock> hyperBlocks;
+
+    // Ultra confusion matrix
+    vector<vector<long>> ultraConfusionMatrix;
+
+    // Variables to be set by LDA; declare without redeclaring later.
+    vector<vector<float>> bestVectors;
+    vector<vector<int>> bestVectorsIndexes;
+    vector<int> eachClassBestVectorIndex;
+
+    if (argc == 2) {
+        // Assuming COMMAND_LINE_ARGS_CLASS is declared somewhere globally.
+        COMMAND_LINE_ARGS_CLASS = stoi(argv[1]);
+        cout << "Running on class index " << COMMAND_LINE_ARGS_CLASS << endl;
+    }
+
+    bool running = true;
+    int choice;
+
+    // Option to use the command line running style
+    if (argc > 1) {
+        // Your command-line style code here (if any)
+    }
+
+    while (running) {
+        displayMainMenu();
+        cin >> choice;
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
+        switch (choice) {
+            case 1: { // IMPORT TRAINING DATA
+                cout << "Enter training data filename: " << endl;
+                system("ls datasets");
+                getline(cin, trainingDataFileName);
+
+                // Prepend the "datasets" directory to the user input.
+                string fullPath = "datasets" + PATH_SEPARATOR + trainingDataFileName;
+
+                // Attempt to read from the file
+                trainingData = dataSetup(fullPath, CLASS_MAP, CLASS_MAP_INT);
+
+                // Resize normalization vectors based on FIELD_LENGTH (assumed to be defined)
+                minValues.assign(FIELD_LENGTH, numeric_limits<float>::infinity());
+                maxValues.assign(FIELD_LENGTH, -numeric_limits<float>::infinity());
+
+                findMinMaxValuesInDataset(trainingData, minValues, maxValues);
+                minMaxNormalization(trainingData, minValues, maxValues);
+
+                // Run LDA on the training data.
+                bestVectors = linearDiscriminantAnalysis(trainingData);
+
+                // Initialize bestVectorsIndexes and eachClassBestVectorIndex for NUM_CLASSES and FIELD_LENGTH.
+                bestVectorsIndexes = vector<vector<int>>(NUM_CLASSES, vector<int>(FIELD_LENGTH, 0));
+                eachClassBestVectorIndex = vector<int>(NUM_CLASSES);
+
+                for (int i = 0; i < NUM_CLASSES; i++) {
+                    for (int j = 0; j < FIELD_LENGTH; j++) {
+                        bestVectorsIndexes[i][j] = j;
+                    }
+                    // Sort the indices by the absolute value of bestVectors for the current class.
+                    sort(bestVectorsIndexes[i].begin(), bestVectorsIndexes[i].end(),
+                         [&](int a, int b) {
+                             return fabs(bestVectors[i][a]) < fabs(bestVectors[i][b]);
+                         });
+                    eachClassBestVectorIndex[i] = bestVectorsIndexes[i][0];
+                }
+
+                // Optionally print the dataset
+                // printDataset(trainingData);
+
+                waitForEnter();
+                break;
+            }
+            case 2: { // IMPORT TESTING DATA
+                cout << "Enter testing data filename: " << endl;
+                system("ls");
+                getline(cin, testingDataFileName);
+                testData = dataSetup(testingDataFileName, CLASS_MAP_TESTING, CLASS_MAP_TESTING_INT);
+                normalizeTestSet(testData, minValues, maxValues);
+                // Not efficient but time-critical.
+                testData = reorderTestingDataset(testData, CLASS_MAP, CLASS_MAP_TESTING);
+                // Optionally print the dataset
+                // printDataset(testData);
+                waitForEnter();
+                break;
+            }
+            case 3: { // SAVE NORMALIZED TRAINING DATA
+                cout << "Enter the file to save the normalized training data to: " << endl;
+                getline(cin, normalizedSaveFile);
+                saveNormalizedVersionToCsv(normalizedSaveFile, trainingData);
+                cout << "Saved normalized training data to: " << normalizedSaveFile << endl;
+                waitForEnter();
+                break;
+            }
+            case 4: { // IMPORT EXISTING HYPERBLOCKS
+                cout << "Enter existing hyperblocks file name: " << endl;
+                getline(cin, hyperBlocksImportFileName);
+                hyperBlocks = loadBasicHBsFromCSV(hyperBlocksImportFileName);
+                cout << "HyperBlocks imported from file " << hyperBlocksImportFileName << " successfully" << endl;
+                waitForEnter();
+                break;
+            }
+            case 5: { // EXPORT HYPERBLOCKS
+                cout << "Enter the file to save HyperBlocks to: " << endl;
+                getline(cin, hyperBlocksExportFileName);
+                saveBasicHBsToCSV(hyperBlocks, hyperBlocksExportFileName);
+                break;
+            }
+            case 6: { // GENERATE NEW HYPERBLOCKS
+                if (trainingData.empty()) {
+                    cout << "\nError: Please import training data first." << endl;
+                    waitForEnter();
+                } else {
+                    hyperBlocks.clear();
+                    generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex);
+                }
+                cout << "Finished Generating HyperBlocks" << endl;
+                waitForEnter();
+                break;
+            }
+            case 7: { // SIMPLIFY HYPERBLOCKS
+                vector<int> result = runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
+                int totalPoints = 0;
+                for (const auto &c : trainingData)
+                    totalPoints += c.size();
+                cout << "After removing useless blocks we have: " << result[1] << " clauses\n";
+                cout << "Ran simplifications: " << result[0] << " Times" << endl;
+                cout << "We had: " << totalPoints << " points\n";
+                waitForEnter();
+                break;
+            }
+            case 8: { // TEST HYPERBLOCKS ON DATASET
+                cout << "Testing hyperblocks on testing dataset" << endl;
+                ultraConfusionMatrix = testAccuracyOfHyperBlocks(hyperBlocks, testData);
+                // Optionally print the confusion matrix
+                printConfusionMatrix(ultraConfusionMatrix);
+                waitForEnter();
+                break;
+            }
+            case 9: {
+                running = false;
+                break;
+            }
+            default: {
+                cout << "\nInvalid choice. Please try again." << endl;
+                waitForEnter();
+                break;
+            }
         }
     }
-    int totalPoints = 0;
-    for(vector<vector<float>> & c : data){
-        totalPoints += c.size();
-    }
-
-    cout << "After removing useless blocks and attributes we have: " << totalClauses << " clauses" << endl;
-    cout << "We had: " << totalPoints << " points" << endl;
-
-    // now we remove our useless attributes
-    saveBasicHBsToCSV(hyper_blocks, "testForDVinCPP.csv");
     return 0;
 }

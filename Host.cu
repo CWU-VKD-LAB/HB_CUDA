@@ -1340,8 +1340,6 @@ void displayMainMenu() {
     cout << "9. Exit\n\n";
 }
 
-
-
 /**
 *    This is the function we will use to classify data that was outside the bounds of all hyperBlocks
 *
@@ -1819,8 +1817,10 @@ vector<int> runSimplifications(vector<HyperBlock> &hyperBlocks, vector<vector<ve
     return { runCount, totalClauses };
 }
 
-int main(int argc, char* argv[]) {
-    /* File names */
+// -------------------------------------------------------------------------
+// Asynchronous mode: run when argc >= 2
+int runAsync(int argc, char* argv[]) {
+    // Local variables for async mode
     string normalizedSaveFile;
     string hyperBlocksImportFileName;
     string trainingDataFileName;
@@ -1836,29 +1836,98 @@ int main(int argc, char* argv[]) {
     vector<float> maxValues;
 
     // Store our HyperBlocks
-    vector<HyperBlock> hyperBlocks;
+    vector<auto> hyperBlocks;
 
     // Ultra confusion matrix
     vector<vector<long>> ultraConfusionMatrix;
 
-    // Variables to be set by LDA; declare without redeclaring later.
+    // Variables to be set by LDA
+
+    if (argc > 3) {
+        cout << "TOO MANY ARGUMENTS!" << endl;
+        exit(1);
+    }
+
+    if (argc == 3) {
+        // Set a global or externally-declared variable
+        COMMAND_LINE_ARGS_CLASS = stoi(argv[2]);
+        cout << "Running on class index " << COMMAND_LINE_ARGS_CLASS << endl;
+    }
+
+    // Process training data from file provided as first argument
+    trainingData = dataSetup(argv[1], CLASS_MAP, CLASS_MAP_INT);
+    cout << "NUM ATTRIBUTES : " << FIELD_LENGTH << endl;
+    cout << "NUM CLASSES : " << NUM_CLASSES << endl;
+
+    // Resize normalization vectors based on FIELD_LENGTH
+    minValues.assign(FIELD_LENGTH, numeric_limits<float>::infinity());
+    maxValues.assign(FIELD_LENGTH, -numeric_limits<float>::infinity());
+
+    findMinMaxValuesInDataset(trainingData, minValues, maxValues);
+    minMaxNormalization(trainingData, minValues, maxValues);
+
+    // Run LDA on the training data.
+    vector<vector<float>>bestVectors = linearDiscriminantAnalysis(trainingData);
+
+    // Initialize indexes for each class
+    vector<vector<int> > bestVectorsIndexes = vector<vector<int> >(NUM_CLASSES, vector<int>(FIELD_LENGTH, 0));
+    vector<int> eachClassBestVectorIndex = vector<int>(NUM_CLASSES);
+
+    // sort our vectors from the LDA by their coefficients so that we can determine an ordering for removing and sorting by best columns in generation
+    for (int i = 0; i < NUM_CLASSES; i++) {
+        for (int j = 0; j < FIELD_LENGTH; j++) {
+            bestVectorsIndexes[i][j] = j;
+        }
+        // Sort indices by absolute value of the coefficients for the current class.
+        sort(bestVectorsIndexes[i].begin(), bestVectorsIndexes[i].end(),
+             [&](int a, int b) {
+                 return fabs(bestVectors[i][a]) < fabs(bestVectors[i][b]);
+             });
+        eachClassBestVectorIndex[i] = bestVectorsIndexes[i][0];
+    }
+
+    generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex);
+    cout << "HYPERBLOCK GENERATION FINISHED!" << endl;
+    cout << "WE FOUND " << hyperBlocks.size() << " HYPERBLOCKS!" << endl;
+
+    vector<int> result = runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
+    int totalPoints = 0;
+    for (const auto &c : trainingData)
+        totalPoints += c.size();
+    cout << "After removing useless blocks we have: " << result[1] << " clauses\n";
+    cout << "Ran simplifications: " << result[0] << " Times" << endl;
+    cout << "We had: " << totalPoints << " points\n";
+
+    saveBasicHBsToCSV(hyperBlocks, "AsyncBlockOutput");
+    return 0;
+}
+
+// -------------------------------------------------------------------------
+// Interactive mode: run when argc < 2
+void runInteractive() {
+    // Local variables for interactive mode
+    string normalizedSaveFile;
+    string hyperBlocksImportFileName;
+    string trainingDataFileName;
+    string testingDataFileName;
+    string hyperBlocksExportFileName;
+
+    vector<vector<vector<float>>> testData;
+    vector<vector<vector<float>>> trainingData;
+
+    vector<float> minValues;
+    vector<float> maxValues;
+
+    vector<auto> hyperBlocks;
+
+    vector<vector<long>> ultraConfusionMatrix;
+
     vector<vector<float>> bestVectors;
     vector<vector<int>> bestVectorsIndexes;
     vector<int> eachClassBestVectorIndex;
 
-    if (argc == 2) {
-        // Assuming COMMAND_LINE_ARGS_CLASS is declared somewhere globally.
-        COMMAND_LINE_ARGS_CLASS = stoi(argv[1]);
-        cout << "Running on class index " << COMMAND_LINE_ARGS_CLASS << endl;
-    }
-
     bool running = true;
     int choice;
-
-    // Option to use the command line running style
-    if (argc > 1) {
-        // Your command-line style code here (if any)
-    }
 
     while (running) {
         displayMainMenu();
@@ -1869,26 +1938,21 @@ int main(int argc, char* argv[]) {
         switch (choice) {
             case 1: { // IMPORT TRAINING DATA
                 cout << "Enter training data filename: " << endl;
-                system("ls datasets");
+                system("ls datasets");  // list available datasets
                 getline(cin, trainingDataFileName);
+                // Prepend the directory (adjust PATH_SEPARATOR as needed)
+                string fullPath = "datasets" + string(PATH_SEPARATOR) + trainingDataFileName;
+                trainingData = dataSetup(fullPath.c_str(), CLASS_MAP, CLASS_MAP_INT);
 
-                // Prepend the "datasets" directory to the user input.
-                string fullPath = "datasets" + PATH_SEPARATOR + trainingDataFileName;
-
-                // Attempt to read from the file
-                trainingData = dataSetup(fullPath, CLASS_MAP, CLASS_MAP_INT);
-
-                // Resize normalization vectors based on FIELD_LENGTH (assumed to be defined)
+                // Resize normalization vectors based on FIELD_LENGTH
                 minValues.assign(FIELD_LENGTH, numeric_limits<float>::infinity());
                 maxValues.assign(FIELD_LENGTH, -numeric_limits<float>::infinity());
-
                 findMinMaxValuesInDataset(trainingData, minValues, maxValues);
                 minMaxNormalization(trainingData, minValues, maxValues);
 
                 // Run LDA on the training data.
                 bestVectors = linearDiscriminantAnalysis(trainingData);
 
-                // Initialize bestVectorsIndexes and eachClassBestVectorIndex for NUM_CLASSES and FIELD_LENGTH.
                 bestVectorsIndexes = vector<vector<int>>(NUM_CLASSES, vector<int>(FIELD_LENGTH, 0));
                 eachClassBestVectorIndex = vector<int>(NUM_CLASSES);
 
@@ -1896,17 +1960,12 @@ int main(int argc, char* argv[]) {
                     for (int j = 0; j < FIELD_LENGTH; j++) {
                         bestVectorsIndexes[i][j] = j;
                     }
-                    // Sort the indices by the absolute value of bestVectors for the current class.
                     sort(bestVectorsIndexes[i].begin(), bestVectorsIndexes[i].end(),
                          [&](int a, int b) {
                              return fabs(bestVectors[i][a]) < fabs(bestVectors[i][b]);
                          });
                     eachClassBestVectorIndex[i] = bestVectorsIndexes[i][0];
                 }
-
-                // Optionally print the dataset
-                // printDataset(trainingData);
-
                 waitForEnter();
                 break;
             }
@@ -1914,19 +1973,17 @@ int main(int argc, char* argv[]) {
                 cout << "Enter testing data filename: " << endl;
                 system("ls");
                 getline(cin, testingDataFileName);
-                testData = dataSetup(testingDataFileName, CLASS_MAP_TESTING, CLASS_MAP_TESTING_INT);
-                normalizeTestSet(testData, minValues, maxValues);
-                // Not efficient but time-critical.
-                testData = reorderTestingDataset(testData, CLASS_MAP, CLASS_MAP_TESTING);
-                // Optionally print the dataset
-                // printDataset(testData);
+                testData = dataSetup(testingDataFileName.c_str(), CLASS_MAP_TESTING, CLASS_MAP_TESTING_INT);
+                // Normalize and reorder testing data as needed.
+                // normalizeTestSet(testData, minValues, maxValues);
+                // testData = reorderTestingDataset(testData, CLASS_MAP, CLASS_MAP_TESTING);
                 waitForEnter();
                 break;
             }
             case 3: { // SAVE NORMALIZED TRAINING DATA
                 cout << "Enter the file to save the normalized training data to: " << endl;
                 getline(cin, normalizedSaveFile);
-                saveNormalizedVersionToCsv(normalizedSaveFile, trainingData);
+                // saveNormalizedVersionToCsv(normalizedSaveFile, trainingData);
                 cout << "Saved normalized training data to: " << normalizedSaveFile << endl;
                 waitForEnter();
                 break;
@@ -1934,7 +1991,7 @@ int main(int argc, char* argv[]) {
             case 4: { // IMPORT EXISTING HYPERBLOCKS
                 cout << "Enter existing hyperblocks file name: " << endl;
                 getline(cin, hyperBlocksImportFileName);
-                hyperBlocks = loadBasicHBsFromCSV(hyperBlocksImportFileName);
+                // hyperBlocks = loadBasicHBsFromCSV(hyperBlocksImportFileName);
                 cout << "HyperBlocks imported from file " << hyperBlocksImportFileName << " successfully" << endl;
                 waitForEnter();
                 break;
@@ -1942,7 +1999,7 @@ int main(int argc, char* argv[]) {
             case 5: { // EXPORT HYPERBLOCKS
                 cout << "Enter the file to save HyperBlocks to: " << endl;
                 getline(cin, hyperBlocksExportFileName);
-                saveBasicHBsToCSV(hyperBlocks, hyperBlocksExportFileName);
+                // saveBasicHBsToCSV(hyperBlocks, hyperBlocksExportFileName);
                 break;
             }
             case 6: { // GENERATE NEW HYPERBLOCKS
@@ -1970,9 +2027,8 @@ int main(int argc, char* argv[]) {
             }
             case 8: { // TEST HYPERBLOCKS ON DATASET
                 cout << "Testing hyperblocks on testing dataset" << endl;
-                ultraConfusionMatrix = testAccuracyOfHyperBlocks(hyperBlocks, testData);
-                // Optionally print the confusion matrix
-                printConfusionMatrix(ultraConfusionMatrix);
+                // ultraConfusionMatrix = testAccuracyOfHyperBlocks(hyperBlocks, testData);
+                // printConfusionMatrix(ultraConfusionMatrix);
                 waitForEnter();
                 break;
             }
@@ -1987,5 +2043,17 @@ int main(int argc, char* argv[]) {
             }
         }
     }
+}
+
+// -------------------------------------------------------------------------
+// Main entry point: choose mode based on argc.
+int main(int argc, char* argv[]) {
+
+    // asynchronous mode. useful for giant datasets that are going to take hours.
+    if (argc >= 2)
+        return runAsync(argc, argv);
+
+    // this is for testing results and testing small data.
+    runInteractive();
     return 0;
 }

@@ -1,3 +1,4 @@
+/*
 #include <cooperative_groups.cuh>
 #include <cuda_runtime.h>
 namespace cg = cooperative_groups;
@@ -138,3 +139,5 @@ __global__ void merger_cuda(float *hyperBlockMins, float *hyperBlockMaxes, float
         }
     }
 }
+
+*/

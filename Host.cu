@@ -1836,7 +1836,7 @@ int runAsync(int argc, char* argv[]) {
     vector<float> maxValues;
 
     // Store our HyperBlocks
-    vector<auto> hyperBlocks;
+    vector<HyperBlock> hyperBlocks;
 
     // Ultra confusion matrix
     vector<vector<long>> ultraConfusionMatrix;
@@ -1918,7 +1918,7 @@ void runInteractive() {
     vector<float> minValues;
     vector<float> maxValues;
 
-    vector<auto> hyperBlocks;
+    vector<HyperBlock> hyperBlocks;
 
     vector<vector<long>> ultraConfusionMatrix;
 
@@ -2027,8 +2027,8 @@ void runInteractive() {
             }
             case 8: { // TEST HYPERBLOCKS ON DATASET
                 cout << "Testing hyperblocks on testing dataset" << endl;
-                // ultraConfusionMatrix = testAccuracyOfHyperBlocks(hyperBlocks, testData);
-                // printConfusionMatrix(ultraConfusionMatrix);
+                ultraConfusionMatrix = testAccuracyOfHyperBlocks(hyperBlocks, testData);
+                printConfusionMatrix(ultraConfusionMatrix);
                 waitForEnter();
                 break;
             }

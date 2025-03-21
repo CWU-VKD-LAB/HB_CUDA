@@ -9,7 +9,7 @@ when compared to Black-Box models.
 
 
 Compile:
-    nvcc -o a .\Host.cpp .\CudaUtil.cpp .\HyperBlock.cpp .\HyperBlockCuda.cu
+    nvcc -o a .\Host.cu .\hyperblock\HyperBlock.cpp .\hyperblock_generation\MergerHyperBlock.cu .\cuda_util\CudaUtil.cpp .\data_utilities\DataUtil.cpp .\interval_hyperblock\IntervalHyperBlock.cpp .\knn\Knn.cpp .\screen_output\PrintingUtil.cpp .\simplifications\Simplifications.cpp
 
 Run:
     ./a

@@ -158,7 +158,8 @@ std::vector<std::vector<long>> testAccuracyOfHyperBlocks(std::vector<HyperBlock>
 
     std::cout << "\n\n\n\n" << std::endl;
     std::cout << "============================ K-NN CONFUSION MATRIX ==================" << std::endl;
-    std::vector<std::vector<long>> secondConfusionMatrix = Knn::kNN(unclassifiedPointVec, hyperBlocks, 5, NUM_CLASSES);
+    int k = 1;
+    std::vector<std::vector<long>> secondConfusionMatrix = Knn::kNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
      PrintingUtil::printConfusionMatrix(secondConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
     std::cout << "============================ END K-NN MATRIX ======================" << std::endl;
     for (int i = 0; i < NUM_CLASSES; i++) {
@@ -296,11 +297,14 @@ void runInteractive() {
         switch (choice) {
             case 1: { // IMPORT TRAINING DATA
                 std::cout << "Enter training data filename: " << std::endl;
-                system("ls DATASETS");  // list available DATASETS
+                system("ls DATASETS");
                 std::getline(std::cin, trainingDataFileName);
-                // Prepend the directory (adjust PATH_SEPARATOR as needed)
+
                 std::string fullPath = "DATASETS" + std::string(PATH_SEPARATOR) + trainingDataFileName;
                 trainingData = DataUtil::dataSetup(fullPath.c_str(), CLASS_MAP, CLASS_MAP_INT);
+
+                FIELD_LENGTH = trainingData[0][0].size();
+                NUM_CLASSES = trainingData.size();
 
                 // Resize normalization vectors based on FIELD_LENGTH
                 minValues.assign(FIELD_LENGTH, std::numeric_limits<float>::infinity());
@@ -308,7 +312,7 @@ void runInteractive() {
                 DataUtil::findMinMaxValuesInDataset(trainingData, minValues, maxValues, FIELD_LENGTH);
                 DataUtil::minMaxNormalization(trainingData, minValues, maxValues, FIELD_LENGTH);
 
-                // Run LDA on the training data.
+                /* Run LDA on the training data.
                 bestVectors = linearDiscriminantAnalysis(trainingData);
 
                 bestVectorsIndexes = std::vector<std::vector<int>>(NUM_CLASSES, std::vector<int>(FIELD_LENGTH, 0));
@@ -324,6 +328,7 @@ void runInteractive() {
                          });
                     eachClassBestVectorIndex[i] = bestVectorsIndexes[i][0];
                 }
+                 */
                 PrintingUtil::waitForEnter();
                 break;
             }

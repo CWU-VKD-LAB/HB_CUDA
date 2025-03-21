@@ -6,6 +6,7 @@
 #include <vector>
 #include <utility>
 #include <queue>
+#include <iostream>
 /**
 *    This is the function we will use to classify data that was outside the bounds of all hyperBlocks
 *
@@ -24,19 +25,6 @@ std::vector<std::vector<long>> Knn::kNN(std::vector<std::vector<std::vector<floa
       classifications[i] = std::vector<float>(unclassifiedData[i].size());    // Put the std::vector for each class
     }
 
-    // Flatten out the hyperBlocks into their centers
-    std::vector<std::vector<std::vector<float>>> hyperBlockCentroids(NUM_CLASSES);    //[class][block][attribute]
-
-    for(const auto& hyperBlock : hyperBlocks){
-        // Get the center of the block
-        std::vector<float> blockCenter(FIELD_LENGTH, 0);
-        for(int i = 0; i < FIELD_LENGTH; i++){
-            blockCenter[i] = (hyperBlock.maximums[i][0] + hyperBlock.minimums[i][0]) / 2.0f;
-        }
-
-        hyperBlockCentroids[hyperBlock.classNum].push_back(blockCenter);
-    }
-
     // For each class of points
     for(int i = 0; i < NUM_CLASSES; i++){
 
@@ -45,20 +33,20 @@ std::vector<std::vector<long>> Knn::kNN(std::vector<std::vector<std::vector<floa
             // Use a priority queue to keep track of the top k best distances
             std::priority_queue<std::pair<float, int>> kNearest;
 
-
             // Go through all the blocks and find the distances to their centers
-            for(int blockClass = 0; blockClass < NUM_CLASSES; blockClass++){
-                for(const auto& currHBCenter : hyperBlockCentroids[blockClass]){
-                    // Find the distance between the HB center and the unclassified data point
-                    float distance = Knn::euclideanDistance(currHBCenter, unclassifiedData[i][point], FIELD_LENGTH);
+            for(const auto& hyperBlock : hyperBlocks){
+                // Find the distance between the HB center and the unclassified data point
+                float bottomDist = Knn::euclideanDistance(hyperBlock.minimums, unclassifiedData[i][point], FIELD_LENGTH);
+                float topDist = Knn::euclideanDistance(hyperBlock.minimums, unclassifiedData[i][point], FIELD_LENGTH);
 
-                    if(kNearest.size() < k){    // always add when queue is not at k yet.
-                        kNearest.push(std::make_pair(distance, blockClass));
-                    }
-                    else if(distance < kNearest.top().first){ // Queue is big enough, and this distance is better than the worst in queue
-                        kNearest.pop();    // pop the max (worst distance)
-                        kNearest.push(std::make_pair(distance, blockClass));    // push the better distance.
-                    }
+                float distance = std::min(bottomDist, topDist);
+
+                if(kNearest.size() < k){    // always add when queue is not at k yet.
+                    kNearest.push(std::make_pair(distance, hyperBlock.classNum));
+                }
+                else if(distance < kNearest.top().first){ // Queue is big enough, and this distance is better than the worst in queue
+                    kNearest.pop();    // pop the max (worst distance)
+                    kNearest.push(std::make_pair(distance, hyperBlock.classNum));    // push the better distance.
                 }
             }
 
@@ -100,11 +88,11 @@ std::vector<std::vector<long>> Knn::kNN(std::vector<std::vector<std::vector<floa
 
 
 //EUCLIDEAN DISTANCE OF TWO VECTORS.
-float Knn::euclideanDistance(const std::vector<float>& hbCenter, const std::vector<float>& point, int FIELD_LENGTH){
+float Knn::euclideanDistance(const std::vector<std::vector<float>>& blockBound, const std::vector<float>& point, int FIELD_LENGTH){
     float sumSquaredDifference = 0.0f;
 
     for(int i = 0; i < FIELD_LENGTH; i++){
-        float diff = hbCenter[i] - point[i];
+        float diff = blockBound[i][0] - point[i];
         sumSquaredDifference += diff * diff;
     }
 

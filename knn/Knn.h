@@ -11,7 +11,7 @@
 
 class Knn {
     public:
-       static float euclideanDistance(const std::vector<float>& hbCenter, const std::vector<float>& point, int FIELD_LENGTH);
+       static float euclideanDistance(const std::vector<std::vector<float>>& blockBound, const std::vector<float>& point, int FIELD_LENGTH);
        static std::vector<std::vector<long>> kNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES);
 
 

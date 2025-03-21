@@ -214,6 +214,7 @@ void DataUtil::normalizeTestSet(std::vector<std::vector<std::vector<float>>>& te
 
 
 void DataUtil::minMaxNormalization(std::vector<std::vector<std::vector<float>>>& dataset, const std::vector<float>& minValues, const std::vector<float>& maxValues, int FIELD_LENGTH) {
+    std::cout << "Normalizing the dataset" << std::endl;
     if (dataset.empty()) return;
 
     int num_classes = dataset.size();

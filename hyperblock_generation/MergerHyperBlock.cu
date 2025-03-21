@@ -1,4 +1,4 @@
-#include "HyperBlockCuda.cuh"
+#include "MergerHyperBlock.cuh"
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include <limits>

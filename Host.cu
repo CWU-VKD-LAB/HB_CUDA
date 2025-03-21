@@ -11,9 +11,6 @@
 #include "./lda/LDA.cpp"
 #include <iomanip>
 #include <algorithm>
-#include <queue>
-
-
 #include <string>
 #include <vector>
 #include <map>
@@ -42,221 +39,6 @@ std::map<std::string, int> CLASS_MAP_TESTING;
 
 std::map<int, std::string> CLASS_MAP_INT;
 std::map<int, std::string> CLASS_MAP_TESTING_INT;
-
-
-
-// Source
-void merger_cuda(const std::vector<std::vector<std::vector<float>>>& dataWithSkips, const std::vector<std::vector<std::vector<float>>>& allData, std::vector<HyperBlock>& hyperBlocks) {
-
-    // Calculate total points
-    int numPoints = 0;
-    for (const auto& classData : allData) {
-        numPoints += classData.size();
-    }
-
-    // Count blocks per class
-    std::vector<int> numBlocksOfEachClass(NUM_CLASSES, 0);
-    for (const auto& hb : hyperBlocks) {
-        numBlocksOfEachClass[hb.classNum]++;
-    }
-
-    std::vector<std::vector<HyperBlock>> resultingBlocks(NUM_CLASSES);
-
-    int PADDED_LENGTH = ((FIELD_LENGTH + 3) / 4) * 4;
-    // Find best occupancy
-    int sharedMemSize = 2 * PADDED_LENGTH * sizeof(float);
-    int minGridSize, blockSize;
-    cudaError_t err = cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, mergerHyperBlocks, sharedMemSize, 0);
-    if (err != cudaSuccess) {
-        printf("CUDA error in cudaOccupancyMaxPotentialBlockSize: %s\n", cudaGetErrorString(err));
-        exit(-1);
-    }
-
-
-    int temp = 0;
-    int goToClass = NUM_CLASSES;
-    if (COMMAND_LINE_ARGS_CLASS != -1){
-         temp = COMMAND_LINE_ARGS_CLASS;
-         goToClass = COMMAND_LINE_ARGS_CLASS + 1;
-    }
-
-    for (int classN = temp; classN < goToClass; classN++) {
-        
-        // set our device based on class. this way even single threaded we use multiple GPUs
-        // MORE MULTI GPU BUSINESS
-        //cudaSetDevice(classN % deviceCount);
-
-        int totalDataSetSizeFlat = numPoints * PADDED_LENGTH;
-        int sizeWithoutHBpoints = ((dataWithSkips[classN].size() + numBlocksOfEachClass[classN]) * PADDED_LENGTH);
-        if (dataWithSkips[classN].empty()) {
-            sizeWithoutHBpoints = numBlocksOfEachClass[classN] * PADDED_LENGTH;
-        }
-
-        // Compute grid size to cover all elements. we already know our ideal block size from before.
-        int gridSize = ((sizeWithoutHBpoints / PADDED_LENGTH) + blockSize - 1) / blockSize;
-
-        #ifdef DEBUG
-        std::cout << "Grid size: " << gridSize << std::endl;
-        std::cout << "Block size: " << blockSize << std::endl;
-        std::cout << "Shared memory size: " << sharedMemSize << std::endl;
-        #endif
-
-        // Allocate host memory
-        std::vector<float> hyperBlockMinsC(sizeWithoutHBpoints);
-        std::vector<float> hyperBlockMaxesC(sizeWithoutHBpoints);
-        std::vector<int> deleteFlagsC(sizeWithoutHBpoints / PADDED_LENGTH);
-
-        int nSize = allData[classN].size();
-        std::vector<float> pointsC(totalDataSetSizeFlat - (nSize * PADDED_LENGTH));
-
-        // Fill hyperblock arrays
-        int currentClassIndex = 0;
-        for (int currentClass = 0; currentClass < dataWithSkips.size(); currentClass++) {
-            for (const auto& point : dataWithSkips[currentClass]) {
-                if (currentClass == classN) {
-                    for (int attr = 0; attr < FIELD_LENGTH; attr++) {
-                        //if (removed[attr]) continue;
-                        hyperBlockMinsC[currentClassIndex] = point[attr];
-                        hyperBlockMaxesC[currentClassIndex] = point[attr];
-                        currentClassIndex++;
-                    }
-                    for (int leftOverAtt = FIELD_LENGTH; leftOverAtt < PADDED_LENGTH; leftOverAtt++) {
-                        hyperBlockMinsC[currentClassIndex] = -std::numeric_limits<float>::infinity();
-                        hyperBlockMaxesC[currentClassIndex] = std::numeric_limits<float>::infinity();
-                        currentClassIndex++;
-                    }
-                }
-            }
-        }
-
-        // Process other class points
-        int otherClassIndex = 0;
-        for (int currentClass = 0; currentClass < allData.size(); currentClass++) {
-            if (currentClass == classN) continue;
-
-            for (const auto& point : allData[currentClass]) {
-                for (int attr = 0; attr < FIELD_LENGTH; attr++) {
-                    pointsC[otherClassIndex++] = point[attr];
-                }
-                for (int leftOverAtt = FIELD_LENGTH; leftOverAtt < PADDED_LENGTH; leftOverAtt++) {
-                    pointsC[otherClassIndex++] = -std::numeric_limits<float>::infinity();
-                }
-            }
-        }
-
-        // Add the existing blocks from intervalHyper
-        for (auto it = hyperBlocks.begin(); it != hyperBlocks.end(); ++it) {
-            if (it->classNum == classN) {
-                for (int i = 0; i < it->minimums.size(); i++) {
-                    //if (removed[i]) continue;
-                    hyperBlockMinsC[currentClassIndex] = it->minimums[i][0];
-                    hyperBlockMaxesC[currentClassIndex] = it->maximums[i][0];
-                    currentClassIndex++;
-                }
-                for (int leftOverAtt = FIELD_LENGTH; leftOverAtt < PADDED_LENGTH; leftOverAtt++) {
-                    hyperBlockMinsC[currentClassIndex] = -std::numeric_limits<float>::infinity();
-                    hyperBlockMaxesC[currentClassIndex] = std::numeric_limits<float>::infinity();
-                    currentClassIndex++;
-                }
-            }
-        }
-
-        // Allocate device memory
-        float *d_hyperBlockMins, *d_hyperBlockMaxes, *d_points;
-        int *d_deleteFlags, *d_mergable, *d_seedQueue, *d_writeSeedQueue;
-
-        cudaMalloc(&d_hyperBlockMins, sizeWithoutHBpoints * sizeof(float));
-        cudaMalloc(&d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float));
-        cudaMalloc(&d_deleteFlags, (sizeWithoutHBpoints / PADDED_LENGTH) * sizeof(int));
-        cudaMemset(d_deleteFlags, 0, (sizeWithoutHBpoints / PADDED_LENGTH) * sizeof(int));
-
-        cudaMalloc(&d_points, pointsC.size() * sizeof(float));
-
-        int numBlocks = hyperBlockMinsC.size() / PADDED_LENGTH;
-        std::vector<int> seedQueue(numBlocks);
-        for(int i = 0; i < numBlocks; i++){
-            seedQueue[i] = i;
-        }
-
-        cudaMalloc(&d_mergable, numBlocks * sizeof(int));
-        cudaMemset(d_mergable, 0, numBlocks * sizeof(int));
-        cudaMalloc(&d_seedQueue, numBlocks * sizeof(int));
-        cudaMalloc(&d_writeSeedQueue, numBlocks * sizeof(int));
-
-        // Copy data to device
-        cudaMemcpy(d_hyperBlockMins, hyperBlockMinsC.data(), sizeWithoutHBpoints * sizeof(float), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_hyperBlockMaxes, hyperBlockMaxesC.data(), sizeWithoutHBpoints * sizeof(float), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_points, pointsC.data(), pointsC.size() * sizeof(float), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_seedQueue, seedQueue.data(), numBlocks * sizeof(int), cudaMemcpyHostToDevice);
-
-        std::cout << "Launched a kernel for class: " << classN << std::endl;
-
-        // funky wap to swap the readQueue and writeQueue
-        int* queues[2] = {d_seedQueue, d_writeSeedQueue};
-        for(int i = 0; i < numBlocks; i++){
-            // swap between the two queues
-            int* readQueue = queues[i & 1];
-            int* writeQueue = queues[(i + 1) & 1];
-            mergerHyperBlocksWrapper(
-                i, 			// seednum
-                readQueue,  // seedQueue
-                numBlocks,  // number seed blocks
-                PADDED_LENGTH,	// num attributes
-                pointsC.size() / PADDED_LENGTH,	// num op class points
-                d_points,						// op class points
-                d_hyperBlockMins,				// mins
-                d_hyperBlockMaxes,				// maxes
-                d_deleteFlags,
-                d_mergable,						// mergable flags
-                gridSize,
-                blockSize,
-                sharedMemSize
-            );
-            cudaDeviceSynchronize();
-
-            // Reorder the seedblock order
-            rearrangeSeedQueueWrapper(i, readQueue, writeQueue, d_deleteFlags, d_mergable, numBlocks, gridSize, blockSize);
-            cudaDeviceSynchronize();
-
-            // Reset mergable flags
-            resetMergableFlagsWrapper(d_mergable, numBlocks, gridSize, blockSize);
-            cudaDeviceSynchronize();
-        }
-
-        // Copy results back
-        cudaMemcpy(hyperBlockMinsC.data(), d_hyperBlockMins, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
-        cudaMemcpy(hyperBlockMaxesC.data(), d_hyperBlockMaxes, sizeWithoutHBpoints * sizeof(float), cudaMemcpyDeviceToHost);
-        cudaMemcpy(deleteFlagsC.data(), d_deleteFlags, deleteFlagsC.size() * sizeof(int), cudaMemcpyDeviceToHost);
-        // Process results
-        for (int i = 0; i < hyperBlockMinsC.size(); i += PADDED_LENGTH) {
-            
-            if (deleteFlagsC[i / PADDED_LENGTH] == -1) continue;  // -1 is a seed block which was merged to. so it doesn't need to be copied back.
-
-            std::vector<std::vector<float>> blockMins(FIELD_LENGTH);
-            std::vector<std::vector<float>> blockMaxes(FIELD_LENGTH);
-            for (int j = 0; j < FIELD_LENGTH; j++) {
-                blockMins[j].push_back(hyperBlockMinsC[i + j]);
-                blockMaxes[j].push_back(hyperBlockMaxesC[i + j]);
-            }
-            HyperBlock hb(blockMaxes, blockMins, classN);
-            resultingBlocks[classN].emplace_back(hb);
-        }
-
-        // Free device memory
-        cudaFree(d_hyperBlockMins);
-        cudaFree(d_hyperBlockMaxes);
-        cudaFree(d_deleteFlags);
-        cudaFree(d_points);
-        cudaFree(d_mergable);
-        cudaFree(d_seedQueue);
-        cudaFree(d_writeSeedQueue);
-    }
-
-    hyperBlocks.clear();
-    for(const std::vector<HyperBlock>& classBlocks : resultingBlocks) {
-      hyperBlocks.insert(hyperBlocks.end(), classBlocks.begin(), classBlocks.end());
-    }
-}
 
 
 /**
@@ -369,15 +151,15 @@ std::vector<std::vector<long>> testAccuracyOfHyperBlocks(std::vector<HyperBlock>
 
     std::cout << "\n\n\n\n" << std::endl;
     std::cout << "============================ REGULAR CONFUSION MATRIX ==================" << std::endl;
-    PrintingUtil::printConfusionMatrix(regularConfusionMatrix);
+    PrintingUtil::printConfusionMatrix(regularConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
     std::cout << "============================ END CONFUSION MATRIX ======================" << std::endl;
 
 	std::cout << "Any point was inside" << anyPointWasInside <<  std::endl;
 
     std::cout << "\n\n\n\n" << std::endl;
     std::cout << "============================ K-NN CONFUSION MATRIX ==================" << std::endl;
-    std::vector<std::vector<long>> secondConfusionMatrix = Knn::kNN(unclassifiedPointVec, hyperBlocks, 5);
-     PrintingUtil::printConfusionMatrix(secondConfusionMatrix);
+    std::vector<std::vector<long>> secondConfusionMatrix = Knn::kNN(unclassifiedPointVec, hyperBlocks, 5, NUM_CLASSES);
+     PrintingUtil::printConfusionMatrix(secondConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
     std::cout << "============================ END K-NN MATRIX ======================" << std::endl;
     for (int i = 0; i < NUM_CLASSES; i++) {
         for (int j = 0; j < NUM_CLASSES; j++) {
@@ -387,7 +169,7 @@ std::vector<std::vector<long>> testAccuracyOfHyperBlocks(std::vector<HyperBlock>
 
     std::cout << "\n\n\n\n" << std::endl;
     std::cout << "============================ DISTINCT POINT CONFUSION MATRIX ==================" << std::endl;
-    PrintingUtil::printConfusionMatrix(regularConfusionMatrix);
+    PrintingUtil::printConfusionMatrix(regularConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
     std::cout << "============================ END DISTINCE POINT MATRIX ======================" << std::endl;
     std::cout << "\n\n\n\n" << std::endl;
 
@@ -441,14 +223,14 @@ int runAsync(int argc, char* argv[]) {
     minValues.assign(FIELD_LENGTH, std::numeric_limits<float>::infinity());
     maxValues.assign(FIELD_LENGTH, -std::numeric_limits<float>::infinity());
 
-    DataUtil::findMinMaxValuesInDataset(trainingData, minValues, maxValues);
-    DataUtil::minMaxNormalization(trainingData, minValues, maxValues);
+    DataUtil::findMinMaxValuesInDataset(trainingData, minValues, maxValues, FIELD_LENGTH);
+    DataUtil::minMaxNormalization(trainingData, minValues, maxValues, FIELD_LENGTH);
 
     // Run LDA on the training data.
     std::vector<std::vector<float>>bestVectors = linearDiscriminantAnalysis(trainingData);
 
     // Initialize indexes for each class
-    std::vector<std::vector<int> > bestVectorsIndexes = std::vector<std::vector<int> >(NUM_CLASSES, std::vector<int>(FIELD_LENGTH, 0));
+    std::vector<std::vector<int>> bestVectorsIndexes = std::vector<std::vector<int> >(NUM_CLASSES, std::vector<int>(FIELD_LENGTH, 0));
     std::vector<int> eachClassBestVectorIndex = std::vector<int>(NUM_CLASSES);
 
     // sort our vectors from the LDA by their coefficients so that we can determine an ordering for removing and sorting by best columns in generation
@@ -464,7 +246,7 @@ int runAsync(int argc, char* argv[]) {
         eachClassBestVectorIndex[i] = bestVectorsIndexes[i][0];
     }
 
-    IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex);
+    IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
     std::cout << "HYPERBLOCK GENERATION FINISHED!" << std::endl;
     std::cout << "WE FOUND " << hyperBlocks.size() << " HYPERBLOCKS!" << std::endl;
 
@@ -476,7 +258,7 @@ int runAsync(int argc, char* argv[]) {
     std::cout << "Ran simplifications: " << result[0] << " Times" << std::endl;
     std::cout << "We had: " << totalPoints << " points\n";
 
-     DataUtil::saveBasicHBsToCSV(hyperBlocks, "AsyncBlockOutput");
+     DataUtil::saveBasicHBsToCSV(hyperBlocks, "AsyncBlockOutput", FIELD_LENGTH);
     return 0;
 }
 
@@ -523,8 +305,8 @@ void runInteractive() {
                 // Resize normalization vectors based on FIELD_LENGTH
                 minValues.assign(FIELD_LENGTH, std::numeric_limits<float>::infinity());
                 maxValues.assign(FIELD_LENGTH, -std::numeric_limits<float>::infinity());
-                DataUtil::findMinMaxValuesInDataset(trainingData, minValues, maxValues);
-                DataUtil::minMaxNormalization(trainingData, minValues, maxValues);
+                DataUtil::findMinMaxValuesInDataset(trainingData, minValues, maxValues, FIELD_LENGTH);
+                DataUtil::minMaxNormalization(trainingData, minValues, maxValues, FIELD_LENGTH);
 
                 // Run LDA on the training data.
                 bestVectors = linearDiscriminantAnalysis(trainingData);
@@ -552,7 +334,7 @@ void runInteractive() {
                 testData = DataUtil::dataSetup(testingDataFileName.c_str(), CLASS_MAP_TESTING, CLASS_MAP_TESTING_INT);
 
                 // Normalize and reorder testing data as needed.
-                DataUtil::normalizeTestSet(testData, minValues, maxValues);
+                DataUtil::normalizeTestSet(testData, minValues, maxValues, FIELD_LENGTH);
                 testData = DataUtil::reorderTestingDataset(testData, CLASS_MAP, CLASS_MAP_TESTING);
                 PrintingUtil::waitForEnter();
                 break;
@@ -576,7 +358,7 @@ void runInteractive() {
             case 5: { // EXPORT HYPERBLOCKS
                 std::cout << "Enter the file to save HyperBlocks to: " << std::endl;
                 getline(std::cin, hyperBlocksExportFileName);
-                DataUtil::saveBasicHBsToCSV(hyperBlocks, hyperBlocksExportFileName);
+                DataUtil::saveBasicHBsToCSV(hyperBlocks, hyperBlocksExportFileName, FIELD_LENGTH);
                 break;
             }
             case 6: { // GENERATE NEW HYPERBLOCKS
@@ -585,7 +367,7 @@ void runInteractive() {
                     PrintingUtil::waitForEnter();
                 } else {
                     hyperBlocks.clear();
-                    IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex);
+                    IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
                 }
                 std::cout << "Finished Generating HyperBlocks" << std::endl;
                 PrintingUtil::waitForEnter();

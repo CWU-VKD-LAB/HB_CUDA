@@ -4,8 +4,8 @@
 
 #include "Knn.h"
 #include <vector>
-#include <pair>
-
+#include <utility>
+#include <queue>
 /**
 *    This is the function we will use to classify data that was outside the bounds of all hyperBlocks
 *
@@ -13,7 +13,8 @@
 *    to assign the point to the correct class.
 *
 */
-std::vector<std::vector<long>> kNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int k){
+std::vector<std::vector<long>> Knn::kNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES){
+    int FIELD_LENGTH = unclassifiedData[0].size();
 
     if(k > hyperBlocks.size()) k = (int) sqrt(hyperBlocks.size());
 
@@ -42,14 +43,14 @@ std::vector<std::vector<long>> kNN(std::vector<std::vector<std::vector<float>>> 
         // For each point in unclassified points
         for(int point = 0; point < unclassifiedData[i].size(); point++){
             // Use a priority queue to keep track of the top k best distances
-            priority_queue<pair<float, int>> kNearest;
+            std::priority_queue<std::pair<float, int>> kNearest;
 
 
             // Go through all the blocks and find the distances to their centers
             for(int blockClass = 0; blockClass < NUM_CLASSES; blockClass++){
                 for(const auto& currHBCenter : hyperBlockCentroids[blockClass]){
                     // Find the distance between the HB center and the unclassified data point
-                    float distance = euclideanDistance(currHBCenter, unclassifiedData[i][point]);
+                    float distance = Knn::euclideanDistance(currHBCenter, unclassifiedData[i][point], FIELD_LENGTH);
 
                     if(kNearest.size() < k){    // always add when queue is not at k yet.
                         kNearest.push(std::make_pair(distance, blockClass));
@@ -99,7 +100,7 @@ std::vector<std::vector<long>> kNN(std::vector<std::vector<std::vector<float>>> 
 
 
 //EUCLIDEAN DISTANCE OF TWO VECTORS.
-float euclideanDistance(const std::vector<float>& hbCenter, const std::vector<float>& point){
+float Knn::euclideanDistance(const std::vector<float>& hbCenter, const std::vector<float>& point, int FIELD_LENGTH){
     float sumSquaredDifference = 0.0f;
 
     for(int i = 0; i < FIELD_LENGTH; i++){

@@ -1,14 +1,15 @@
 //
 // Created by asnyd on 3/20/2025.
 //
-
+#include <iomanip>
 #include "PrintingUtil.h"
-#include <cout>
+#include <iostream>
 #include <string>
 #include <vector>
+#include <map>
 
 // Function to clear the console screen (cross-platform)
-void clearScreen() {
+void PrintingUtil::clearScreen() {
 #ifdef _WIN32
     system("cls");
 #else
@@ -17,13 +18,13 @@ void clearScreen() {
 }
 
 // Function to wait for user input before continuing
-void waitForEnter() {
+void PrintingUtil::waitForEnter() {
     std::cout << "\nPress Enter to continue...";
-    std::cin.ignore(std::numeric_limits<streamsize>::max(), '\n');
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 }
 
 // Function to display the main menu
-void displayMainMenu() {
+void PrintingUtil::displayMainMenu() {
     clearScreen();
     std::cout << "=== HyperBlock Classification System ===\n\n";
     std::cout << "1. Import training data.\n";
@@ -40,7 +41,7 @@ void displayMainMenu() {
 }
 
 
-void printConfusionMatrix(std::vector<std::vector<long>>& data, const int NUM_CLASSES) {
+void PrintingUtil::printConfusionMatrix(std::vector<std::vector<long>>& data, const int NUM_CLASSES, std::map<int, std::string>& CLASS_MAP_INT) {
     std::vector<std::string> classLabels(NUM_CLASSES);
 
     std::vector<float> accuracies(NUM_CLASSES, 0.0);
@@ -80,20 +81,20 @@ void printConfusionMatrix(std::vector<std::vector<long>>& data, const int NUM_CL
     size_t maxWidth = 8; // Minimum width
 
     for (const auto& name : classLabels) {
-        maxWidth = max(maxWidth, name.length() + 2);
+        maxWidth = std::max(maxWidth, name.length() + 2);
     }
 
     for (const auto& row : data) {
         for (const auto& cell : row) {
-            std::string numStr = to_string(cell);
-            maxWidth = max(maxWidth, numStr.length() + 2);
+            std::string numStr = std::to_string(cell);
+            maxWidth = std::max(maxWidth, numStr.length() + 2);
         }
     }
 
     // Print header row with "Actual\Predicted" in the corner
-    std::cout << setw(maxWidth) << "Act\\Pred" << " |";
+    std::cout << std::setw(maxWidth) << "Act\\Pred" << " |";
     for (int i = 0; i < NUM_CLASSES; i++) {
-        std::cout << setw(maxWidth) << CLASS_MAP_INT[i] << " |";
+        std::cout << std::setw(maxWidth) << CLASS_MAP_INT[i] << " |";
     }
     std::cout << std::endl;
 
@@ -106,10 +107,10 @@ void printConfusionMatrix(std::vector<std::vector<long>>& data, const int NUM_CL
 
     // Print each row with row label
     for (size_t i = 0; i < data.size(); i++) {
-        std::cout << setw(maxWidth) << CLASS_MAP_INT[i] << " |";
+        std::cout << std::setw(maxWidth) << CLASS_MAP_INT[i] << " |";
 
         for (size_t j = 0; j < data[i].size(); j++) {
-            std::cout << setw(maxWidth) << data[i][j] << " |";
+            std::cout << std::setw(maxWidth) << data[i][j] << " |";
         }
 
         std::cout << accuracies[i] << std::endl;
@@ -119,7 +120,7 @@ void printConfusionMatrix(std::vector<std::vector<long>>& data, const int NUM_CL
 }
 
 
-void printDataset(const std::vector<std::vector<std::vector<float>>>& vec) {
+void PrintingUtil::printDataset(const std::vector<std::vector<std::vector<float>>>& vec) {
     for (int i = 0; i < vec.size(); i++) {
         std::cout << "Class " << i << ":" << std::endl;
         for (const auto& row : vec[i]) {

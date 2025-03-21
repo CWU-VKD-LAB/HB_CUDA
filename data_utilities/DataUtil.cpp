@@ -2,7 +2,9 @@
 // Created by asnyd on 3/20/2025.
 //
 #include <vector>
-#include <cout>
+#include <iostream>
+#include <sstream>
+#include <fstream>
 #include <map>
 #include <string>
 #include "DataUtil.h"
@@ -12,13 +14,13 @@
 /*  Returns a class seperated version of the dataset
  *  Each class has an entry in the outer vector with a 2-d vector of its points
  */
-std::vector<std::vector<std::vector<float>>> dataSetup(const std::string filepath, std::map<std::string, int>& classMap, std::map<int, std::string>& reversedClassMap) {
+std::vector<std::vector<std::vector<float>>> DataUtil::dataSetup(const std::string filepath, std::map<std::string, int>& classMap, std::map<int, std::string>& reversedClassMap) {
     // 3D std::std::vector: data[class][point][attribute]
-    std::std::vector<std::vector<std::vector<float>>> data;
+    std::vector<std::vector<std::vector<float>>> data;
 
-    ifstream file(filepath);
+    std::ifstream file(filepath);
     if (!file.is_open()) {
-        cerr << "Failed to open file " << filepath << endl;
+        std::cerr << "Failed to open file " << filepath << std::endl;
         return data;
     }
 
@@ -29,9 +31,9 @@ std::vector<std::vector<std::vector<float>>> dataSetup(const std::string filepat
 
     // Read through all rows of CSV
     while (getline(file, line)) {
-        stringstream ss(line);
+        std::stringstream ss(line);
         std::string cell;
-        std::vector<string> row;
+        std::vector<std::string> row;
 
         // Read the entire row, splitting by commas
         while (getline(ss, cell, ',')) {
@@ -57,8 +59,8 @@ std::vector<std::vector<std::vector<float>>> dataSetup(const std::string filepat
         for (const std::string& val : row) {
             try {
                 point.push_back(stof(val));  // Convert to float and add to the point
-            } catch (const invalid_argument&) {
-                cerr << "Invalid value '" << val << "' in CSV" << endl;
+            } catch (const std::invalid_argument&) {
+                std::cerr << "Invalid value '" << val << "' in CSV" << std::endl;
                 point.push_back(0.0f);  // Default to 0 if conversion fails
             }
         }
@@ -72,10 +74,6 @@ std::vector<std::vector<std::vector<float>>> dataSetup(const std::string filepat
     }
     file.close();
 
-    // Set global variables
-    FIELD_LENGTH = data.empty() ? 0 : static_cast<int>(data[0][0].size());
-    NUM_CLASSES = classNum;
-
     return data;
 }
 
@@ -86,11 +84,11 @@ std::vector<std::vector<std::vector<float>>> dataSetup(const std::string filepat
  * assumes each row in the 2-D vector is 1 hyperblock
  * the first 1/2 of the row is the max's, the end is the mins.
  */
-void saveHyperBlocksToFile(const std::string& filepath, const std::vector<std::vector<std::vector<float>>>& hyperBlocks) {
-    ofstream file(filepath);
+void DataUtil::saveHyperBlocksToFile(const std::string& filepath, const std::vector<std::vector<std::vector<float>>>& hyperBlocks) {
+    std::ofstream file(filepath);
 
     if (!file.is_open()) {
-        cerr << "Failed to open file: " << filepath << endl;
+        std::cerr << "Failed to open file: " << filepath << std::endl;
         return;
     }
 
@@ -109,17 +107,17 @@ void saveHyperBlocksToFile(const std::string& filepath, const std::vector<std::v
     }
 
     file.close();
-    cout << "Hyperblocks saved to " << filepath << endl;
+    std::cout << "Hyperblocks saved to " << filepath << std::endl;
 }
 
 /**
 * This will save the normalized dataset back so that we can use the same one in DV with the same normalization.
 */
-void saveNormalizedVersionToCsv(std::string fileName, std::vector<std::vector<std::vector<float>>>& data) {
-    ofstream outFile(fileName);
+void DataUtil::saveNormalizedVersionToCsv(std::string fileName, std::vector<std::vector<std::vector<float>>>& data) {
+    std::ofstream outFile(fileName);
 
     if (!outFile.is_open()) {
-        cerr << "Error opening file: " << fileName << std::endl;
+        std::cerr << "Error opening file: " << fileName << std::endl;
         return;
     }
 
@@ -147,18 +145,18 @@ void saveNormalizedVersionToCsv(std::string fileName, std::vector<std::vector<st
     outFile.close();
 }
 
-std::vector<HyperBlock> loadBasicHBsFromCSV(const std::string& fileName) {
-    ifstream file(fileName);
+std::vector<HyperBlock> DataUtil::loadBasicHBsFromCSV(const std::string& fileName) {
+    std::ifstream file(fileName);
     std::vector<HyperBlock> hyperBlocks;
 
     if (!file.is_open()) {
-        cerr << "Error opening file: " << fileName << endl;
+        std::cerr << "Error opening file: " << fileName << std::endl;
         return hyperBlocks;
     }
 
     std::string line;
     while (getline(file, line)) {
-        stringstream ss(line);
+        std::stringstream ss(line);
         std::vector<std::vector<float>> minimums, maximums;
         std::string value;
         std::vector<float> temp_vals;
@@ -194,7 +192,7 @@ std::vector<HyperBlock> loadBasicHBsFromCSV(const std::string& fileName) {
 /**
 * A function to normalize the test set using the given mins/maxes that were used to normalize the initial set
 */
-void normalizeTestSet(std::vector<std::vector<std::vector<float>>>& testSet, const std::vector<float>& minValues, const std::vector<float>& maxValues) {
+void DataUtil::normalizeTestSet(std::vector<std::vector<std::vector<float>>>& testSet, const std::vector<float>& minValues, const std::vector<float>& maxValues, int FIELD_LENGTH) {
     if (testSet.empty()){
       std::cout << "Test set was empty when trying to normalize" << std::endl;
       return;
@@ -215,7 +213,7 @@ void normalizeTestSet(std::vector<std::vector<std::vector<float>>>& testSet, con
 }
 
 
-void minMaxNormalization(std::vector<std::vector<std::vector<float>>>& dataset, const std::vector<float>& minValues, const std::vector<float>& maxValues) {
+void DataUtil::minMaxNormalization(std::vector<std::vector<std::vector<float>>>& dataset, const std::vector<float>& minValues, const std::vector<float>& maxValues, int FIELD_LENGTH) {
     if (dataset.empty()) return;
 
     int num_classes = dataset.size();
@@ -238,7 +236,7 @@ void minMaxNormalization(std::vector<std::vector<std::vector<float>>>& dataset, 
 
 
 // Function to reorder testing dataset based on training class std::mapping
-std::vector<std::vector<std::vector<float>>> reorderTestingDataset(const std::vector<std::vector<std::vector<float>>>& testingData, const std::map<std::string, int>& CLASS_MAP_TRAINING, const std::map<std::string, int>& CLASS_MAP_TESTING) {
+std::vector<std::vector<std::vector<float>>> DataUtil::reorderTestingDataset(const std::vector<std::vector<std::vector<float>>>& testingData, const std::map<std::string, int>& CLASS_MAP_TRAINING, const std::map<std::string, int>& CLASS_MAP_TESTING) {
     // Create a new std::vector with the same size as the testing data
     std::vector<std::vector<std::vector<float>>> reorderedTestingData(testingData.size());
 
@@ -281,11 +279,11 @@ std::vector<std::vector<std::vector<float>>> reorderTestingDataset(const std::ve
 *
 * This print isn't caring about disjunctive blocks.
 */
-void saveBasicHBsToCSV(const std::vector<HyperBlock>& hyperBlocks, const std::string& fileName){
+void DataUtil::saveBasicHBsToCSV(const std::vector<HyperBlock>& hyperBlocks, const std::string& fileName, int FIELD_LENGTH){
 	// Open file for writing
-    ofstream file(fileName);
+    std::ofstream file(fileName);
     if (!file.is_open()) {
-        cerr << "Error opening file: " << fileName << endl;
+        std::cerr << "Error opening file: " << fileName << std::endl;
         return;
     }
 
@@ -308,50 +306,12 @@ void saveBasicHBsToCSV(const std::vector<HyperBlock>& hyperBlocks, const std::st
     file.close();
 }
 
-
-/**
-* This will save the normalized dataset back so that we can use the same one in DV with the same normalization.
-*/
-void saveNormalizedVersionToCsv(std::string fileName, std::vector<std::vector<std::vector<float>>>& data) {
-    ofstream outFile(fileName);
-
-    if (!outFile.is_open()) {
-        cerr << "Error opening file: " << fileName << std::endl;
-        return;
-    }
-
-    // Assuming all classes have at least one point, get feature count from the first point of the first class
-    int featureCount = data[0][0].size();
-
-    // Write the header
-    for (int i = 0; i < featureCount; i++) {
-        outFile << "x" << i << ",";
-    }
-    outFile << "label\n";  // Add label column
-
-    // Iterate through classes
-    for (int i = 0; i < data.size(); i++) {
-        // Iterate through points in class
-        for (int j = 0; j < data[i].size(); j++) {
-            // Iterate through attributes of a point
-            for (int k = 0; k < data[i][j].size(); k++) {
-                outFile << data[i][j][k] << ",";
-            }
-            outFile << i << "\n";  // Append class label
-        }
-    }
-
-    outFile.close();
-}
-
-
-
 /**
 * Find the min/max values in each column of data across the dataset.
 * Can use this in normalization and also for making sure test set is normalized with
 * the same values as the training set.
 */
-void findMinMaxValuesInDataset(const std::vector<std::vector<std::vector<float>>>& dataset, std::vector<float>& minValues, std::vector<float>& maxValues) {
+void DataUtil::findMinMaxValuesInDataset(const std::vector<std::vector<std::vector<float>>>& dataset, std::vector<float>& minValues, std::vector<float>& maxValues, int FIELD_LENGTH) {
     // Step 1: Find min and max for each attribute
     for (const auto& class_data : dataset) {
         for (const auto& point : class_data) {
@@ -365,7 +325,7 @@ void findMinMaxValuesInDataset(const std::vector<std::vector<std::vector<float>>
 
 
 
-std::vector<bool> markUniformColumns(const std::vector<std::vector<std::vector<float>>>& data) {
+std::vector<bool> DataUtil::markUniformColumns(const std::vector<std::vector<std::vector<float>>>& data) {
     // std::cout << "Starting mark uniform columns\n" << std::endl;
 
     if (data.empty() || data[0].empty()) return std::vector<bool>(); // Handle edge case
@@ -399,7 +359,7 @@ std::vector<bool> markUniformColumns(const std::vector<std::vector<std::vector<f
 }
 
 
-std::vector<std::vector<float>> flattenMinsMaxesForRUB(std::vector<HyperBlock>& hyper_blocks){
+std::vector<std::vector<float>> DataUtil::flattenMinsMaxesForRUB(std::vector<HyperBlock>& hyper_blocks, int FIELD_LENGTH){
     // Declare std::vectors
     std::vector<float> flatMinsList;
     std::vector<float> flatMaxesList;
@@ -434,15 +394,15 @@ std::vector<std::vector<float>> flattenMinsMaxesForRUB(std::vector<HyperBlock>& 
 
     // Assemble the result using move semantics to avoid extra copies
     std::vector<std::vector<float>> result;
-    result.push_back(move(flatMinsList));
-    result.push_back(move(flatMaxesList));
-    result.push_back(move(blockEdges));
-    result.push_back(move(blockClasses));
+    result.push_back(std::move(flatMinsList));
+    result.push_back(std::move(flatMaxesList));
+    result.push_back(std::move(blockEdges));
+    result.push_back(std::move(blockClasses));
     return result;
 }
 
 
-std::vector<std::vector<float>> flattenDataset(std::vector<std::vector<std::vector<float>>>& data) {
+std::vector<std::vector<float>> DataUtil::flattenDataset(std::vector<std::vector<std::vector<float>>>& data) {
     std::vector<float> dataset;
     std::vector<float> classBorder(data.size() + 1);
     classBorder[0] = 0.0f;
@@ -469,7 +429,7 @@ std::vector<std::vector<float>> flattenDataset(std::vector<std::vector<std::vect
 
 
 // our function to flatten our list of HBs without encoding lengths in. this is what we use for removing attirbutes
-std::vector<std::vector<float>> flatMinMaxNoEncode(std::vector<HyperBlock> hyper_blocks) {
+std::vector<std::vector<float>> DataUtil::flatMinMaxNoEncode(std::vector<HyperBlock> hyper_blocks, int FIELD_LENGTH) {
 
     int size = hyper_blocks.size();
     std::vector<float> flatMinsList;

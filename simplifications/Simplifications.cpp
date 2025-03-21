@@ -2,13 +2,15 @@
 // Created by asnyd on 3/20/2025.
 //
 #include "Simplifications.h"
-#include <../hyperblock/HyperBlock.h>
-#include <../data_utilities/DataUtil.h>
+#include "../hyperblock/HyperBlock.h"
+#include "../data_utilities/DataUtil.h"
+#include "../hyperblock_generation/MergerHyperBlock.cuh"
 #include <vector>
 #include <cuda_runtime.h>
+#include <algorithm>
 
 // runs our three kernel functions which remove useless blocks.
-void removeUselessBlocks(std::vector<std::vector<std::vector<float>>> &data, std::vector<HyperBlock>& hyper_blocks) {
+void Simplifications::removeUselessBlocks(std::vector<std::vector<std::vector<float>>> &data, std::vector<HyperBlock>& hyper_blocks) {
     /*
      * The algorithm to remove useless blocks does basically this.
      *     - take one particular point in our dataset. Find the first HB that it fits into.
@@ -17,9 +19,11 @@ void removeUselessBlocks(std::vector<std::vector<std::vector<float>>> &data, std
      *     - this is not a perfect way of doing it, but at least allows us to find the "most general blocks" based on the count of how many points are in each. This way we can then just delete whichever blocks we find with no *UNIQUE* points in them.
      *     * notice how we are putting all data in, and all blocks together. this allows us to find errors as well. we may find that a block is letting in wrong class points this way.
      */
+    int FIELD_LENGTH = data[0][0].size();
 
-    std::vector<std::vector<float>> minMaxResult = flattenMinsMaxesForRUB(hyper_blocks);
-    std::vector<std::vector<float>> flattenedData = flattenDataset(data);
+
+    std::vector<std::vector<float>> minMaxResult = DataUtil::flattenMinsMaxesForRUB(hyper_blocks, FIELD_LENGTH);
+    std::vector<std::vector<float>> flattenedData =  DataUtil::flattenDataset(data);
 
     // Use references to avoid copying.
     const std::vector<float>& blockMins   = minMaxResult[0];
@@ -30,7 +34,7 @@ void removeUselessBlocks(std::vector<std::vector<std::vector<float>>> &data, std
     std::vector<int> blockEdges;
     blockEdges.resize(minMaxResult[2].size());
     // cast result [2] to ints, since this is the block edges. the array which tells us where each block starts and ends (as indexes).
-    transform(edgesAsFloats.begin(), edgesAsFloats.end(), blockEdges.begin(),
+    std::transform(edgesAsFloats.begin(), edgesAsFloats.end(), blockEdges.begin(),
               [](float val) -> int { return static_cast<int>(val); });
 
     // Get the dataPointsArray (again using a reference).
@@ -106,10 +110,12 @@ void removeUselessBlocks(std::vector<std::vector<std::vector<float>>> &data, std
 }
 
 
-void removeUselessAttributesCUDA(std::vector<HyperBlock> &hyper_blocks, std::vector<std::vector<std::vector<float>>> &data, std::vector<std::vector<int>> &attributeOrderings) {
+void Simplifications::removeUselessAttr(std::vector<HyperBlock>& hyper_blocks, std::vector<std::vector<std::vector<float>>>& data, std::vector<std::vector<int>>& attributeOrderings) {
+    int FIELD_LENGTH = data[0][0].size();
+
     // Prepare host data by flattening your data structures.
-    auto fMinMaxResult = flatMinMaxNoEncode(hyper_blocks);
-    auto fDataResult = flattenDataset(data);
+    auto fMinMaxResult =  DataUtil::flatMinMaxNoEncode(hyper_blocks, FIELD_LENGTH);
+    auto fDataResult =  DataUtil::flattenDataset(data);
 
     // Build host arrays from the flattened results:
     std::vector<float> mins = fMinMaxResult[0];
@@ -229,8 +235,8 @@ void removeUselessAttributesCUDA(std::vector<HyperBlock> &hyper_blocks, std::vec
 }
 
 
-std::vector<int> runSimplifications(std::vector<HyperBlock> &hyperBlocks, std::vector<std::vector<std::vector<float>>> &trainData, std::vector<std::vector<int>> &bestAttributeOrderings){
-
+std::vector<int> Simplifications::runSimplifications(std::vector<HyperBlock> &hyperBlocks, std::vector<std::vector<std::vector<float>>> &trainData, std::vector<std::vector<int>> &bestAttributeOrderings){
+    int FIELD_LENGTH = trainData[0][0].size();
     int runCount = 0;
     int totalClauses = 0;
     int updatedClauses = 0;
@@ -241,8 +247,8 @@ std::vector<int> runSimplifications(std::vector<HyperBlock> &hyperBlocks, std::v
         runCount++; // counter so we can show how many iterations this took.
 
         // simplification functions
-        removeUselessAttributesCUDA(hyperBlocks, trainData, bestAttributeOrderings);
-        removeUselessBlocks(trainData, hyperBlocks);
+        Simplifications::removeUselessAttr(hyperBlocks, trainData, bestAttributeOrderings);
+        Simplifications::removeUselessBlocks(trainData, hyperBlocks);
 
         // count how many we have after simplifications.
         updatedClauses = 0;
@@ -260,5 +266,4 @@ std::vector<int> runSimplifications(std::vector<HyperBlock> &hyperBlocks, std::v
     } while(updatedClauses != totalClauses);
     return { runCount, totalClauses };
 }
-
 

@@ -405,7 +405,7 @@ int runAsync(int argc, char* argv[]) {
     std::string testingDataFileName;
     std::string hyperBlocksExportFileName;
 
-    // 3-D datasets
+    // 3-D DATASETS
     std::vector<std::vector<std::vector<float>>> testData;
     std::vector<std::vector<std::vector<float>>> trainingData;
 
@@ -514,10 +514,10 @@ void runInteractive() {
         switch (choice) {
             case 1: { // IMPORT TRAINING DATA
                 std::cout << "Enter training data filename: " << std::endl;
-                system("ls datasets");  // list available datasets
+                system("ls DATASETS");  // list available DATASETS
                 std::getline(std::cin, trainingDataFileName);
                 // Prepend the directory (adjust PATH_SEPARATOR as needed)
-                std::string fullPath = "datasets" + std::string(PATH_SEPARATOR) + trainingDataFileName;
+                std::string fullPath = "DATASETS" + std::string(PATH_SEPARATOR) + trainingDataFileName;
                 trainingData = DataUtil::dataSetup(fullPath.c_str(), CLASS_MAP, CLASS_MAP_INT);
 
                 // Resize normalization vectors based on FIELD_LENGTH

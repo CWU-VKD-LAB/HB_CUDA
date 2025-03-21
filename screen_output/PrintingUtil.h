@@ -1,0 +1,27 @@
+//
+// Created by asnyd on 3/20/2025.
+//
+#pragma once
+#include <vector>
+
+#ifndef PRINTINGUTIL_H
+#define PRINTINGUTIL_H
+
+
+
+class PrintingUtil {
+  public:
+    static void clearScreen();
+    static void waitForEnter();
+    static void displayMainMenu();
+    static void printConfusionMatrix(std::vector<std::vector<long>>& data);
+    static void printDataset(const std::vector<std::vector<std::vector<float>>>& vec);
+
+
+  private:
+
+};
+
+
+
+#endif //PRINTINGUTIL_H

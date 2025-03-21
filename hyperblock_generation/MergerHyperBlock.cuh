@@ -1,7 +1,8 @@
+#pragma once
+#include <cuda_runtime.h>
+
 #ifndef HyperBlockCuda_CUH
 #define HyperBlockCuda_CUH
-
-#include <cuda_runtime.h>
 
 // === KERNELS: ===
 __global__ void mergerHyperBlocks(

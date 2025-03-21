@@ -5,12 +5,10 @@
 #include <cassert>
 #include <limits>
 
-using namespace std;
-
 // Matrix inverse using naive Gauss-Jordan elimination
-vector<vector<float>> inverse(const vector<vector<float>>& matrix) {
+std::vector<std::vector<float>> inverse(const std::vector<std::vector<float>>& matrix) {
     int n = matrix.size();
-    vector<vector<float>> augmented(n, vector<float>(2 * n, 0.0f));
+    std::vector<std::vector<float>> augmented(n, std::vector<float>(2 * n, 0.0f));
 
     // Create augmented matrix
     for (int i = 0; i < n; i++) {
@@ -24,7 +22,7 @@ vector<vector<float>> inverse(const vector<vector<float>>& matrix) {
     for (int i = 0; i < n; i++) {
         float pivot = augmented[i][i];
         if (fabs(pivot) < 1e-12) {
-            cerr << "Matrix is singular or near-singular.\n";
+            std::cerr << "Matrix is singular or near-singular.\n";
             exit(EXIT_FAILURE);
         }
         // Normalize pivot row
@@ -43,7 +41,7 @@ vector<vector<float>> inverse(const vector<vector<float>>& matrix) {
     }
 
     // Extract inverse
-    vector<vector<float>> inv(n, vector<float>(n, 0.0f));
+    std::vector<std::vector<float>> inv(n, std::vector<float>(n, 0.0f));
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
             inv[i][j] = augmented[i][j + n];
@@ -52,11 +50,11 @@ vector<vector<float>> inverse(const vector<vector<float>>& matrix) {
     return inv;
 }
 
-// Simple matrix-vector multiply
-vector<float> matrixVectorMultiply(const vector<vector<float>>& A, const vector<float>& v) {
+// Simple matrix-std::vector multiply
+std::vector<float> matrixVectorMultiply(const std::vector<std::vector<float>>& A, const std::vector<float>& v) {
     int rows = A.size();
     int cols = A[0].size();
-    vector<float> result(rows, 0.0f);
+    std::vector<float> result(rows, 0.0f);
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < cols; j++) {
             result[i] += A[i][j] * v[j];
@@ -65,8 +63,8 @@ vector<float> matrixVectorMultiply(const vector<vector<float>>& A, const vector<
     return result;
 }
 
-// Helper: dot product of two vectors
-inline float dotProduct(const vector<float>& a, const vector<float>& b) {
+// Helper: dot product of two std::vectors
+inline float dotProduct(const std::vector<float>& a, const std::vector<float>& b) {
     assert(a.size() == b.size());
     float sum = 0.0f;
     for (size_t i = 0; i < a.size(); i++) {
@@ -79,24 +77,24 @@ inline float dotProduct(const vector<float>& a, const vector<float>& b) {
 // 2. Core two-class LDA function (with bias computation)
 // --------------------------------------
 
-// Define a struct to hold both the weight vector and its bias.
+// Define a struct to hold both the weight std::vector and its bias.
 struct LDAClassifier {
-    vector<float> w;
+    std::vector<float> w;
     float bias;
 };
 
 /**
- * Computes a single LDA vector w (and bias) that separates two classes:
+ * Computes a single LDA std::vector w (and bias) that separates two classes:
  *   classA vs. classB
- * Returns an LDAClassifier containing the weight vector and bias.
+ * Returns an LDAClassifier containing the weight std::vector and bias.
  */
-LDAClassifier computeBinaryLDA(const vector<vector<float>>& classA,
-                               const vector<vector<float>>& classB)
+LDAClassifier computeBinaryLDA(const std::vector<std::vector<float>>& classA,
+                               const std::vector<std::vector<float>>& classB)
 {
     int numFeatures = classA[0].size();
 
-    // 1. Compute mean vectors of class A and class B
-    vector<float> meanA(numFeatures, 0.0f);
+    // 1. Compute mean std::vectors of class A and class B
+    std::vector<float> meanA(numFeatures, 0.0f);
     for (auto& row : classA) {
         for (int j = 0; j < numFeatures; j++) {
             meanA[j] += row[j];
@@ -106,7 +104,7 @@ LDAClassifier computeBinaryLDA(const vector<vector<float>>& classA,
         meanA[j] /= (float)classA.size();
     }
 
-    vector<float> meanB(numFeatures, 0.0f);
+    std::vector<float> meanB(numFeatures, 0.0f);
     for (auto& row : classB) {
         for (int j = 0; j < numFeatures; j++) {
             meanB[j] += row[j];
@@ -117,8 +115,8 @@ LDAClassifier computeBinaryLDA(const vector<vector<float>>& classA,
     }
 
     // 2. Compute within-class scatter Sw = S_A + S_B
-    vector<vector<float>> Sw(numFeatures, vector<float>(numFeatures, 0.0f));
-    auto addScatter = [&](const vector<vector<float>>& data, const vector<float>& mean) {
+    std::vector<std::vector<float>> Sw(numFeatures, std::vector<float>(numFeatures, 0.0f));
+    auto addScatter = [&](const std::vector<std::vector<float>>& data, const std::vector<float>& mean) {
         for (auto& x : data) {
             for (int i = 0; i < numFeatures; i++) {
                 for (int j = 0; j < numFeatures; j++) {
@@ -138,12 +136,12 @@ LDAClassifier computeBinaryLDA(const vector<vector<float>>& classA,
     }
 
     // 3. Compute w = Sw^-1 * (meanB - meanA)
-    vector<vector<float>> SwInv = inverse(Sw);
-    vector<float> meanDiff(numFeatures, 0.0f);
+    std::vector<std::vector<float>> SwInv = inverse(Sw);
+    std::vector<float> meanDiff(numFeatures, 0.0f);
     for (int j = 0; j < numFeatures; j++) {
         meanDiff[j] = meanB[j] - meanA[j];
     }
-    vector<float> w = matrixVectorMultiply(SwInv, meanDiff);
+    std::vector<float> w = matrixVectorMultiply(SwInv, meanDiff);
 
     // 4. Normalize w
     float normVal = 0.0f;
@@ -178,7 +176,7 @@ LDAClassifier computeBinaryLDA(const vector<vector<float>>& classA,
 
 // predictClass: for a given sample, compute the adjusted score for each classifier
 // (w^T x - bias) and return the class with the highest score.
-int predictClass(const vector<LDAClassifier>& classifiers, const vector<float>& sample) {
+int predictClass(const std::vector<LDAClassifier>& classifiers, const std::vector<float>& sample) {
     int bestClass = -1;
     float bestScore = -1e9f; // a very low starting score
     for (size_t i = 0; i < classifiers.size(); i++) {
@@ -194,8 +192,8 @@ int predictClass(const vector<LDAClassifier>& classifiers, const vector<float>& 
 
 // testMultiClassAccuracy: loops over each sample in inputData (labeled by class),
 // predicts its class using predictClass, and computes overall accuracy.
-void testMultiClassAccuracy(const vector<LDAClassifier>& classifiers,
-                            const vector<vector<vector<float>>>& inputData) {
+void testMultiClassAccuracy(const std::vector<LDAClassifier>& classifiers,
+                            const std::vector<std::vector<std::vector<float>>>& inputData) {
     int numClasses = inputData.size();
     int totalSamples = 0;
     int correct = 0;
@@ -211,7 +209,7 @@ void testMultiClassAccuracy(const vector<LDAClassifier>& classifiers,
     }
 
     float accuracy = static_cast<float>(correct) / totalSamples;
-    cout << "Overall multi-class accuracy: " << accuracy * 100.0f << "%" << endl;
+    std::cout << "Overall multi-class accuracy: " << accuracy * 100.0f << "%" << std::endl;
 }
 
 
@@ -222,11 +220,11 @@ void testMultiClassAccuracy(const vector<LDAClassifier>& classifiers,
  * Given inputData where inputData[i] = all samples of class i,
  * run a 2-class LDA for each class i vs. all other classes combined.
  *
- * Returns a vector of LDAClassifier, one per class.
+ * Returns a std::vector of LDAClassifier, one per class.
  */
-vector<vector<float>> linearDiscriminantAnalysis(const vector<vector<vector<float>>>& inputData) {
+std::vector<std::vector<float>> linearDiscriminantAnalysis(const std::vector<std::vector<std::vector<float>>>& inputData) {
     int numClasses = inputData.size();
-    vector<LDAClassifier> classifiers(numClasses); // one classifier per class
+    std::vector<LDAClassifier> classifiers(numClasses); // one classifier per class
 
     // For each class i, gather its samples in classA
     // and gather all other samples in classB
@@ -234,7 +232,7 @@ vector<vector<float>> linearDiscriminantAnalysis(const vector<vector<vector<floa
         // classA = the samples of class i
         const auto& classA = inputData[i];
         // classB = union of samples of all other classes
-        vector<vector<float>> classB;
+        std::vector<std::vector<float>> classB;
         for (int j = 0; j < numClasses; j++) {
             if (j == i) continue; // skip class i
             classB.insert(classB.end(), inputData[j].begin(), inputData[j].end());
@@ -242,7 +240,7 @@ vector<vector<float>> linearDiscriminantAnalysis(const vector<vector<vector<floa
         // Compute the 2-class LDA classifier for i vs. rest
         classifiers[i] = computeBinaryLDA(classA, classB);
     }
-    vector<vector<float>> separationVectors;
+    std::vector<std::vector<float>> separationVectors;
     for (LDAClassifier &classifier : classifiers) {
         separationVectors.push_back(classifier.w);
     }

@@ -1974,16 +1974,17 @@ void runInteractive() {
                 system("ls");
                 getline(cin, testingDataFileName);
                 testData = dataSetup(testingDataFileName.c_str(), CLASS_MAP_TESTING, CLASS_MAP_TESTING_INT);
+
                 // Normalize and reorder testing data as needed.
-                // normalizeTestSet(testData, minValues, maxValues);
-                // testData = reorderTestingDataset(testData, CLASS_MAP, CLASS_MAP_TESTING);
+                normalizeTestSet(testData, minValues, maxValues);
+                testData = reorderTestingDataset(testData, CLASS_MAP, CLASS_MAP_TESTING);
                 waitForEnter();
                 break;
             }
             case 3: { // SAVE NORMALIZED TRAINING DATA
                 cout << "Enter the file to save the normalized training data to: " << endl;
                 getline(cin, normalizedSaveFile);
-                // saveNormalizedVersionToCsv(normalizedSaveFile, trainingData);
+                saveNormalizedVersionToCsv(normalizedSaveFile, trainingData);
                 cout << "Saved normalized training data to: " << normalizedSaveFile << endl;
                 waitForEnter();
                 break;
@@ -1991,7 +1992,7 @@ void runInteractive() {
             case 4: { // IMPORT EXISTING HYPERBLOCKS
                 cout << "Enter existing hyperblocks file name: " << endl;
                 getline(cin, hyperBlocksImportFileName);
-                // hyperBlocks = loadBasicHBsFromCSV(hyperBlocksImportFileName);
+                hyperBlocks = loadBasicHBsFromCSV(hyperBlocksImportFileName);
                 cout << "HyperBlocks imported from file " << hyperBlocksImportFileName << " successfully" << endl;
                 waitForEnter();
                 break;
@@ -1999,7 +2000,7 @@ void runInteractive() {
             case 5: { // EXPORT HYPERBLOCKS
                 cout << "Enter the file to save HyperBlocks to: " << endl;
                 getline(cin, hyperBlocksExportFileName);
-                // saveBasicHBsToCSV(hyperBlocks, hyperBlocksExportFileName);
+                saveBasicHBsToCSV(hyperBlocks, hyperBlocksExportFileName);
                 break;
             }
             case 6: { // GENERATE NEW HYPERBLOCKS

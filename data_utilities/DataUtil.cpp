@@ -8,8 +8,9 @@
 #include <map>
 #include <string>
 #include "DataUtil.h"
-#include "../hyperblock/Hyperblock.h"
 
+extern int FIELD_LENGTH;
+extern int NUM_CLASSES;
 
 /*  Returns a class seperated version of the dataset
  *  Each class has an entry in the outer vector with a 2-d vector of its points

@@ -1,6 +1,7 @@
 .idea/
 CMakeLists.txt
 cmake-build-debug/
+cmake-build-debug-docker/
 a.exe
 .vscode/
 a.exp

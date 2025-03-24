@@ -11,9 +11,7 @@
 #include <ostream>
 #include "Interval.h"
 #include "DataAttr.h"
-#include <cuda_runtime.h>
 #include "../hyperblock_generation/MergerHyperBlock.cuh"
-
 
 /**
      * Finds largest interval across all dimensions of a set of data.
@@ -232,34 +230,34 @@ void IntervalHyperBlock::generateHBs(std::vector<std::vector<std::vector<float>>
 	// "Initialized datum, seed_data, skips\n" << endl;
 
     // Initially generate blocks
-        while(dataByAttribute[0].size() > 0){
+    while(dataByAttribute[0].size() > 0){
 
-            std::vector<DataATTR> intv = intervalHyper(dataByAttribute, 100, gen_hb);
-  			all_intv.push_back(intv);
+        std::vector<DataATTR> intv = intervalHyper(dataByAttribute, 100, gen_hb);
+  		all_intv.push_back(intv);
 
-        // if hyperblock is unique then add
-        if(intv.size() > 1){
-            std::vector<std::vector<std::vector<float>>> hb_data;
-            std::vector<std::vector<float>> intv_data;
+    // if hyperblock is unique then add
+    if(intv.size() > 1){
+        std::vector<std::vector<std::vector<float>>> hb_data;
+        std::vector<std::vector<float>> intv_data;
 
-            // Add the points from real data that are in the intervals
-            for(DataATTR& dataAttr : intv){
-                intv_data.push_back(data[dataAttr.classNum][dataAttr.classIndex]);
-            }
-
-            // add data and hyperblock
-            hb_data.push_back(intv_data);
-
-            HyperBlock hb(hb_data, intv[0].classNum);
-
-            gen_hb.push_back(hb);
-        }else{
-            break;
+        // Add the points from real data that are in the intervals
+        for(DataATTR& dataAttr : intv){
+            intv_data.push_back(data[dataAttr.classNum][dataAttr.classIndex]);
         }
-    }
 
-        // Add all hbs from gen_hb to hyperBlocks
-        hyperBlocks.insert(hyperBlocks.end(), gen_hb.begin(), gen_hb.end());
+        // add data and hyperblock
+        hb_data.push_back(intv_data);
+
+        HyperBlock hb(hb_data, intv[0].classNum);
+
+        gen_hb.push_back(hb);
+    }else{
+        break;
+    }
+}
+
+    // Add all hbs from gen_hb to hyperBlocks
+    hyperBlocks.insert(hyperBlocks.end(), gen_hb.begin(), gen_hb.end());
 
     // All data: go through each class and add points from data
     for(const std::vector<std::vector<float>>& classData : data){
@@ -303,9 +301,9 @@ void IntervalHyperBlock::generateHBs(std::vector<std::vector<std::vector<float>>
     }
 
     try{
-        IntervalHyperBlock::merger_cuda(seed_data, datum, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
+        merger_cuda(seed_data, datum, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
     }catch (std::exception e){
-        //std::cout << "Error in generateHBs: merger_cuda" << std::endl;
+        std::cout << "Error in generateHBs: merger_cuda" << std::endl;
     }
 }
 

@@ -5,7 +5,7 @@
 #include <map>
 #include <vector>
 #include <string>
-#include "../hyperblock/Hyperblock.h"
+#include "../hyperblock/HyperBlock.h"
 #ifndef DATAUTIL_H
 #define DATAUTIL_H
 

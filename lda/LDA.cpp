@@ -5,6 +5,9 @@
 #include <cassert>
 #include <limits>
 
+// our flag for if we want to apply arc cos to each vector or not. In DV it is applied, and this gets us slightly better blocks.
+#define USE_TRIG
+
 // Matrix inverse using naive Gauss-Jordan elimination
 std::vector<std::vector<float>> inverse(const std::vector<std::vector<float>>& matrix) {
     int n = matrix.size();
@@ -130,7 +133,7 @@ LDAClassifier computeBinaryLDA(const std::vector<std::vector<float>>& classA,
     addScatter(classB, meanB);
 
     // REGULARIZE TO AVOID THE MATRIX BEING SINGULAR.
-    float lambda = 1e-3f; // adjust as needed.
+    float lambda = 1e-4f; // adjust as needed.
     for (int i = 0; i < numFeatures; i++) {
         Sw[i][i] += lambda;
     }
@@ -199,7 +202,7 @@ void testMultiClassAccuracy(const std::vector<LDAClassifier>& classifiers,
     int correct = 0;
 
     for (int i = 0; i < numClasses; i++) {
-        for (const auto &sample : inputData[i]) {
+        for (const auto &sample: inputData[i]) {
             int predicted = predictClass(classifiers, sample);
             if (predicted == i) {
                 correct++;
@@ -234,7 +237,9 @@ std::vector<std::vector<float>> linearDiscriminantAnalysis(const std::vector<std
         // classB = union of samples of all other classes
         std::vector<std::vector<float>> classB;
         for (int j = 0; j < numClasses; j++) {
+
             if (j == i) continue; // skip class i
+
             classB.insert(classB.end(), inputData[j].begin(), inputData[j].end());
         }
         // Compute the 2-class LDA classifier for i vs. rest
@@ -242,7 +247,36 @@ std::vector<std::vector<float>> linearDiscriminantAnalysis(const std::vector<std
     }
     std::vector<std::vector<float>> separationVectors;
     for (LDAClassifier &classifier : classifiers) {
+
+#ifdef USE_TRIG
+        // Make a copy of the classifier weights to normalize.
+        std::vector<float> normalizedVector = classifier.w;
+
+        // Find the min and max of the vector.
+        float maxVal = *std::max_element(normalizedVector.begin(), normalizedVector.end());
+        float minVal = *std::min_element(normalizedVector.begin(), normalizedVector.end());
+
+        // Avoid division by zero: if all values are the same, set range to 1.
+        float range = (maxVal - minVal);
+        if (range == 0.0f) {
+            range = 1.0f;
+        }
+
+        constexpr float radToDeg = 180.0f / M_PI;  // convert radians to degrees
+        // Normalize each element to [0, 1] and then compute arccos
+        for (auto& val : normalizedVector) {
+
+            // Map value from [minVal, maxVal] to [0, 1]
+            float norm = (val - minVal) / range;
+
+            // Apply arccos: when norm is 1, acos returns 0 (best attribute),
+            // when norm is 0, acos returns π/2 (~90 degrees, worst attribute).
+            val = std::acos(norm) * radToDeg;
+        }
+        separationVectors.push_back(normalizedVector);
+#else
         separationVectors.push_back(classifier.w);
+#endif
     }
 
     testMultiClassAccuracy(classifiers, inputData);

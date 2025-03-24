@@ -7,6 +7,7 @@
 #include <utility>
 #include <queue>
 #include <iostream>
+#include <cmath>
 /**
 *    This is the function we will use to classify data that was outside the bounds of all hyperBlocks
 *

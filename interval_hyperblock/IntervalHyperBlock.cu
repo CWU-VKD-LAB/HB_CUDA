@@ -6,7 +6,6 @@
 #include <vector>
 #include <future>
 #include <algorithm>
-#include "../hyperblock/HyperBlock.h"
 #include <iostream>
 #include <ostream>
 #include "Interval.h"

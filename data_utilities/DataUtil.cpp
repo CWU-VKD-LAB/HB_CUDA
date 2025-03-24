@@ -75,6 +75,9 @@ std::vector<std::vector<std::vector<float>>> DataUtil::dataSetup(const std::stri
     }
     file.close();
 
+    FIELD_LENGTH = data[0][0].size();
+    NUM_CLASSES = classNum;
+
     return data;
 }
 

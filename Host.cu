@@ -320,14 +320,13 @@ void runInteractive() {
 
                 trainingData = DataUtil::dataSetup(fullPath.c_str(), CLASS_MAP, CLASS_MAP_INT);
 
-                FIELD_LENGTH = trainingData[0][0].size();
-                NUM_CLASSES = trainingData.size();
-
                 // Resize normalization vectors based on FIELD_LENGTH
                 minValues.assign(FIELD_LENGTH, std::numeric_limits<float>::infinity());
                 maxValues.assign(FIELD_LENGTH, -std::numeric_limits<float>::infinity());
                 DataUtil::findMinMaxValuesInDataset(trainingData, minValues, maxValues, FIELD_LENGTH);
                 DataUtil::minMaxNormalization(trainingData, minValues, maxValues, FIELD_LENGTH);
+
+                std::cout << "Finished Normalization, beginning LDA" << std::endl;
 
                 // Run LDA on the training data.
                 bestVectors = linearDiscriminantAnalysis(trainingData);

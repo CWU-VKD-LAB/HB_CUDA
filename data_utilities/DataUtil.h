@@ -9,8 +9,6 @@
 #ifndef DATAUTIL_H
 #define DATAUTIL_H
 
-
-
 class DataUtil {
     public:
       static std::vector<std::vector<std::vector<float>>> dataSetup(const std::string filepath, std::map<std::string, int>& classMap, std::map<int, std::string>& reversedClassMap);

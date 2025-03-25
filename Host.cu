@@ -179,7 +179,6 @@ std::vector<std::vector<long>> testAccuracyOfHyperBlocks(std::vector<HyperBlock>
     return ultraConfusionMatrix;
 }
 
-
 // -------------------------------------------------------------------------
 // Asynchronous mode: run when argc >= 2
 int runAsync(int argc, char* argv[]) {

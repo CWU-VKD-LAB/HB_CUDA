@@ -315,6 +315,7 @@ __global__ void sumPointsPerBlock(int *dataPointBlocks, const int numPoints, int
         atomicAdd(&numPointsInBlocks[dataPointBlocks[threadID]], 1);
     }
 }
+
 __global__ void findBetterBlocks(const float *dataPointsArray, const int numAttributes, const int numPoints, const float *blockMins, const float *blockMaxes, const int *blockEdges, const int numBlocks, int *dataPointBlocks, int *numPointsInBlocks){
 
     const int threadID = blockIdx.x * blockDim.x + threadIdx.x;

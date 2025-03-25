@@ -109,7 +109,6 @@ void Simplifications::removeUselessBlocks(std::vector<std::vector<std::vector<fl
     }
 }
 
-
 void Simplifications::removeUselessAttr(std::vector<HyperBlock>& hyper_blocks, std::vector<std::vector<std::vector<float>>>& data, std::vector<std::vector<int>>& attributeOrderings) {
     int FIELD_LENGTH = data[0][0].size();
 
@@ -234,7 +233,6 @@ void Simplifications::removeUselessAttr(std::vector<HyperBlock>& hyper_blocks, s
     }
 }
 
-
 std::vector<int> Simplifications::runSimplifications(std::vector<HyperBlock> &hyperBlocks, std::vector<std::vector<std::vector<float>>> &trainData, std::vector<std::vector<int>> &bestAttributeOrderings){
     int FIELD_LENGTH = trainData[0][0].size();
     int runCount = 0;
@@ -266,4 +264,3 @@ std::vector<int> Simplifications::runSimplifications(std::vector<HyperBlock> &hy
     } while(updatedClauses != totalClauses);
     return { runCount, totalClauses };
 }
-

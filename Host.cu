@@ -21,13 +21,15 @@
 #include "./knn/Knn.h"
 #include "./screen_output/PrintingUtil.h"
 #include "./data_utilities/DataUtil.h"
-#include "./simplifications/Simplifications.h""
+#include "./simplifications/Simplifications.h"
 
 #ifdef _WIN32
     const std::string PATH_SEPARATOR = "\\";
 #else
     const std::string PATH_SEPARATOR = "/";
 #endif
+
+#define LDA_ORDERING true
 
 int NUM_CLASSES;   // Number of classes in the dataset
 int NUM_POINTS;    // Total number of points in the dataset
@@ -45,7 +47,7 @@ std::map<int, std::string> CLASS_MAP_TESTING_INT;
 * We generate a confusion matrix, but allow for points to fall into multiple blocks at a time
 * that is why we go through blocks on outerloop and whole dataset on the inside.
 */
-std::vector<std::vector<long>> testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vector<std::vector<std::vector<float>>> testSet){
+std::vector<std::vector<long>> testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vector<std::vector<std::vector<float>>> &testSet){
 
   	// Keep track of which points were never inside of a block, when a point is classifed we increment the map internal std::vectors correct positon
     // there should be CLASS_NUM unordered_maps or just hashmaps, in each will hold a std::vector<point_index, std::vector<int> of len(class_num)>
@@ -236,15 +238,26 @@ int runAsync(int argc, char* argv[]) {
 
     // sort our vectors from the LDA by their coefficients so that we can determine an ordering for removing and sorting by best columns in generation
     for (int i = 0; i < NUM_CLASSES; i++) {
+
         for (int j = 0; j < FIELD_LENGTH; j++) {
             bestVectorsIndexes[i][j] = j;
         }
-        // Sort indices by absolute value of the coefficients for the current class.
-        sort(bestVectorsIndexes[i].begin(), bestVectorsIndexes[i].end(),
-             [&](int a, int b) {
-                 return fabs(bestVectors[i][a]) < fabs(bestVectors[i][b]);
-             });
-        eachClassBestVectorIndex[i] = bestVectorsIndexes[i][0];
+#ifdef LDA_ORDERING
+            // if we have decided to use the ordering from LDA we sort, otherwise we simply go through and use it in the order 0,1,2,3...
+            sort(bestVectorsIndexes[i].begin(), bestVectorsIndexes[i].end(),
+                 [&](int a, int b) {
+                     return fabs(bestVectors[i][a]) < fabs(bestVectors[i][b]);
+            });
+#endif
+            // this is used when we are generating the HBs. We need to know which had the largest value in the separation vector, which is what this represents here.
+            // if we are sorting we could just grab the 0th element, but this works better in the case that we are not. so we just use this.
+
+            // find the element with the largest absolute value.
+            auto it = std::max_element(bestVectorsIndexes[i].begin(), bestVectorsIndexes[i].end(),
+                [](float a, float b) {
+                    return std::abs(a) < std::abs(b);
+            });
+        eachClassBestVectorIndex[i] = std::distance(bestVectorsIndexes[i].begin(), it);
     }
 
     IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
@@ -297,14 +310,15 @@ void runInteractive() {
         switch (choice) {
             case 1: { // IMPORT TRAINING DATA
                 std::cout << "Enter training data filename: " << std::endl;
-                system("ls DATASETS");
+                system("ls datasets");
                 std::getline(std::cin, trainingDataFileName);
 
-                std::string fullPath = "DATASETS" + std::string(PATH_SEPARATOR) + trainingDataFileName;
-                trainingData = DataUtil::dataSetup(fullPath.c_str(), CLASS_MAP, CLASS_MAP_INT);
+                std::string fullPath = "datasets" + std::string(PATH_SEPARATOR) + trainingDataFileName;
 
-                FIELD_LENGTH = trainingData[0][0].size();
-                NUM_CLASSES = trainingData.size();
+                CLASS_MAP.clear();
+                CLASS_MAP_INT.clear();
+
+                trainingData = DataUtil::dataSetup(fullPath.c_str(), CLASS_MAP, CLASS_MAP_INT);
 
                 // Resize normalization vectors based on FIELD_LENGTH
                 minValues.assign(FIELD_LENGTH, std::numeric_limits<float>::infinity());
@@ -312,31 +326,57 @@ void runInteractive() {
                 DataUtil::findMinMaxValuesInDataset(trainingData, minValues, maxValues, FIELD_LENGTH);
                 DataUtil::minMaxNormalization(trainingData, minValues, maxValues, FIELD_LENGTH);
 
-                /* Run LDA on the training data.
+                std::cout << "Finished Normalization, beginning LDA" << std::endl;
+
+                // Run LDA on the training data.
                 bestVectors = linearDiscriminantAnalysis(trainingData);
 
                 bestVectorsIndexes = std::vector<std::vector<int>>(NUM_CLASSES, std::vector<int>(FIELD_LENGTH, 0));
                 eachClassBestVectorIndex = std::vector<int>(NUM_CLASSES);
 
+                // where we are getting the ordering of attributes which we are going to use for removing attributes later.
                 for (int i = 0; i < NUM_CLASSES; i++) {
+
+                    // first we populate it just with the index values. 0,1,2,3,4...
                     for (int j = 0; j < FIELD_LENGTH; j++) {
                         bestVectorsIndexes[i][j] = j;
                     }
+
+#ifdef LDA_ORDERING
+                    // if we have decided to use the ordering from LDA we sort, otherwise we simply go through and use it in the order 0,1,2,3...
                     sort(bestVectorsIndexes[i].begin(), bestVectorsIndexes[i].end(),
                          [&](int a, int b) {
                              return fabs(bestVectors[i][a]) < fabs(bestVectors[i][b]);
-                         });
-                    eachClassBestVectorIndex[i] = bestVectorsIndexes[i][0];
+                    });
+#endif
+                    // this is used when we are generating the HBs. We need to know which had the largest value in the separation vector, which is what this represents here.
+                    // if we are sorting we could just grab the 0th element, but this works better in the case that we are not. so we just use this.
+                    auto it = std::max_element(bestVectorsIndexes[i].begin(), bestVectorsIndexes[i].end(),
+                    [](float a, float b) {
+                        return fabs(a) < fabs(b);
+                    });
+
+                    // the best index is the distance from 0 to our index. since it is just an iterator to the index of our biggest absolute value.
+                    eachClassBestVectorIndex[i] = std::distance(bestVectorsIndexes[i].begin(), it);
+
+                    std::cout << "BEST ATTRIBUTE: " << eachClassBestVectorIndex[i] << std::endl;
+
                 }
-                 */
+
                 PrintingUtil::waitForEnter();
                 break;
             }
             case 2: { // IMPORT TESTING DATA
                 std::cout << "Enter testing data filename: " << std::endl;
-                system("ls");
+                system("ls datasets");
                 getline(std::cin, testingDataFileName);
-                testData = DataUtil::dataSetup(testingDataFileName.c_str(), CLASS_MAP_TESTING, CLASS_MAP_TESTING_INT);
+                std::string fullPath = "datasets" + std::string(PATH_SEPARATOR) + testingDataFileName;
+
+                // clear these two maps to prevent issues when using a second test set.
+                CLASS_MAP_TESTING.clear();
+                CLASS_MAP_TESTING_INT.clear();
+
+                testData = DataUtil::dataSetup(fullPath, CLASS_MAP_TESTING, CLASS_MAP_TESTING_INT);
 
                 // Normalize and reorder testing data as needed.
                 DataUtil::normalizeTestSet(testData, minValues, maxValues, FIELD_LENGTH);
@@ -378,7 +418,8 @@ void runInteractive() {
                 PrintingUtil::waitForEnter();
                 break;
             }
-            case 7: { // SIMPLIFY HYPERBLOCKS
+            case 7: {
+                // SIMPLIFY HYPERBLOCKS
                 std::vector<int> result = Simplifications::runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
                 int totalPoints = 0;
 
@@ -393,7 +434,6 @@ void runInteractive() {
             case 8: { // TEST HYPERBLOCKS ON DATASET
                 std::cout << "Testing hyperblocks on testing dataset" << std::endl;
                 ultraConfusionMatrix = testAccuracyOfHyperBlocks(hyperBlocks, testData);
-                //printConfusionMatrix(ultraConfusionMatrix);
                 PrintingUtil::waitForEnter();
                 break;
             }

@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <limits>
 
 // Function to clear the console screen (cross-platform)
 void PrintingUtil::clearScreen() {

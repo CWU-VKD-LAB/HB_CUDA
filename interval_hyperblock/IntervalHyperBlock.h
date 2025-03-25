@@ -4,7 +4,7 @@
 #pragma once
 #include "Interval.h"
 #include "DataAttr.h"
-#include "../hyperblock/Hyperblock.h"
+#include "../hyperblock/HyperBlock.h"
 
 #ifndef INTERVALHYPERBLOCK_H
 #define INTERVALHYPERBLOCK_H

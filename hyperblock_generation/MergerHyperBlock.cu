@@ -244,8 +244,6 @@ __global__ void assignPointsToBlocks(const float *dataPointsArray, const int num
         dataPointBlock = &dataPointBlocks[threadID];
         *dataPointBlock = -1;
 
-        thisThreadPoint = &dataPointsArray[threadID * numAttributes];
-
         // now we iterate through all the blocks. checking which block this point falls into first.
         while (currentBlock < numBlocks){
 

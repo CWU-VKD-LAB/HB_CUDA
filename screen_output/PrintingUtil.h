@@ -9,8 +9,6 @@
 #ifndef PRINTINGUTIL_H
 #define PRINTINGUTIL_H
 
-
-
 class PrintingUtil {
   public:
     static void clearScreen();
@@ -18,7 +16,6 @@ class PrintingUtil {
     static void displayMainMenu();
     static void printConfusionMatrix(std::vector<std::vector<long>>& data, const int NUM_CLASSES, std::map<int, std::string>& CLASS_MAP_INT);
     static void printDataset(const std::vector<std::vector<std::vector<float>>>& vec);
-
 
   private:
 

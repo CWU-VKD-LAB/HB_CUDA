@@ -38,7 +38,7 @@ std::vector<std::vector<long>> Knn::kNN(std::vector<std::vector<std::vector<floa
             for(const auto& hyperBlock : hyperBlocks){
                 // Find the distance between the HB center and the unclassified data point
                 float bottomDist = Knn::euclideanDistance(hyperBlock.minimums, unclassifiedData[i][point], FIELD_LENGTH);
-                float topDist = Knn::euclideanDistance(hyperBlock.minimums, unclassifiedData[i][point], FIELD_LENGTH);
+                float topDist = Knn::euclideanDistance(hyperBlock.maximums, unclassifiedData[i][point], FIELD_LENGTH);
 
                 float distance = std::min(bottomDist, topDist);
 

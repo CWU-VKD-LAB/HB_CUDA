@@ -80,9 +80,15 @@ std::vector<std::vector<long>> testAccuracyOfHyperBlocks(std::vector<HyperBlock>
 
 					ultraConfusionMatrix[cls][currBlock.classNum]++;
 
-
                     // Go to the actual class, to the right points entry, and increment the "predicted" class (the hb it was in).
                     pointsNotClassified[cls][pnt][currBlock.classNum]++;
+
+                    // Print when a point is misclassified (i.e. block class is different from point's true class)
+                    if(cls != currBlock.classNum) {
+                        std::cout << "Misclassification: Point from class " << CLASS_MAP_INT[cls]
+                                  << " (point index " << pnt << ") went into block " << hb << " of class " << currBlock.classNum << std::endl;
+                    }
+
                 }
         	}
      	}
@@ -113,7 +119,9 @@ std::vector<std::vector<long>> testAccuracyOfHyperBlocks(std::vector<HyperBlock>
                }
            }
 
-           if(in > 1) numPointsInMultipleClasses++;
+           if(in > 1) {
+               numPointsInMultipleClasses++;
+           }
 
            if(in == 0) numPointsInNoBlocks++;
        }
@@ -173,7 +181,7 @@ std::vector<std::vector<long>> testAccuracyOfHyperBlocks(std::vector<HyperBlock>
     std::cout << "\n\n\n\n" << std::endl;
     std::cout << "============================ DISTINCT POINT CONFUSION MATRIX ==================" << std::endl;
     PrintingUtil::printConfusionMatrix(regularConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
-    std::cout << "============================ END DISTINCE POINT MATRIX ======================" << std::endl;
+    std::cout << "============================ END DISTINCT POINT MATRIX ======================" << std::endl;
     std::cout << "\n\n\n\n" << std::endl;
 
     return ultraConfusionMatrix;

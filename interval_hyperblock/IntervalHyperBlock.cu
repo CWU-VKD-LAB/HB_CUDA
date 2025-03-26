@@ -14,8 +14,8 @@
 
 using namespace std;
 
-#define USED -1
-#define ACCURACY .999f
+#define USED true
+#define STOP_SEARCHING -1
 
 #define CUDA_CHECK(call) \
 do { \
@@ -27,92 +27,143 @@ exit(err); \
 } while (0)
 
 
-Interval IntervalHyperBlock::longestInterval(vector<DataATTR> &dataByAttribute, float accThreshold, int attribute, int numClasses) {
+Interval IntervalHyperBlock::longestInterval(std::vector<DataATTR> &dataByAttribute, int attribute)
+{
+    Interval bestInterval(-1, -1, -1, attribute, -1);
+    int n = (int)dataByAttribute.size();
+    int currentStart = 0;
 
-    // We'll track one global "bestInterval" across all classes.
-    Interval bestInterval(/*size*/0, /*start*/-1, /*end*/-1, attribute, -1);
-
-    // Loop over each class to find the best interval for that specific class.
-    for (int currentClass = 0; currentClass < numClasses; currentClass++) {
-        int left = 0;
-        int right = 0;
-        int rightClass = 0;  // how many items in window belong to currentClass
-        int wrongClass = 0;  // how many do *not* belong to currentClass
-
-        // Sliding window: expand `right`, then if accuracy < threshold, shrink from the left.
-        while (right < static_cast<int>(dataByAttribute.size())) {
-
-            // Include dataByAttribute[right] in the window
-            if (dataByAttribute[right].classNum == currentClass) {
-                rightClass++;
-            } else {
-                wrongClass++;
-            }
-
-            // Compute current accuracy
-            int windowSize = (right - left + 1);
-            float currentAcc = static_cast<float>(rightClass) / windowSize;
-
-            // If accuracy is below threshold, move left until it's valid or window is empty
-            while (currentAcc < accThreshold && left <= right) {
-                // Remove dataByAttribute[left] from the window
-                if (dataByAttribute[left].classNum == currentClass) {
-                    rightClass--;
-                } else {
-                    wrongClass--;
-                }
-                left++;
-
-                // Recompute if window is non-empty
-                windowSize = (right - left + 1);
-                if (windowSize > 0) {
-                    currentAcc = static_cast<float>(rightClass) / windowSize;
-                } else {
-                    currentAcc = 0.0f;
-                }
-            }
-
-            if (right < left)
-                right = left;
-
-            // Now we either have accuracy >= threshold or window is empty
-            if (currentAcc >= accThreshold && windowSize > bestInterval.size) {
-                bestInterval.size = windowSize;
-                bestInterval.start = left;
-                bestInterval.end = right;
-                bestInterval.attribute = attribute;
-                bestInterval.dominantClass = currentClass;
-            }
-
-            // Move `right` forward to expand the window
-            right++;
+    while (currentStart < n) {
+        // 1) Skip used items to find a valid start
+        while (currentStart < n && dataByAttribute[currentStart].used) {
+            currentStart++;
         }
+        if (currentStart >= n)
+            break;
+
+        float startVal = dataByAttribute[currentStart].value;
+        int   startClass = dataByAttribute[currentStart].classNum;
+
+        // 2) Backward check for any same-value items with a different class
+        bool mismatchFound = false;
+        int backIdx = currentStart - 1;
+
+        while (backIdx >= 0) {
+            // If the value differs, we're safe to stop checking backward
+            // because the 'same-value block' behind has ended.
+            if (dataByAttribute[backIdx].value != startVal) {
+                break;
+            }
+            // If we find a different class or used item, that's a mismatch
+            if (dataByAttribute[backIdx].classNum != startClass) {
+                mismatchFound = true;
+                break;
+            }
+            backIdx--;
+        }
+
+        // problem case. guy behind us has the same value as us, and he's different class.
+        if (mismatchFound) {
+            // If there's a mismatch behind us in the same-value region,
+            // we must forcibly treat this new interval as size = 1
+            // (only the currentStart item).
+            if (1 > bestInterval.size) {
+                bestInterval.size = 1;
+                bestInterval.start = currentStart;
+                bestInterval.end   = currentStart;
+                bestInterval.dominantClass = startClass;
+            }
+            // Move on to next start guy
+            currentStart++;
+            continue;
+        }
+
+        // 3) No mismatch behind => proceed with normal forward extension
+        int runStart = currentStart;
+        int currentEnd = currentStart;
+
+        while (true) {
+            if (currentEnd >= n) {
+                break; // we ran off the end
+            }
+            // If we find a class mismatch, stop extending
+            if (dataByAttribute[currentEnd].classNum != startClass) {
+                break;
+            }
+
+            float endVal = dataByAttribute[currentEnd].value;
+            int nextEnd = currentEnd + 1;
+            
+            // prevent going out of bounds of course
+            while (nextEnd < n - 1) {
+                float nextInLineVal = dataByAttribute[nextEnd].value;
+
+                if (nextInLineVal == endVal && dataByAttribute[nextEnd].classNum != startClass) {
+                    // now we have trouble to consider. think about our next guy in line being the same value as our friend, BUT wrong class! DISASTER!
+                    nextEnd = STOP_SEARCHING;
+                    break;
+                }
+                // just break if the next two in line are different values OR still same class.
+                nextEnd++;
+                break;
+            }
+
+            // if we hit the STOP SEARCHING case, that means that we have to take current end as our end, since we have matching values of different classes.
+            if (nextEnd == STOP_SEARCHING) {
+                // We've gathered an interval [runStart ... (currentEnd-1)]
+                int length = currentEnd - runStart + 1;
+                if (length > bestInterval.size) {
+                    bestInterval.size = length;
+                    bestInterval.start = runStart;
+                    bestInterval.end   = currentEnd - 1; // inclusive
+                    bestInterval.dominantClass = startClass;
+                }
+                // increment current end so that we can get through the matching stuff. otherwise we start right at that point and infinite loop
+                currentEnd++;
+                break;
+            }
+
+            // if we did not hit that case, we can carry on as usual, finding matching classes in sorted order until we find the wrong class guy again.
+            currentEnd = nextEnd;
+        }
+
+        // We've gathered an interval [runStart ... (currentEnd-1)]
+        int length = currentEnd - runStart + 1;
+        if (length > bestInterval.size) {
+            bestInterval.size = length;
+            bestInterval.start = runStart;
+            bestInterval.end   = currentEnd - 1; // inclusive
+            bestInterval.dominantClass = startClass;
+        }
+
+        // Move on
+        currentStart = currentEnd;
     }
 
     return bestInterval;
 }
 
 // REMAINING DATA PASSED AS A COPY INTENTIONALLY! WE TAKE TRAINING DATA AS A COPY, SO WE CAN REMOVE WITHOUT RUINING ORIGINAL DATA
-void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, vector<vector<DataATTR>> remainingData, vector<HyperBlock> &hyperBlocks, float accThreshold, int numClasses) {
+void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, vector<vector<DataATTR>> remainingData, vector<HyperBlock> &hyperBlocks) {
 
+    int pointsPutIntoBlocks = 0;
     // sort the input dataAttr's in each column by the value
     for (int i = 0; i < remainingData.size(); i++) {
         sort(remainingData[i].begin(), remainingData[i].end(),
              [](const DataATTR &a, const DataATTR &b) {
                  return a.value < b.value;
-             });
+        });
     }
 
     while (true) {
 
         // Launch our intervals asynchronously; get the intervals back and pick the biggest.
         vector<future<Interval>> intervals;
-        int attr = -1;
         Interval best(-1, -1, -1, -1, -1);
 
         // Search each attribute
         for (int i = 0; i < remainingData.size(); i++) {
-            intervals.emplace_back(async(launch::async, longestInterval, ref(remainingData[i]), accThreshold, i, numClasses));
+            intervals.emplace_back(async(launch::async, longestInterval, ref(remainingData[i]), i));
         }
 
         // Wait for results then find largest interval
@@ -120,33 +171,40 @@ void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, 
             Interval intr = future1.get();
             if (intr.size >= 1 && intr.size > best.size) {
                 best = intr;  // copy entire interval
-                attr = intr.attribute;
             }
         }
 
         // Build a list of removed points based on the best interval.
         // (We assume that best.start and best.end are valid indices in remainingData[attr].)
-        vector<pair<int, int>> removedIDs;
+        vector<pair<int, int>> usedIDs;
 
         // if we had a valid interval, we have to do all this business
         // if there was not we are obviously just done.
         if (best.size >= 1) {
             for (int i = best.start; i <= best.end; i++) {
-                DataATTR d = remainingData[attr][i];
-                removedIDs.push_back({d.classNum, d.classIndex});
+                DataATTR d = remainingData[best.attribute][i];
+                if (!d.used)
+                    usedIDs.push_back({d.classNum, d.classIndex});
             }
 
             // Build the block of points from the real data.
             vector<vector<float>> pointsInThisBlock;
             pointsInThisBlock.reserve(best.size);  // reserve capacity to avoid extra copies
             for (int i = best.start; i <= best.end; i++) {
+
                 // From the best attribute column, grab the identification for the point.
-                DataATTR thisPoint = remainingData[attr][i];
+                DataATTR thisPoint = remainingData[best.attribute][i];
+
+                if (thisPoint.used) {
+                    continue;
+                }
+
                 int classNum = thisPoint.classNum;
                 int classIndex = thisPoint.classIndex;
 
                 // Get the actual point from the real data and add it.
                 pointsInThisBlock.push_back(realData[classNum][classIndex]);
+                pointsPutIntoBlocks++;
             }
 
             // Compute bounds for each attribute.
@@ -162,25 +220,23 @@ void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, 
 
             // make a block and throw it into the hyperblocks vector
             HyperBlock h(maxes, mins, best.dominantClass);
+            cout << "Made a block with: " << pointsInThisBlock.size() << " points for class" << h.classNum << " out of attribute " << best.attribute << endl;
             hyperBlocks.push_back(h);
 
             // --- REMOVAL PHASE ---
             // Remove the points that were just used from each column in remainingData.
+            // --- REMOVAL PHASE ---
             for (int att = 0; att < remainingData.size(); att++) {
-
-                // iterating through each column to find and mark the ones which are matches to the points we need to mark
                 for (int dataAtt = 0; dataAtt < remainingData[att].size(); dataAtt++) {
+
+                    // Make sure to read from the "att" column, *not* best.attribute
                     DataATTR d = remainingData[att][dataAtt];
 
                     // Check if this DataATTR matches any of the removed points.
-                    for (auto &removed : removedIDs) {
-
-                        // if this is the point which we are trying to mark
+                    for (auto &removed : usedIDs) {
                         if (d.classNum == removed.first && d.classIndex == removed.second) {
-
-                            // set it as USED, so that it hurts the accuracy still, but we don't try and make an interval which would go over the top of it.
-                            remainingData[att][dataAtt].classNum = USED;
-                            // Break out once a match is found
+                            // Mark it used in the att-th column
+                            remainingData[att][dataAtt].used = USED;
                             break;
                         }
                     }
@@ -189,8 +245,10 @@ void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, 
         }
         else
             break;
-
     }
+
+    cout << "POINTS PUT INTO BLOCKS: " << pointsPutIntoBlocks << endl;
+    cout << "NUM BLOCKS MADE IN INTERVAL: " << hyperBlocks.size() << endl;
 }
 
 /**
@@ -207,7 +265,7 @@ vector<vector<DataATTR>> IntervalHyperBlock::separateByAttribute(vector<vector<v
         for(int i = 0; i < data.size(); i++){
             // Go through the points
             for(int j = 0; j < data[i].size(); j++){
-                tmpField.push_back(DataATTR(data[i][j][k], i, j));
+                tmpField.push_back(DataATTR(data[i][j][k], i, j, false));
             }
         }
 
@@ -237,14 +295,13 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
 
     // Get data to create hyperblocks
     vector<vector<DataATTR>> dataByAttribute = separateByAttribute(data, FIELD_LENGTH);
-    vector<vector<DataATTR>> all_intv;
 
     // make our interval based blocks
-    intervalHyper(data, dataByAttribute, hyperBlocks, ACCURACY, data.size());
-
+    intervalHyper(data, dataByAttribute, hyperBlocks);
+    
     try{
-        merger_cuda(data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
-    }catch (exception e){
+        // merger_cuda(data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
+    } catch (exception e){
         cout << "Error in generateHBs: merger_cuda" << endl;
     }
 }

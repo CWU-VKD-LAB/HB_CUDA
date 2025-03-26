@@ -433,7 +433,7 @@ void runInteractive() {
                 for (const auto &c : trainingData) totalPoints += c.size();
 
                 std::cout << "After removing useless blocks we have: " << result[1] << " clauses\n";
-                std::cout << "Ran simplifications: " << result[0] << " Times" << std::endl;
+                std::cout << "We got a final total of: " << hyperBlocks.size() << " blocks." << std::endl;
                 std::cout << "We had: " << totalPoints << " points\n";
                 PrintingUtil::waitForEnter();
                 break;

@@ -127,7 +127,6 @@ Interval IntervalHyperBlock::longestInterval(std::vector<DataATTR> &dataByAttrib
 // REMAINING DATA PASSED AS A COPY INTENTIONALLY! WE TAKE TRAINING DATA AS A COPY, SO WE CAN REMOVE WITHOUT RUINING ORIGINAL DATA
 void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, vector<vector<DataATTR>> remainingData, vector<HyperBlock> &hyperBlocks) {
 
-    int pointsPutIntoBlocks = 0;
     // sort the input dataAttr's in each column by the value
     for (int i = 0; i < remainingData.size(); i++) {
         sort(remainingData[i].begin(), remainingData[i].end(),
@@ -225,9 +224,6 @@ void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, 
         else
             break;
     }
-
-    cout << "POINTS PUT INTO BLOCKS: " << pointsPutIntoBlocks << endl;
-    cout << "NUM BLOCKS MADE IN INTERVAL: " << hyperBlocks.size() << endl;
 }
 
 /**
@@ -280,6 +276,7 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
     
     try{
         merger_cuda(data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
+        cout << "BlOCK GENERATION FINISHED! WE FOUND: " << hyperBlocks.size() << " BLOCKS" << endl;
     } catch (exception e){
         cout << "Error in generateHBs: merger_cuda" << endl;
         cout << e.what() << endl;

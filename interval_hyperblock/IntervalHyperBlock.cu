@@ -85,7 +85,7 @@ Interval IntervalHyperBlock::longestInterval(std::vector<DataATTR> &dataByAttrib
         // 3) FORWARD EXTENSION to find the longest run
         //------------------------------------------------------------------
         int currentEnd = currentStart; // we'll move this as far as we can
-        while (true) {
+        while (currentEnd < n) {
             if (dataByAttribute[currentEnd].classNum != startClass) {
                 break;
             }

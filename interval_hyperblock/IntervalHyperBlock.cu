@@ -15,131 +15,112 @@
 using namespace std;
 
 #define USED true
-#define STOP_SEARCHING -1
 
-#define CUDA_CHECK(call) \
-do { \
-cudaError_t err = call; \
-if (err != cudaSuccess) { \
-fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, cudaGetErrorString(err)); \
-exit(err); \
-} \
-} while (0)
+#define EPSILON 0.00001
+// comparing float helper
+static inline bool closeEnough(float a, float b) {
+    return abs(a - b) < EPSILON;
+}
 
+// helper function. checks if there are any of the exact same value that our current start of an interval has, of the wrong class behind it
+static inline bool checkBackwards(vector<DataATTR> &dataByAttribute, int currentStart) {
+    //------------------------------------------------------------------
+    // 2) BACKWARD CHECK for mismatch among same-value items
+    //------------------------------------------------------------------
+    int startClass = dataByAttribute[currentStart].classNum;
+    float startVal = dataByAttribute[currentStart].value;
+
+    int backIdx = currentStart - 1;
+    while (backIdx >= 0) {
+        // If value changes, the same-value “block” behind has ended, so stop.
+        if (!closeEnough(dataByAttribute[backIdx].value, startVal)) {
+            return true;
+        }
+        // If we find a different class in that same-value region, mismatch.
+        if (dataByAttribute[backIdx].classNum != startClass) {
+            return false;
+        }
+        backIdx--;
+    }
+    // if we go all the way to the end with no issues, return true
+    return true;
+}
 
 Interval IntervalHyperBlock::longestInterval(std::vector<DataATTR> &dataByAttribute, int attribute)
 {
     Interval bestInterval(-1, -1, -1, attribute, -1);
-    int n = (int)dataByAttribute.size();
+    int n = static_cast<int>(dataByAttribute.size());
     int currentStart = 0;
 
     while (currentStart < n) {
-        // 1) Skip used items to find a valid start
+        // Skip "used" items to find a valid start:
         while (currentStart < n && dataByAttribute[currentStart].used) {
             currentStart++;
         }
-        if (currentStart >= n)
-            break;
 
-        float startVal = dataByAttribute[currentStart].value;
-        int   startClass = dataByAttribute[currentStart].classNum;
-
-        // 2) Backward check for any same-value items with a different class
-        bool mismatchFound = false;
-        int backIdx = currentStart - 1;
-
-        while (backIdx >= 0) {
-            // If the value differs, we're safe to stop checking backward
-            // because the 'same-value block' behind has ended.
-            if (dataByAttribute[backIdx].value != startVal) {
-                break;
-            }
-            // If we find a different class or used item, that's a mismatch
-            if (dataByAttribute[backIdx].classNum != startClass) {
-                mismatchFound = true;
-                break;
-            }
-            backIdx--;
+        if (currentStart >= n) {
+            break; // all used or out of range
         }
 
-        // problem case. guy behind us has the same value as us, and he's different class.
-        if (mismatchFound) {
-            // If there's a mismatch behind us in the same-value region,
-            // we must forcibly treat this new interval as size = 1
-            // (only the currentStart item).
+        //------------------------------------------------------------------
+        // BACKWARD CHECK for mismatch among same-value items
+        //------------------------------------------------------------------
+        int startClass = dataByAttribute[currentStart].classNum;
+
+        // if our back check failed, that means there is a matching value behind us, from the wrong class.
+        // this means we have to just move on as an interval of ONE no matter what.
+        if (!checkBackwards(dataByAttribute, currentStart)) {
             if (1 > bestInterval.size) {
-                bestInterval.size = 1;
-                bestInterval.start = currentStart;
-                bestInterval.end   = currentStart;
+                bestInterval.size         = 1;
+                bestInterval.start        = currentStart;
+                bestInterval.end          = currentStart;
                 bestInterval.dominantClass = startClass;
             }
-            // Move on to next start guy
+            // move one and carry on
             currentStart++;
             continue;
         }
 
-        // 3) No mismatch behind => proceed with normal forward extension
-        int runStart = currentStart;
-        int currentEnd = currentStart;
-
+        //------------------------------------------------------------------
+        // 3) FORWARD EXTENSION to find the longest run
+        //------------------------------------------------------------------
+        int currentEnd = currentStart; // we'll move this as far as we can
         while (true) {
-            if (currentEnd >= n) {
-                break; // we ran off the end
-            }
-            // If we find a class mismatch, stop extending
             if (dataByAttribute[currentEnd].classNum != startClass) {
                 break;
             }
-
-            float endVal = dataByAttribute[currentEnd].value;
-            int nextEnd = currentEnd + 1;
-            
-            // prevent going out of bounds of course
-            while (nextEnd < n - 1) {
-                float nextInLineVal = dataByAttribute[nextEnd].value;
-
-                if (nextInLineVal == endVal && dataByAttribute[nextEnd].classNum != startClass) {
-                    // now we have trouble to consider. think about our next guy in line being the same value as our friend, BUT wrong class! DISASTER!
-                    nextEnd = STOP_SEARCHING;
-                    break;
-                }
-                // just break if the next two in line are different values OR still same class.
-                nextEnd++;
-                break;
-            }
-
-            // if we hit the STOP SEARCHING case, that means that we have to take current end as our end, since we have matching values of different classes.
-            if (nextEnd == STOP_SEARCHING) {
-                // We've gathered an interval [runStart ... (currentEnd-1)]
-                int length = currentEnd - runStart + 1;
-                if (length > bestInterval.size) {
-                    bestInterval.size = length;
-                    bestInterval.start = runStart;
-                    bestInterval.end   = currentEnd - 1; // inclusive
-                    bestInterval.dominantClass = startClass;
-                }
-                // increment current end so that we can get through the matching stuff. otherwise we start right at that point and infinite loop
-                currentEnd++;
-                break;
-            }
-
-            // if we did not hit that case, we can carry on as usual, finding matching classes in sorted order until we find the wrong class guy again.
-            currentEnd = nextEnd;
+            currentEnd++;
         }
 
-        // We've gathered an interval [runStart ... (currentEnd-1)]
-        int length = currentEnd - runStart + 1;
+        int length = currentEnd - currentStart;
         if (length > bestInterval.size) {
             bestInterval.size = length;
-            bestInterval.start = runStart;
-            bestInterval.end   = currentEnd - 1; // inclusive
+            bestInterval.start = currentStart;
+            bestInterval.end = currentEnd - 1;
             bestInterval.dominantClass = startClass;
         }
 
-        // Move on
+        //------------------------------------------------------------------
+        // Move on to the next interval start
+        //------------------------------------------------------------------
         currentStart = currentEnd;
     }
 
+    // now, one final check. we are going to simply trim off values at the end, if they are matching with exact same value as a wrong class point
+    int finalEnd = bestInterval.end;
+
+    // if we won't go out of bounds by checking the next one
+    if (finalEnd < n - 1) {
+        // get our next value
+        float neighborVal = dataByAttribute[bestInterval.end + 1].value;
+
+        // while there is a match between the next value and where we are trying to end, we have to trim off our end guy.
+        // this prevents us from making an interval which includes a value which would be shared between our class and another class.
+        while (finalEnd > bestInterval.start && closeEnough(neighborVal, dataByAttribute[finalEnd].value)) {
+            finalEnd--;
+        }
+        bestInterval.end = finalEnd;
+    }
     return bestInterval;
 }
 
@@ -204,7 +185,6 @@ void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, 
 
                 // Get the actual point from the real data and add it.
                 pointsInThisBlock.push_back(realData[classNum][classIndex]);
-                pointsPutIntoBlocks++;
             }
 
             // Compute bounds for each attribute.
@@ -220,7 +200,6 @@ void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, 
 
             // make a block and throw it into the hyperblocks vector
             HyperBlock h(maxes, mins, best.dominantClass);
-            cout << "Made a block with: " << pointsInThisBlock.size() << " points for class" << h.classNum << " out of attribute " << best.attribute << endl;
             hyperBlocks.push_back(h);
 
             // --- REMOVAL PHASE ---
@@ -300,9 +279,10 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
     intervalHyper(data, dataByAttribute, hyperBlocks);
     
     try{
-        // merger_cuda(data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
+        merger_cuda(data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
     } catch (exception e){
         cout << "Error in generateHBs: merger_cuda" << endl;
+        cout << e.what() << endl;
     }
 }
 

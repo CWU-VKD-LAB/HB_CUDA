@@ -39,6 +39,7 @@ void PrintingUtil::displayMainMenu() {
     std::cout << "8. Test hyperblocks on dataset.\n";
     std::cout << std::endl;
     std::cout << "9. Exit\n\n";
+    std::cout << "10. K Fold Cross Validation.\n";
 }
 
 

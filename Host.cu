@@ -47,7 +47,7 @@ std::map<int, std::string> CLASS_MAP_TESTING_INT;
 * We generate a confusion matrix, but allow for points to fall into multiple blocks at a time
 * that is why we go through blocks on outerloop and whole dataset on the inside.
 */
-std::vector<std::vector<long>> testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vector<std::vector<std::vector<float>>> &testSet){
+std::vector<std::vector<long>> testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vector<std::vector<std::vector<float>>> &testSet, std::vector<std::vector<std::vector<float>>> &trainingSet){
 
   	// Keep track of which points were never inside of a block, when a point is classifed we increment the map internal std::vectors correct positon
     // there should be CLASS_NUM unordered_maps or just hashmaps, in each will hold a std::vector<point_index, std::vector<int> of len(class_num)>
@@ -161,7 +161,7 @@ std::vector<std::vector<long>> testAccuracyOfHyperBlocks(std::vector<HyperBlock>
     std::cout << "\n\n\n\n" << std::endl;
     std::cout << "============================ K-NN CONFUSION MATRIX ==================" << std::endl;
     int k = 1;
-    std::vector<std::vector<long>> secondConfusionMatrix = Knn::kNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
+    std::vector<std::vector<long>> secondConfusionMatrix = Knn::blockPointkNN(unclassifiedPointVec, trainingSet, hyperBlocks, k, NUM_CLASSES);
      PrintingUtil::printConfusionMatrix(secondConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
     std::cout << "============================ END K-NN MATRIX ======================" << std::endl;
     for (int i = 0; i < NUM_CLASSES; i++) {
@@ -432,7 +432,7 @@ void runInteractive() {
             }
             case 8: { // TEST HYPERBLOCKS ON DATASET
                 std::cout << "Testing hyperblocks on testing dataset" << std::endl;
-                ultraConfusionMatrix = testAccuracyOfHyperBlocks(hyperBlocks, testData);
+                ultraConfusionMatrix = testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData);
                 PrintingUtil::waitForEnter();
                 break;
             }

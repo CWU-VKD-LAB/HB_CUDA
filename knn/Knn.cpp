@@ -8,6 +8,91 @@
 #include <queue>
 #include <iostream>
 #include <cmath>
+#include <unordered_map>
+
+std::vector<std::vector<long>> Knn::blockPointkNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<std::vector<std::vector<float>>> classifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES){
+    int FIELD_LENGTH = unclassifiedData[0].size();
+    if(k > hyperBlocks.size()) k = (int) sqrt(hyperBlocks.size());
+
+    std::vector<std::vector<float>> classifications(NUM_CLASSES);    // [class][pointIndex]
+    for(int i = 0; i < NUM_CLASSES; i++){
+      classifications[i] = std::vector<float>(unclassifiedData[i].size());    // Put the std::vector for each class
+    }
+
+    // Go through all the classified data of each class and mark for each point EVERY BLOCK IT IS IN
+    std::unordered_map<int, std::vector<int>> pointsInBlocks;
+    for(int i = 0; i < NUM_CLASSES; i++){
+        for(int p = 0; p < classifiedData[i].size(); p++){
+            for(int block = 0; block < hyperBlocks.size(); block++){
+                if(hyperBlocks[block].inside_HB(FIELD_LENGTH, classifiedData[i][p].data())){
+                    pointsInBlocks[p].push_back(block);
+                }
+            }
+        }
+    }
+
+    // Now we want to run the K-nn on the unclassified points
+     // For each class of points
+    for(int i = 0; i < NUM_CLASSES; i++){
+
+        // For each point in unclassified points
+        for(int uPoint = 0; uPoint < unclassifiedData[i].size(); uPoint++){
+            // Use a priority queue to keep track of the top k best distances
+            std::priority_queue<std::pair<float, int>> kNearest;
+
+            // Go through all the classified points to find the closest one and whatever class thats in use.
+            for(int cPoint = 0; cPoint < classifiedData[i].size(); cPoint++){
+                float distance = Knn::euclideanDistancePoints(unclassifiedData[i][uPoint], classifiedData[i][cPoint], FIELD_LENGTH);
+
+                if(kNearest.size() < k){
+                    kNearest.push(std::make_pair(distance, cPoint));
+                }
+                else if(distance < kNearest.top().first){
+                    kNearest.pop();
+                    kNearest.push(std::make_pair(distance, cPoint));
+                }
+            }
+
+            // Count votes for each class
+            std::vector<int> votes(NUM_CLASSES, 0);
+            while(!kNearest.empty()){
+                // kNearest.top().second is the index of the classified point,
+                // we need to increment for each of the blocks that point falls into. (pointsInBlocks)
+                for(int block : pointsInBlocks[kNearest.top().second]){
+                    votes[hyperBlocks[block].classNum]++;
+                }
+                kNearest.pop();
+            }
+
+            int majorityClass = -1;
+            int maxVotes = -1;
+
+            for(int c = 0; c < NUM_CLASSES; c++){
+                if(votes[c] > maxVotes){
+                   maxVotes = votes[c];
+                   majorityClass = c;
+                }
+            }
+
+            // WE WILL ASSUME WE DONT HAVE A ID COLUMN.
+            // WE WILL ASSSUME THE LAST COLUMN IS A CLASS COLUMN
+            classifications[i][uPoint] = majorityClass;
+        }
+    }
+
+    std::vector<std::vector<long>> regularConfusionMatrix(NUM_CLASSES, std::vector<long>(NUM_CLASSES, 0));
+
+    // Go through the classes.
+    for(int classN = 0; classN < NUM_CLASSES; classN++){
+        for(int point = 0; point < classifications[classN].size(); point++)
+            regularConfusionMatrix[classN][classifications[classN][point]]++;  
+    }
+
+    return regularConfusionMatrix;
+}
+
+
+
 /**
 *    This is the function we will use to classify data that was outside the bounds of all hyperBlocks
 *
@@ -34,11 +119,11 @@ std::vector<std::vector<long>> Knn::kNN(std::vector<std::vector<std::vector<floa
             // Use a priority queue to keep track of the top k best distances
             std::priority_queue<std::pair<float, int>> kNearest;
 
-            // Go through all the blocks and find the distances to their centers
+            // Go through all the blocks and find the disstances to their centers
             for(const auto& hyperBlock : hyperBlocks){
                 // Find the distance between the HB center and the unclassified data point
-                float bottomDist = Knn::euclideanDistance(hyperBlock.minimums, unclassifiedData[i][point], FIELD_LENGTH);
-                float topDist = Knn::euclideanDistance(hyperBlock.maximums, unclassifiedData[i][point], FIELD_LENGTH);
+                float bottomDist = Knn::euclideanDistanceBounds(hyperBlock.minimums, unclassifiedData[i][point], FIELD_LENGTH);
+                float topDist = Knn::euclideanDistanceBounds(hyperBlock.maximums, unclassifiedData[i][point], FIELD_LENGTH);
 
                 float distance = std::min(bottomDist, topDist);
 
@@ -88,8 +173,8 @@ std::vector<std::vector<long>> Knn::kNN(std::vector<std::vector<std::vector<floa
 }
 
 
-//EUCLIDEAN DISTANCE OF TWO VECTORS.
-float Knn::euclideanDistance(const std::vector<std::vector<float>>& blockBound, const std::vector<float>& point, int FIELD_LENGTH){
+//EUCLIDEAN DISTANCE OF TWO VECTORS, comparing a point to a block bound (2-D vector for disjunctions)
+float Knn::euclideanDistanceBounds(const std::vector<std::vector<float>>& blockBound, const std::vector<float>& point, int FIELD_LENGTH){
     float sumSquaredDifference = 0.0f;
 
     for(int i = 0; i < FIELD_LENGTH; i++){
@@ -99,3 +184,17 @@ float Knn::euclideanDistance(const std::vector<std::vector<float>>& blockBound, 
 
     return sqrt(sumSquaredDifference);
 }
+
+
+//EUCLIDEAN DISTANCE OF TWO VECTORS, comparing a point to a point
+float Knn::euclideanDistancePoints(const std::vector<float>& point2, const std::vector<float>& point, int FIELD_LENGTH){
+    float sumSquaredDifference = 0.0f;
+
+    for(int i = 0; i < FIELD_LENGTH; i++){
+        float diff = point2[i] - point[i];
+        sumSquaredDifference += diff * diff;
+    }
+
+    return sqrt(sumSquaredDifference);
+}
+

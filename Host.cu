@@ -160,7 +160,7 @@ std::vector<std::vector<long>> testAccuracyOfHyperBlocks(std::vector<HyperBlock>
 
     std::cout << "\n\n\n\n" << std::endl;
     std::cout << "============================ K-NN CONFUSION MATRIX ==================" << std::endl;
-    int k = 1;
+    int k = 2;
     std::vector<std::vector<long>> secondConfusionMatrix = Knn::blockPointkNN(unclassifiedPointVec, trainingSet, hyperBlocks, k, NUM_CLASSES);
      PrintingUtil::printConfusionMatrix(secondConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
     std::cout << "============================ END K-NN MATRIX ======================" << std::endl;

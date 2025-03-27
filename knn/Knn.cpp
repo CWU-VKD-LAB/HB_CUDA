@@ -10,9 +10,36 @@
 #include <cmath>
 #include <unordered_map>
 
+
+
+// Lets make a K-nn that goes through the unclassified points and sees how close they are to being
+// inside of each of the blocks. If the value for a attribute is within the bounds of the block we wont add any
+// distance to the sum. If the value is outside the bounds we will add the distance to the sum.
+//std::vector<std::vector<long>> Knn::closeToInkNN(){
+
+
+
+
+
+//}
+
+
+
+
+
+/////
+/////
+/////
+/////
+/////
+////
+/////
+
+
 std::vector<std::vector<long>> Knn::blockPointkNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<std::vector<std::vector<float>>> classifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES){
-    int FIELD_LENGTH = unclassifiedData[0].size();
+    
     if(k > hyperBlocks.size()) k = (int) sqrt(hyperBlocks.size());
+    int FIELD_LENGTH = hyperBlocks[0].maximums.size();
 
     std::vector<std::vector<float>> classifications(NUM_CLASSES);    // [class][pointIndex]
     for(int i = 0; i < NUM_CLASSES; i++){
@@ -101,7 +128,7 @@ std::vector<std::vector<long>> Knn::blockPointkNN(std::vector<std::vector<std::v
 *
 */
 std::vector<std::vector<long>> Knn::kNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES){
-    int FIELD_LENGTH = unclassifiedData[0].size();
+    int FIELD_LENGTH = hyperBlocks[0].maximums.size();
 
     if(k > hyperBlocks.size()) k = (int) sqrt(hyperBlocks.size());
 

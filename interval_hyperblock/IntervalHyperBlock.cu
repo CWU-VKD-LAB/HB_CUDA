@@ -126,7 +126,6 @@ Interval IntervalHyperBlock::longestInterval(std::vector<DataATTR> &dataByAttrib
 
 // REMAINING DATA PASSED AS A COPY INTENTIONALLY! WE TAKE TRAINING DATA AS A COPY, SO WE CAN REMOVE WITHOUT RUINING ORIGINAL DATA
 void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, vector<vector<DataATTR>> remainingData, vector<HyperBlock> &hyperBlocks) {
-
     // sort the input dataAttr's in each column by the value
     for (int i = 0; i < remainingData.size(); i++) {
         sort(remainingData[i].begin(), remainingData[i].end(),
@@ -315,7 +314,6 @@ void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allDat
         printf("CUDA error in cudaOccupancyMaxPotentialBlockSize: %s\n", cudaGetErrorString(err));
         exit(-1);
     }
-
 
     int temp = 0;
     int goToClass = NUM_CLASSES;

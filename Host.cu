@@ -1,4 +1,3 @@
-
 #include <cstdio>
 #include <fstream>
 #include <unordered_map>
@@ -36,7 +35,7 @@ using namespace std;
 int NUM_CLASSES;   // Number of classes in the dataset
 int NUM_POINTS;    // Total number of points in the dataset
 int FIELD_LENGTH;  // Number of attributes in the dataset
-int COMMAND_LINE_ARGS_CLASS = -1;
+int COMMAND_LINE_ARGS_CLASS = -1; // used for when we are splitting up generation one class per machine. This lets us run on many computers at once.
 
 map<string, int> CLASS_MAP;
 map<string, int> CLASS_MAP_TESTING;
@@ -213,7 +212,6 @@ void computeLDAOrdering(const vector<vector<vector<float>>>& trainingData, vecto
         eachClassBestVectorIndex[i] = distance(bestVectorsIndexes[i].begin(), it);
     }
 }
-
 
 void runKFold(vector<vector<vector<float>>> &dataset) {
     if (dataset.empty()) {
@@ -499,7 +497,6 @@ void runInteractive() {
                 running = false;
                 break;
             }
-
             default: {
                 cout << "\nInvalid choice. Please try again." << endl;
                 PrintingUtil::waitForEnter();

@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <cmath>
 #include "./cuda_util/CudaUtil.h"
 #include "./hyperblock_generation/MergerHyperBlock.cuh"
 #include "./hyperblock/HyperBlock.h"
@@ -87,10 +88,6 @@ vector<vector<long>> testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, 
      	}
     }
 
-    for(int i = 0; i < NUM_CLASSES; i++){
-        cout << pointsNotClassified[0][0][i] << endl;
-    }
-
     // Lets count how many points fell into blocks of multiple classes
     for(int i = 0; i < NUM_CLASSES; i++){
        int numPointsInMultipleClasses = 0;
@@ -122,7 +119,6 @@ vector<vector<long>> testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, 
        cout << "CLASS: " << CLASS_MAP_INT[i] << "NUM POINTS IN MULTIPLE CLASSES BLOCKS: " << numPointsInMultipleClasses << endl;
        cout << "CLASS: " << CLASS_MAP_INT[i] << "NUM POINTS IN NO BLOCKS: " << numPointsInNoBlocks << endl;
     }
-
 
     vector<vector<vector<float>>> unclassifiedPointVec(NUM_CLASSES, vector<vector<float>>()); // [class][pointIdx][attr]
 
@@ -180,6 +176,45 @@ vector<vector<long>> testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, 
     return ultraConfusionMatrix;
 }
 
+// This function computes the LDA ordering for a given training dataset.
+// It sets up the bestVectors, bestVectorsIndexes, and eachClassBestVectorIndex.
+// best vectors is the weights of each coefficient from the LDF function
+// bestVectorsIndexes is just the indexes that correspond to those weights from the function, since we are sorting them
+// eachClassBestVectorIndex is the one best attribute for each class, we sort by this when generating blocks, and it helps a bit.
+void computeLDAOrdering(const vector<vector<vector<float>>>& trainingData, vector<vector<float>>& bestVectors, vector<vector<int>>& bestVectorsIndexes, vector<int>& eachClassBestVectorIndex) {
+    // Run LDA on the training data.
+    bestVectors = linearDiscriminantAnalysis(trainingData);
+
+    // Resize our index containers.
+    bestVectorsIndexes.assign(NUM_CLASSES, vector<int>(FIELD_LENGTH, 0));
+    eachClassBestVectorIndex.assign(NUM_CLASSES, 0);
+
+    // For each class, initialize the indexes and then sort (if desired)
+    // and determine the index with the largest absolute LDA coefficient.
+    for (int i = 0; i < NUM_CLASSES; i++) {
+        // Populate with initial indices: 0, 1, 2, ... FIELD_LENGTH - 1.
+        for (int j = 0; j < FIELD_LENGTH; j++) {
+            bestVectorsIndexes[i][j] = j;
+        }
+
+#ifdef LDA_ORDERING
+        // Optionally sort the indexes for class i based on the absolute value of the LDA coefficients.
+        sort(bestVectorsIndexes[i].begin(), bestVectorsIndexes[i].end(),
+             [&](int a, int b) {
+                 return fabs(bestVectors[i][a]) < fabs(bestVectors[i][b]);
+             });
+#endif
+        // Find the index (from bestVectorsIndexes) corresponding to the largest absolute LDA coefficient.
+        // We use the values in bestVectors[i] for comparison.
+        auto it = max_element(bestVectorsIndexes[i].begin(), bestVectorsIndexes[i].end(),
+                              [&](int a, int b) {
+                                  return fabs(bestVectors[i][a]) < fabs(bestVectors[i][b]);
+                              });
+        eachClassBestVectorIndex[i] = distance(bestVectorsIndexes[i].begin(), it);
+    }
+}
+
+
 void runKFold(vector<vector<vector<float>>> &dataset) {
     if (dataset.empty()) {
         cout << "Please enter a training dataset before using K Fold validation" << endl;
@@ -225,37 +260,16 @@ void runKFold(vector<vector<vector<float>>> &dataset) {
 
         // now that our data is set up with training and testing, we simply do business as usual. we are going to do our LDA on the train data, then just do our block generation and simplification
         // Run LDA on the training data.
-        vector<vector<float>>bestVectors = linearDiscriminantAnalysis(trainingData);
+        vector<vector<float>>bestVectors;
 
         // Initialize indexes for each class
         vector<vector<int>> bestVectorsIndexes = vector<vector<int> >(NUM_CLASSES, vector<int>(FIELD_LENGTH, 0));
         vector<int> eachClassBestVectorIndex = vector<int>(NUM_CLASSES);
 
-        cout << "----------------------------FOLD " << i << " RESULTS----------------------------------" << endl;
+        computeLDAOrdering(trainingData, bestVectors, bestVectorsIndexes, eachClassBestVectorIndex);
 
-        // sort our vectors from the LDA by their coefficients so that we can determine an ordering for removing and sorting by best columns in generation
-        for (int j = 0; j < NUM_CLASSES; j++) {
 
-            for (int k = 0; k < FIELD_LENGTH; k++) {
-                bestVectorsIndexes[j][k] = k;
-            }
-#ifdef LDA_ORDERING
-            // if we have decided to use the ordering from LDA we sort, otherwise we simply go through and use it in the order 0,1,2,3...
-            sort(bestVectorsIndexes[j].begin(), bestVectorsIndexes[j].end(),
-                 [&](int a, int b) {
-                     return fabs(bestVectors[j][a]) < fabs(bestVectors[j][b]);
-            });
-#endif
-            // this is used when we are generating the HBs. We need to know which had the largest value in the separation vector, which is what this represents here.
-            // if we are sorting we could just grab the 0th element, but this works better in the case that we are not. so we just use this.
-
-            // find the element with the largest absolute value.
-            auto it = max_element(bestVectorsIndexes[j].begin(), bestVectorsIndexes[j].end(),
-                [](float a, float b) {
-                    return abs(a) < abs(b);
-            });
-            eachClassBestVectorIndex[j] = distance(bestVectorsIndexes[j].begin(), it);
-        }
+        cout << "----------------------------FOLD " << (i + 1) << " RESULTS----------------------------------" << endl;
 
         // ------------------------------------------
         // GENERATING BLOCKS BUSINESS AS USUAL
@@ -276,8 +290,6 @@ void runKFold(vector<vector<vector<float>>> &dataset) {
         testAccuracyOfHyperBlocks(hyperBlocks, testData);
     } // end of one train/test loop
 }
-
-
 
 // -------------------------------------------------------------------------
 // Asynchronous mode: run when argc >= 2
@@ -329,35 +341,11 @@ int runAsync(int argc, char* argv[]) {
     DataUtil::minMaxNormalization(trainingData, minValues, maxValues, FIELD_LENGTH);
 
     // Run LDA on the training data.
-    vector<vector<float>>bestVectors = linearDiscriminantAnalysis(trainingData);
-
+    vector<vector<float>>bestVectors;
     // Initialize indexes for each class
     vector<vector<int>> bestVectorsIndexes = vector<vector<int> >(NUM_CLASSES, vector<int>(FIELD_LENGTH, 0));
     vector<int> eachClassBestVectorIndex = vector<int>(NUM_CLASSES);
-
-    // sort our vectors from the LDA by their coefficients so that we can determine an ordering for removing and sorting by best columns in generation
-    for (int i = 0; i < NUM_CLASSES; i++) {
-
-        for (int j = 0; j < FIELD_LENGTH; j++) {
-            bestVectorsIndexes[i][j] = j;
-        }
-#ifdef LDA_ORDERING
-            // if we have decided to use the ordering from LDA we sort, otherwise we simply go through and use it in the order 0,1,2,3...
-            sort(bestVectorsIndexes[i].begin(), bestVectorsIndexes[i].end(),
-                 [&](int a, int b) {
-                     return fabs(bestVectors[i][a]) < fabs(bestVectors[i][b]);
-            });
-#endif
-            // this is used when we are generating the HBs. We need to know which had the largest value in the separation vector, which is what this represents here.
-            // if we are sorting we could just grab the 0th element, but this works better in the case that we are not. so we just use this.
-
-            // find the element with the largest absolute value.
-            auto it = max_element(bestVectorsIndexes[i].begin(), bestVectorsIndexes[i].end(),
-                [](float a, float b) {
-                    return abs(a) < abs(b);
-            });
-        eachClassBestVectorIndex[i] = distance(bestVectorsIndexes[i].begin(), it);
-    }
+    computeLDAOrdering(trainingData, bestVectors, bestVectorsIndexes, eachClassBestVectorIndex);
 
     IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
     cout << "HYPERBLOCK GENERATION FINISHED!" << endl;
@@ -425,42 +413,8 @@ void runInteractive() {
                 DataUtil::findMinMaxValuesInDataset(trainingData, minValues, maxValues, FIELD_LENGTH);
                 DataUtil::minMaxNormalization(trainingData, minValues, maxValues, FIELD_LENGTH);
 
-                cout << "Finished Normalization, beginning LDA" << endl;
+                computeLDAOrdering(trainingData, bestVectors, bestVectorsIndexes, eachClassBestVectorIndex);
 
-                // Run LDA on the training data.
-                bestVectors = linearDiscriminantAnalysis(trainingData);
-
-                bestVectorsIndexes = vector<vector<int>>(NUM_CLASSES, vector<int>(FIELD_LENGTH, 0));
-                eachClassBestVectorIndex = vector<int>(NUM_CLASSES);
-
-                // where we are getting the ordering of attributes which we are going to use for removing attributes later.
-                for (int i = 0; i < NUM_CLASSES; i++) {
-
-                    // first we populate it just with the index values. 0,1,2,3,4...
-                    for (int j = 0; j < FIELD_LENGTH; j++) {
-                        bestVectorsIndexes[i][j] = j;
-                    }
-
-#ifdef LDA_ORDERING
-                    // if we have decided to use the ordering from LDA we sort, otherwise we simply go through and use it in the order 0,1,2,3...
-                    sort(bestVectorsIndexes[i].begin(), bestVectorsIndexes[i].end(),
-                         [&](int a, int b) {
-                             return fabs(bestVectors[i][a]) < fabs(bestVectors[i][b]);
-                    });
-#endif
-                    // this is used when we are generating the HBs. We need to know which had the largest value in the separation vector, which is what this represents here.
-                    // if we are sorting we could just grab the 0th element, but this works better in the case that we are not. so we just use this.
-                    auto it = max_element(bestVectorsIndexes[i].begin(), bestVectorsIndexes[i].end(),
-                    [](float a, float b) {
-                        return fabs(a) < fabs(b);
-                    });
-
-                    // the best index is the distance from 0 to our index. since it is just an iterator to the index of our biggest absolute value.
-                    eachClassBestVectorIndex[i] = distance(bestVectorsIndexes[i].begin(), it);
-
-                    cout << "BEST ATTRIBUTE: " << eachClassBestVectorIndex[i] << endl;
-
-                }
 
                 PrintingUtil::waitForEnter();
                 break;
@@ -526,7 +480,7 @@ void runInteractive() {
 
                 cout << "After removing useless blocks we have: " << result[1] << " clauses\n";
                 cout << "We got a final total of: " << hyperBlocks.size() << " blocks." << endl;
-                cout << "We had: " << totalPoints << " points\n";
+                cout << "We had: " << totalPoints << " points of training data\n";
                 PrintingUtil::waitForEnter();
                 break;
             }

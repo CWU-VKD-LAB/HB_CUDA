@@ -190,10 +190,12 @@ void runKFold(vector<vector<vector<float>>> &dataset) {
     int k;
     cin >> k;
 
-    // Check if the reading succeeded.
+    // Clear the newline from the input buffer.
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
     if (cin.fail() || k < 2) {
         cout << "Error: Invalid input. Please enter a valid integer greater than 1." << endl;
-        // Clear the error state and ignore any remaining input in the buffer.
+        // Clear the error state and ignore any remaining input.
         cin.clear();
         cin.ignore(numeric_limits<streamsize>::max(), '\n');
         return;
@@ -535,13 +537,15 @@ void runInteractive() {
                 break;
             }
             case 9: {
-                running = false;
+                runKFold(trainingData);
+                PrintingUtil::waitForEnter();
                 break;
             }
             case 10: {
-                runKFold(trainingData);
+                running = false;
                 break;
             }
+
             default: {
                 cout << "\nInvalid choice. Please try again." << endl;
                 PrintingUtil::waitForEnter();

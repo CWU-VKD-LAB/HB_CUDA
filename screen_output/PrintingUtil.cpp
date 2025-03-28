@@ -42,7 +42,7 @@ void PrintingUtil::displayMainMenu() {
     std::cout << "10. Exit\n\n";
 }
 
-void PrintingUtil::printConfusionMatrix(std::vector<std::vector<long>>& data, const int NUM_CLASSES, std::map<int, std::string>& CLASS_MAP_INT) {
+float PrintingUtil::printConfusionMatrix(std::vector<std::vector<long>>& data, const int NUM_CLASSES, std::map<int, std::string>& CLASS_MAP_INT) {
     std::vector<std::string> classLabels(NUM_CLASSES);
 
     std::vector<float> accuracies(NUM_CLASSES, 0.0);
@@ -118,6 +118,7 @@ void PrintingUtil::printConfusionMatrix(std::vector<std::vector<long>>& data, co
     }
 
     std::cout << "The overall accuracy is " << overallAccuracy << std::endl;
+    return overallAccuracy;
 }
 
 

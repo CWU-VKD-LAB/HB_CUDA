@@ -47,7 +47,7 @@ map<int, string> CLASS_MAP_TESTING_INT;
 * We generate a confusion matrix, but allow for points to fall into multiple blocks at a time
 * that is why we go through blocks on outerloop and whole dataset on the inside.
 */
-vector<vector<long>> testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, vector<vector<vector<float>>> &testSet){
+float testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, vector<vector<vector<float>>> &testSet){
 
   	// Keep track of which points were never inside of a block, when a point is classifed we increment the map internal vectors correct positon
     // there should be CLASS_NUM unordered_maps or just hashmaps, in each will hold a vector<point_index, vector<int> of len(class_num)>
@@ -168,11 +168,11 @@ vector<vector<long>> testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, 
 
     cout << "\n\n\n\n" << endl;
     cout << "============================ DISTINCT POINT CONFUSION MATRIX ==================" << endl;
-    PrintingUtil::printConfusionMatrix(regularConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
+    float accuracy = PrintingUtil::printConfusionMatrix(regularConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
     cout << "============================ END DISTINCT POINT MATRIX ======================" << endl;
     cout << "\n\n\n\n" << endl;
 
-    return ultraConfusionMatrix;
+    return accuracy;
 }
 
 // This function computes the LDA ordering for a given training dataset.
@@ -236,6 +236,10 @@ void runKFold(vector<vector<vector<float>>> &dataset) {
 
     vector<vector<vector<vector<float>>>> kFolds = DataUtil::splitDataset(dataset, k);
 
+    // stats trackers for cross folds.
+    float acc = 0.0f;
+    int blockCount = 0;
+    int cCount = 0;
 
     // generate blocks with a training set which is all folds except i. using i as the test dataset.
     for (int i = 0; i < k; i++) {
@@ -274,18 +278,37 @@ void runKFold(vector<vector<vector<float>>> &dataset) {
         vector<HyperBlock> hyperBlocks;
 
         IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
-        cout << "HYPERBLOCK GENERATION FINISHED!" << endl;
-        cout << "GENERATED WITH " << hyperBlocks.size() << " BLOCKS" << endl;
+        //cout << "HYPERBLOCK GENERATION FINISHED!" << endl;
+        //cout << "GENERATED WITH " << hyperBlocks.size() << " BLOCKS" << endl;
         vector<int> result = Simplifications::runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
+
         int totalPoints = 0;
         for (const auto &c : trainingData)
             totalPoints += c.size();
 
-        cout << "WE FOUND " << hyperBlocks.size() << " HYPERBLOCKS AFTER REMOVING USELESS BLOCKS!" << endl;
-        cout << "After removing useless blocks we have: " << result[1] << " clauses\n";
+        //cout << "WE FOUND " << hyperBlocks.size() << " HYPERBLOCKS AFTER REMOVING USELESS BLOCKS!" << endl;
+        //cout << "After removing useless blocks we have: " << result[1] << " clauses\n";
 
-        testAccuracyOfHyperBlocks(hyperBlocks, testData);
+        int clauseCount = 0;
+        for (const auto &hb : hyperBlocks) {
+            for (int a = 0; a < FIELD_LENGTH; a++) {
+                if (hb.minimums[a][0] == 0.0f && hb.maximums[a][0] == 1.0f)
+                    continue;
+                else
+                    clauseCount++;
+            }
+        }
+
+        acc += testAccuracyOfHyperBlocks(hyperBlocks, testData);
+        blockCount += hyperBlocks.size();
+        cCount += clauseCount;
+
     } // end of one train/test loop
+
+    cout << "OVERALL ACCURACY " << float(acc) / float(k) << endl;
+    cout << "Average block count " << float(blockCount) / float (k) << endl;
+    cout << "Average clause count " << float(cCount) / float (k) << endl;
+    
 }
 
 // -------------------------------------------------------------------------
@@ -483,7 +506,7 @@ void runInteractive() {
             }
             case 8: { // TEST HYPERBLOCKS ON DATASET
                 cout << "Testing hyperblocks on testing dataset" << endl;
-                ultraConfusionMatrix = testAccuracyOfHyperBlocks(hyperBlocks, testData);
+                testAccuracyOfHyperBlocks(hyperBlocks, testData);
                 PrintingUtil::waitForEnter();
                 break;
             }

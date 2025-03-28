@@ -15,16 +15,79 @@
 // Lets make a K-nn that goes through the unclassified points and sees how close they are to being
 // inside of each of the blocks. If the value for a attribute is within the bounds of the block we wont add any
 // distance to the sum. If the value is outside the bounds we will add the distance to the sum.
-//std::vector<std::vector<long>> Knn::closeToInkNN(){
+std::vector<std::vector<long>> Knn::closeToInkNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES){
+    // Basically we will do the same thing, we will just need to change our distancce thingy around.
+
+    int FIELD_LENGTH = hyperBlocks[0].maximums.size();
+    std::cout << "Field Length: " << FIELD_LENGTH << std::endl;
+    if(k > hyperBlocks.size()) k = (int) sqrt(hyperBlocks.size());
+
+    // Keep track of assignments with something
+    std::vector<std::vector<float>> classifications(NUM_CLASSES);    // [class][pointIndex]
+    for(int i = 0; i < NUM_CLASSES; i++){
+      classifications[i] = std::vector<float>(unclassifiedData[i].size());    // Put the std::vector for each class
+    }
+
+    // For each class of points
+    for(int i = 0; i < NUM_CLASSES; i++){
+
+        // For each point in unclassified points
+        for(int point = 0; point < unclassifiedData[i].size(); point++){
+            // Use a priority queue to keep track of the top k best distances
+            std::priority_queue<std::pair<float, int>> kNearest;
+
+            // Go through all the blocks and find the disstances to their centers
+            for(const HyperBlock& hyperBlock : hyperBlocks){
+                // Find the distance between the HB center and the unclassified data point
+                
+                float distance =  hyperBlock.distance_to_HB(FIELD_LENGTH, unclassifiedData[i][point].data());
+
+                if(kNearest.size() < k){    // always add when queue is not at k yet.
+                    kNearest.push(std::make_pair(distance, hyperBlock.classNum));
+                }
+                else if(distance < kNearest.top().first){ // Queue is big enough, and this distance is better than the worst in queue
+                    kNearest.pop();    // pop the max (worst distance)
+                    kNearest.push(std::make_pair(distance, hyperBlock.classNum));    // push the better distance.
+                }
+            }
+
+            // Count votes for each class
+            std::vector<int> votes(NUM_CLASSES, 0);
+            while(!kNearest.empty()){
+                votes[kNearest.top().second]++;
+                kNearest.pop();
+            }
 
 
+            int majorityClass = 5;
+            int maxVotes = 0;
+
+            for(int c = 0; c < NUM_CLASSES; c++){
+                if(votes[c] > maxVotes){
+                   maxVotes = votes[c];
+                   majorityClass = c;
+                }
+            }
+
+            // WE WILL ASSUME WE DONT HAVE A ID COLUMN.
+            // WE WILL ASSSUME THE LAST COLUMN IS A CLASS COLUMN
+            classifications[i][point] = majorityClass;
+        }
+    }
+
+    std::vector<std::vector<long>> regularConfusionMatrix(NUM_CLASSES, std::vector<long>(NUM_CLASSES, 0));
+
+    // Go through the classes.
+    for(int classN = 0; classN < NUM_CLASSES; classN++){
+        for(int point = 0; point < classifications[classN].size(); point++){
+            regularConfusionMatrix[classN][classifications[classN][point]]++;
+        }
+    }
+
+    return regularConfusionMatrix;
 
 
-
-//}
-
-
-
+}
 
 
 /////
@@ -129,7 +192,7 @@ std::vector<std::vector<long>> Knn::blockPointkNN(std::vector<std::vector<std::v
 */
 std::vector<std::vector<long>> Knn::kNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES){
     int FIELD_LENGTH = hyperBlocks[0].maximums.size();
-
+    std::cout << "Field Length: " << FIELD_LENGTH << std::endl;
     if(k > hyperBlocks.size()) k = (int) sqrt(hyperBlocks.size());
 
     // Keep track of assignments with something

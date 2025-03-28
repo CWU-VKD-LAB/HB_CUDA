@@ -275,15 +275,14 @@ void runKFold(vector<vector<vector<float>>> &dataset) {
 
         IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
         cout << "HYPERBLOCK GENERATION FINISHED!" << endl;
-        cout << "WE FOUND " << hyperBlocks.size() << " HYPERBLOCKS!" << endl;
-
+        cout << "GENERATED WITH " << hyperBlocks.size() << " BLOCKS" << endl;
         vector<int> result = Simplifications::runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
         int totalPoints = 0;
         for (const auto &c : trainingData)
             totalPoints += c.size();
+
+        cout << "WE FOUND " << hyperBlocks.size() << " HYPERBLOCKS AFTER REMOVING USELESS BLOCKS!" << endl;
         cout << "After removing useless blocks we have: " << result[1] << " clauses\n";
-        cout << "Ran simplifications: " << result[0] << " Times" << endl;
-        cout << "We had: " << totalPoints << " points" << endl;
 
         testAccuracyOfHyperBlocks(hyperBlocks, testData);
     } // end of one train/test loop

@@ -55,25 +55,20 @@ bool HyperBlock::inside_HB(int numAttributes, const float* point) {
 float HyperBlock::distance_to_HB(int numAttributes, const float* point) const {
     constexpr float EPSILON = 1e-6f;
     float totalDistanceSquared = 0.0f;
-
     for (int i = 0; i < numAttributes; i++) {
-        float minDistance = std::numeric_limits<float>::max();
-
-        // Find the closest interval in this dimension
-        
-        float minVal = minimums[i][0];
-        float maxVal = maximums[i][0];
-
-        // Compute the shortest distance to the nearest bound
-        float lowerDist = std::max(0.0f, minVal - point[i]);  
-        float upperDist = std::max(0.0f, point[i] - maxVal);
-        float closestDist = std::max(lowerDist, upperDist);
-
-        minDistance = std::min(minDistance, closestDist);
-
-        // Accumulate squared distance for Euclidean norm
-        totalDistanceSquared += minDistance * minDistance;
+        // If point is below the min bound (with epsilon tolerance)
+        if (point[i] < minimums[i][0] - EPSILON) {
+            float dist = minimums[i][0] - point[i];
+            totalDistanceSquared += dist * dist;
+        }
+        // If point is above the max bound (with epsilon tolerance)
+        else if (point[i] > maximums[i][0] + EPSILON) {
+            float dist = point[i] - maximums[i][0];
+            totalDistanceSquared += dist * dist;
+        }
+        // If point is within bounds (including epsilon tolerance), distance is 0
+        // So we don't add anything to totalDistanceSquared
     }
 
-    return std::sqrt(totalDistanceSquared); 
+    return std::sqrt(totalDistanceSquared);
 }

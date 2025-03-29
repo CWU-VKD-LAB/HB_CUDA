@@ -69,8 +69,6 @@ std::vector<std::vector<long>> Knn::closeToInkNN(std::vector<std::vector<std::ve
                 }
             }
 
-            // WE WILL ASSUME WE DONT HAVE A ID COLUMN.
-            // WE WILL ASSSUME THE LAST COLUMN IS A CLASS COLUMN
             classifications[i][point] = majorityClass;
         }
     }
@@ -85,8 +83,6 @@ std::vector<std::vector<long>> Knn::closeToInkNN(std::vector<std::vector<std::ve
     }
 
     return regularConfusionMatrix;
-
-
 }
 
 

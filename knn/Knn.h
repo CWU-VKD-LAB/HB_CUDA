@@ -2,12 +2,12 @@
 // Created by asnyd on 3/20/2025.
 //
 #pragma once
-#include <vector>
-#include "../hyperblock/HyperBlock.h"
+
 #ifndef KNN_H
 #define KNN_H
 
-
+#include <vector>
+#include "../hyperblock/HyperBlock.h"
 
 class Knn {
     public:

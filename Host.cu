@@ -360,6 +360,7 @@ int runAsync(int argc, char* argv[]) {
     DataUtil::findMinMaxValuesInDataset(trainingData, minValues, maxValues, FIELD_LENGTH);
     DataUtil::minMaxNormalization(trainingData, minValues, maxValues, FIELD_LENGTH);
 
+    cout << "RUNNING LDA" << endl;
     // Run LDA on the training data.
     vector<vector<float>>bestVectors;
     // Initialize indexes for each class
@@ -370,6 +371,10 @@ int runAsync(int argc, char* argv[]) {
     IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
     cout << "HYPERBLOCK GENERATION FINISHED!" << endl;
     cout << "WE FOUND " << hyperBlocks.size() << " HYPERBLOCKS!" << endl;
+    cout << "BEGINNING SIMPLIFICATIONS" << endl;
+
+    string nonSimplified = string("NonSimplifiedBlocksClass") + to_string(COMMAND_LINE_ARGS_CLASS);
+    DataUtil::saveBasicHBsToCSV(hyperBlocks, nonSimplified, FIELD_LENGTH);
 
     vector<int> result = Simplifications::runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
     int totalPoints = 0;
@@ -379,7 +384,8 @@ int runAsync(int argc, char* argv[]) {
     cout << "Ran simplifications: " << result[0] << " Times" << endl;
     cout << "We had: " << totalPoints << " points\n";
 
-     DataUtil::saveBasicHBsToCSV(hyperBlocks, "AsyncBlockOutput", FIELD_LENGTH);
+    string simplified = string("SimplifiedBlocks") + to_string(COMMAND_LINE_ARGS_CLASS);
+    DataUtil::saveBasicHBsToCSV(hyperBlocks, simplified, FIELD_LENGTH);
     return 0;
 }
 

@@ -270,9 +270,11 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
     // Get data to create hyperblocks
     vector<vector<DataATTR>> dataByAttribute = separateByAttribute(data, FIELD_LENGTH);
 
+    cout << "STARTING INTERVAL HYPER" << endl;
     // make our interval based blocks
     intervalHyper(data, dataByAttribute, hyperBlocks);
-    
+
+    cout << "STARTING MERGING" << endl;
     try{
         merger_cuda(data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
         cout << "BlOCK GENERATION FINISHED! WE FOUND: " << hyperBlocks.size() << " BLOCKS" << endl;

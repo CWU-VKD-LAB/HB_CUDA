@@ -14,7 +14,7 @@ class IntervalHyperBlock {
 
     static Interval longestInterval(std::vector<DataATTR> &dataByAttribute, int attribute);
 
-    static void intervalHyper(std::vector<std::vector<std::vector<float>>> &realData, std::vector<std::vector<DataATTR>> remainingData, std::vector<HyperBlock> &hyperBlocks);
+    static void intervalHyper(std::vector<std::vector<std::vector<float>>> &realData, std::vector<std::vector<DataATTR>> &remainingData, std::vector<HyperBlock> &hyperBlocks);
 
     static std::vector<std::vector<DataATTR>> separateByAttribute(std::vector<std::vector<std::vector<float>>>& data, int FIELD_LENGTH);
 

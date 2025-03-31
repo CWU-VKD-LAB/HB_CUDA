@@ -16,7 +16,7 @@ using namespace std;
 
 #define USED true
 
-#define EPSILON 0.00001
+#define EPSILON 0.000001
 // comparing float helper
 static inline bool closeEnough(float a, float b) {
     return abs(a - b) < EPSILON;
@@ -68,14 +68,8 @@ Interval IntervalHyperBlock::longestInterval(std::vector<DataATTR> &dataByAttrib
         int startClass = dataByAttribute[currentStart].classNum;
 
         // if our back check failed, that means there is a matching value behind us, from the wrong class.
-        // this means we have to just move on as an interval of ONE no matter what.
+        // this means we have to just move on as an interval of ONE no matter what. we aren't using intervals of one, so just continue
         if (!checkBackwards(dataByAttribute, currentStart)) {
-            if (1 > bestInterval.size) {
-                bestInterval.size         = 1;
-                bestInterval.start        = currentStart;
-                bestInterval.end          = currentStart;
-                bestInterval.dominantClass = startClass;
-            }
             // move one and carry on
             currentStart++;
             continue;
@@ -93,7 +87,7 @@ Interval IntervalHyperBlock::longestInterval(std::vector<DataATTR> &dataByAttrib
         }
 
         int length = currentEnd - currentStart;
-        if (length > bestInterval.size) {
+        if (length > bestInterval.size && length > 1) {
             bestInterval.size = length;
             bestInterval.start = currentStart;
             bestInterval.end = currentEnd - 1;
@@ -124,15 +118,18 @@ Interval IntervalHyperBlock::longestInterval(std::vector<DataATTR> &dataByAttrib
     return bestInterval;
 }
 
-// REMAINING DATA PASSED AS A COPY INTENTIONALLY! WE TAKE TRAINING DATA AS A COPY, SO WE CAN REMOVE WITHOUT RUINING ORIGINAL DATA
-void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, vector<vector<DataATTR>> remainingData, vector<HyperBlock> &hyperBlocks) {
+// takes in a vector of DataATTR's per attribute. which are simply our data, chopped up by attribute. Finds the longest interval of all one class across all attributes iteratively.
+// populates the list of hyperblocks, and we then send those blocks to the merger_cuda to get smashed together as much as possible.
+void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, vector<vector<DataATTR>> &remainingData, vector<HyperBlock> &hyperBlocks) {
     // sort the input dataAttr's in each column by the value
-    for (int i = 0; i < remainingData.size(); i++) {
-        sort(remainingData[i].begin(), remainingData[i].end(),
+    for (auto & i : remainingData) {
+        sort(i.begin(), i.end(),
              [](const DataATTR &a, const DataATTR &b) {
                  return a.value < b.value;
         });
     }
+
+    vector<bool> doneFlags(remainingData.size(), false);
 
     while (true) {
 
@@ -142,14 +139,31 @@ void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, 
 
         // Search each attribute
         for (int i = 0; i < remainingData.size(); i++) {
+            // if we are done with the column, just skip.
+            if (doneFlags[i] == true)
+                continue;
+
             intervals.emplace_back(async(launch::async, longestInterval, ref(remainingData[i]), i));
         }
 
         // Wait for results then find largest interval
-        for (auto &future1 : intervals) {
-            Interval intr = future1.get();
-            if (intr.size >= 1 && intr.size > best.size) {
-                best = intr;  // copy entire interval
+        for (int i = 0; i < intervals.size(); i++) {
+
+            // if we already did this column completely skip
+            if (doneFlags[i] == true)
+                continue;
+
+            // else get our result from this column
+            Interval intr = intervals[i].get();
+            // if it returned -1, that means the attribute is done and we don't need to keep checking it. helpful for high attribute datasets.
+            if (intr.size == -1) {
+                doneFlags[i] = true;
+            }
+            else {
+                // we had an interval, check if it's better than current best.
+                if (intr.size >= 1 && intr.size > best.size) {
+                    best = intr;  // copy entire interval
+                }
             }
         }
 
@@ -159,7 +173,7 @@ void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, 
 
         // if we had a valid interval, we have to do all this business
         // if there was not we are obviously just done.
-        if (best.size >= 1) {
+        if (best.size > 1) {
             for (int i = best.start; i <= best.end; i++) {
                 DataATTR d = remainingData[best.attribute][i];
                 if (!d.used)
@@ -189,10 +203,10 @@ void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, 
             vector<vector<float>> maxes(remainingData.size(), vector<float>(1, -numeric_limits<float>::infinity()));
             vector<vector<float>> mins(remainingData.size(), vector<float>(1, numeric_limits<float>::infinity()));
 
-            for (int point = 0; point < pointsInThisBlock.size(); point++) {
+            for (auto & point : pointsInThisBlock) {
                 for (int att = 0; att < remainingData.size(); att++) {
-                    maxes[att][0] = max(pointsInThisBlock[point][att], maxes[att][0]);
-                    mins[att][0] = min(pointsInThisBlock[point][att], mins[att][0]);
+                    maxes[att][0] = max(point[att], maxes[att][0]);
+                    mins[att][0] = min(point[att], mins[att][0]);
                 }
             }
 
@@ -203,25 +217,54 @@ void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, 
             // --- REMOVAL PHASE ---
             // Remove the points that were just used from each column in remainingData.
             // --- REMOVAL PHASE ---
-            for (int att = 0; att < remainingData.size(); att++) {
-                for (int dataAtt = 0; dataAtt < remainingData[att].size(); dataAtt++) {
-
-                    // Make sure to read from the "att" column, *not* best.attribute
-                    DataATTR d = remainingData[att][dataAtt];
+            for (auto & att : remainingData) {
+                for (auto & dataAtt : att) {
 
                     // Check if this DataATTR matches any of the removed points.
                     for (auto &removed : usedIDs) {
-                        if (d.classNum == removed.first && d.classIndex == removed.second) {
+                        if (dataAtt.classNum == removed.first && dataAtt.classIndex == removed.second) {
                             // Mark it used in the att-th column
-                            remainingData[att][dataAtt].used = USED;
+                            dataAtt.used = USED;
                             break;
                         }
                     }
                 }
             }
         }
+
+        // once all the attributes returned us on intervals or just intervals of one, we break.
         else
             break;
+    }
+
+    // at the end of that loop, we have a bunch of points which we have not put into blocks. We now make all those guys into their own one point blocks.
+    // this is easy, you just find the guys who aren't used yet, and make them their own block to live in.
+    // we only have to use one column, since all the data points are in each column.
+    vector<pair<int, int>> notUsedPoints;
+    for (auto &dataAtt : remainingData[0]) {
+        if (dataAtt.used != USED) {
+            notUsedPoints.push_back({dataAtt.classNum, dataAtt.classIndex});
+        }
+    }
+
+    // loop through each class and all their points, and find the guys who are not used, and make blocks out of them.
+    for (auto &point : notUsedPoints) {
+        int classNum = point.first;
+        int classIndex = point.second;
+
+        // copy this point into it's own HB.
+        vector<float> thisPoint = realData[classNum][classIndex];
+
+        vector<vector<float>> mins(remainingData.size());
+        vector<vector<float>> maxes(remainingData.size());
+        // copy the point in as both min and max
+        for (int att = 0; att < remainingData.size(); att++) {
+            mins[att].push_back(thisPoint[att]);
+            maxes[att].push_back(thisPoint[att]);
+        }
+        // make a block and throw it into the hyperblocks vector
+        HyperBlock h(maxes, mins, classNum);
+        hyperBlocks.push_back(h);
     }
 }
 

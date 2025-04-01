@@ -423,10 +423,10 @@ void runInteractive() {
         switch (choice) {
             case 1: { // IMPORT TRAINING DATA
                 cout << "Enter training data filename: " << endl;
-                system("ls datasets");
+                system("ls DATASETS");
                 getline(cin, trainingDataFileName);
 
-                string fullPath = "datasets" + string(PATH_SEPARATOR) + trainingDataFileName;
+                string fullPath = "DATASETS" + string(PATH_SEPARATOR) + trainingDataFileName;
 
                 CLASS_MAP.clear();
                 CLASS_MAP_INT.clear();
@@ -447,9 +447,9 @@ void runInteractive() {
             }
             case 2: { // IMPORT TESTING DATA
                 cout << "Enter testing data filename: " << endl;
-                system("ls datasets");
+                system("ls DATASETS");
                 getline(cin, testingDataFileName);
-                string fullPath = "datasets" + string(PATH_SEPARATOR) + testingDataFileName;
+                string fullPath = "DATASETS" + string(PATH_SEPARATOR) + testingDataFileName;
 
                 // clear these two maps to prevent issues when using a second test set.
                 CLASS_MAP_TESTING.clear();

@@ -55,7 +55,6 @@ static bool checkBackwards(vector<DataATTR> &dataByAttribute, int currentStart) 
 #define FLIP 1
 #define FLOP 0
 
-
 // supervisor is going to update this after everyone has found their own best intervals. Supervisor goes through and finds best.
 // then the threads are all going to go through and mark all points which are a part of that interval in their own columns.
 mutex mtx;

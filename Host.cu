@@ -47,7 +47,8 @@ map<int, string> CLASS_MAP_TESTING_INT;
 * We generate a confusion matrix, but allow for points to fall into multiple blocks at a time
 * that is why we go through blocks on outerloop and whole dataset on the inside.
 */
-float testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, vector<vector<vector<float>>> &testSet){
+std::vector<std::vector<long>> testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vector<std::vector<std::vector<float>>> &testSet, std::vector<std::vector<std::vector<float>>> &trainingSet){
+
 
   	// Keep track of which points were never inside of a block, when a point is classifed we increment the map internal vectors correct positon
     // there should be CLASS_NUM unordered_maps or just hashmaps, in each will hold a vector<point_index, vector<int> of len(class_num)>
@@ -152,12 +153,14 @@ float testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, vector<vector<v
     PrintingUtil::printConfusionMatrix(regularConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
     cout << "============================ END CONFUSION MATRIX ======================" << endl;
 
-	cout << "Any point was inside" << anyPointWasInside <<  endl;
+	  cout << "Any point was inside" << anyPointWasInside <<  endl;
 
-    cout << "\n\n\n\n" << endl;
-    cout << "============================ K-NN CONFUSION MATRIX ==================" << endl;
-    int k = 1;
-    vector<vector<long>> secondConfusionMatrix = Knn::kNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
+
+    std::cout << "\n\n\n\n" << std::endl;
+    std::cout << "============================ K-NN CONFUSION MATRIX ==================" << std::endl;
+    int k = 2;
+    std::vector<std::vector<long>> secondConfusionMatrix = Knn::closeToInkNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
+
      PrintingUtil::printConfusionMatrix(secondConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
     cout << "============================ END K-NN MATRIX ======================" << endl;
     for (int i = 0; i < NUM_CLASSES; i++) {
@@ -175,11 +178,12 @@ float testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, vector<vector<v
     return accuracy;
 }
 
-// This function computes the LDA ordering for a given training dataset.
-// It sets up the bestVectors, bestVectorsIndexes, and eachClassBestVectorIndex.
-// best vectors is the weights of each coefficient from the LDF function
-// bestVectorsIndexes is just the indexes that correspond to those weights from the function, since we are sorting them
-// eachClassBestVectorIndex is the one best attribute for each class, we sort by this when generating blocks, and it helps a bit.
+/* This function computes the LDA ordering for a given training dataset.
+ * It sets up the bestVectors, bestVectorsIndexes, and eachClassBestVectorIndex.
+ * best vectors is the weights of each coefficient from the LDF function
+ * bestVectorsIndexes is just the indexes that correspond to those weights from the function, since we are sorting them
+ * eachClassBestVectorIndex is the one best attribute for each class, we sort by this when generating blocks, and it helps a bit.
+ */
 void computeLDAOrdering(const vector<vector<vector<float>>>& trainingData, vector<vector<float>>& bestVectors, vector<vector<int>>& bestVectorsIndexes, vector<int>& eachClassBestVectorIndex) {
     // Run LDA on the training data.
     bestVectors = linearDiscriminantAnalysis(trainingData);
@@ -511,8 +515,9 @@ void runInteractive() {
                 break;
             }
             case 8: { // TEST HYPERBLOCKS ON DATASET
-                cout << "Testing hyperblocks on testing dataset" << endl;
-                testAccuracyOfHyperBlocks(hyperBlocks, testData);
+                std::cout << "Testing hyperblocks on testing dataset" << std::endl;
+                ultraConfusionMatrix = testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData);
+
                 PrintingUtil::waitForEnter();
                 break;
             }

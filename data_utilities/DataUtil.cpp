@@ -1,12 +1,6 @@
 //
 // Created by asnyd on 3/20/2025.
 //
-#include <vector>
-#include <iostream>
-#include <sstream>
-#include <fstream>
-#include <map>
-#include <string>
 #include "DataUtil.h"
 
 extern int FIELD_LENGTH;
@@ -80,7 +74,6 @@ std::vector<std::vector<std::vector<float>>> DataUtil::dataSetup(const std::stri
 
     return data;
 }
-
 
 /* This needs to be a function to serialize hyperblocks.
  * take in 3-D vector that is the hyperblocks for each class
@@ -476,4 +469,33 @@ std::vector<std::vector<float>> DataUtil::flatMinMaxNoEncode(std::vector<HyperBl
 
     // Return the five arrays in a vector (order matches the original Java return)
     return { flatMinsList, flatMaxesList, blockEdges, blockClasses, intervalCounts };
+}
+
+// Splits an already-normalized dataset into k folds with stratified sampling.
+// The input 'dataset' is expected to be organized as: [class][point][attribute].
+// The returned 4D vector is structured as: [fold][class][point][attribute].
+std::vector<std::vector<std::vector<std::vector<float>>>> DataUtil::splitDataset(const std::vector<std::vector<std::vector<float>>> &dataset, int k) {
+    // Create a 4D vector with k folds.
+    // Each fold contains one vector per class.
+    std::vector<std::vector<std::vector<std::vector<float>>>> folds(k, std::vector<std::vector<std::vector<float>>>(dataset.size()));
+
+    // Use a fixed random seed for reproducibility.
+    std::mt19937 rng(42);
+
+    // For each class, shuffle its points and distribute them round-robin into the k folds.
+    for (size_t classIdx = 0; classIdx < dataset.size(); classIdx++) {
+        // Copy the points for this class.
+        std::vector<std::vector<float>> points = dataset[classIdx];
+
+        // Shuffle the points.
+        std::shuffle(points.begin(), points.end(), rng);
+
+        // Distribute the points into folds.
+        for (int i = 0; i < points.size(); i++) {
+            int foldIndex = i % k;
+            folds[foldIndex][classIdx].push_back(points[i]);
+        }
+    }
+
+    return folds;
 }

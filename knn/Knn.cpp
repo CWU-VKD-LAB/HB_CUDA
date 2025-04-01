@@ -187,8 +187,10 @@ std::vector<std::vector<long>> Knn::blockPointkNN(std::vector<std::vector<std::v
 *
 */
 std::vector<std::vector<long>> Knn::kNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES){
+
     int FIELD_LENGTH = hyperBlocks[0].maximums.size();
     std::cout << "Field Length: " << FIELD_LENGTH << std::endl;
+
     if(k > hyperBlocks.size()) k = (int) sqrt(hyperBlocks.size());
 
     // Keep track of assignments with something
@@ -210,6 +212,7 @@ std::vector<std::vector<long>> Knn::kNN(std::vector<std::vector<std::vector<floa
                 // Find the distance between the HB center and the unclassified data point
                 float bottomDist = Knn::euclideanDistanceBounds(hyperBlock.minimums, unclassifiedData[i][point], FIELD_LENGTH);
                 float topDist = Knn::euclideanDistanceBounds(hyperBlock.maximums, unclassifiedData[i][point], FIELD_LENGTH);
+
 
                 float distance = std::min(bottomDist, topDist);
 

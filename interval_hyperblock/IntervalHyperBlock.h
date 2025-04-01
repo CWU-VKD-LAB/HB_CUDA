@@ -5,6 +5,8 @@
 #include "Interval.h"
 #include "DataAttr.h"
 #include "../hyperblock/HyperBlock.h"
+#include <atomic>
+#include <unordered_set>
 
 #ifndef INTERVALHYPERBLOCK_H
 #define INTERVALHYPERBLOCK_H
@@ -12,9 +14,29 @@
 class IntervalHyperBlock {
   public:
 
-    static Interval longestInterval(std::vector<DataATTR> &dataByAttribute, float accThreshold, int attribute, int numClasses);
+    // stupid structs because we can't just use a simple hash for some reason.
+    // just using these for the set of used points.
+    struct PairHash {
+        std::size_t operator()(const std::pair<int,int> &p) const {
+            // hash function.
+            return static_cast<std::size_t>(p.first) * 809ULL + static_cast<std::size_t>(p.second); // using 809 because mnist is 784 attributes, so that would maybe be an issue if smaller?
+        }
+    };
 
-    static void intervalHyper(std::vector<std::vector<std::vector<float>>> &realData, std::vector<std::vector<DataATTR>> remainingData, std::vector<HyperBlock> &hyperBlocks, float accThreshold, int numClasses);
+    // default equality operator should be fine for int and int. just checks if the two numbers are equal
+    struct PairEq {
+        bool operator()(const std::pair<int,int> &a, const std::pair<int,int> &b) const {
+            return a == b;
+        }
+    };
+
+    static void longestIntervalWorker(std::vector<std::vector<DataATTR>> &attributeColumns, Interval &threadBestInterval, int threadID, int threadCount, std::atomic<int> &readyThreadsCount, char *currentPhase, std::unordered_set<std::pair<int, int>, PairHash, PairEq> &usedPoints, std::vector<char> &doneColumns);
+
+    static void longestIntervalSupervisor(std::vector<std::vector<std::vector<float>>> &realData, std::vector<std::vector<DataATTR>> &dataByAttribute, std::vector<HyperBlock> &hyperBlocks);
+
+    static Interval longestInterval(std::vector<DataATTR> &dataByAttribute, int attribute);
+
+    static void intervalHyper(std::vector<std::vector<std::vector<float>>> &realData, std::vector<std::vector<DataATTR>> &remainingData, std::vector<HyperBlock> &hyperBlocks);
 
     static std::vector<std::vector<DataATTR>> separateByAttribute(std::vector<std::vector<std::vector<float>>>& data, int FIELD_LENGTH);
 

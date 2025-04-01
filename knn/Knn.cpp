@@ -16,7 +16,7 @@
 *
 */
 std::vector<std::vector<long>> Knn::kNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES){
-    int FIELD_LENGTH = unclassifiedData[0].size();
+    int FIELD_LENGTH = hyperBlocks[0].minimums.size();
 
     if(k > hyperBlocks.size()) k = (int) sqrt(hyperBlocks.size());
 

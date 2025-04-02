@@ -195,7 +195,6 @@ void IntervalHyperBlock::intervalHyperWorker(vector<vector<DataATTR>> &attribute
     }
 }
 
-
 // EXACTLY THE SAME AS THE INTERVAL HYPER ALGORITHM, BUT IT USES A MANAGER WORKER SETUP INSTEAD OF LAUNCHING THREADS AND KILLING AND LAUNCHING AGAIN
 // takes in the training data which is broken up so that each value of each point is broken up into DataATTR's. finds longest interval of an attribute which is all one class.
 // then makes HBs out of all those points we found which belong to an interval.

@@ -2,12 +2,9 @@
 // Created by asnyd on 3/20/2025.
 //
 #include "Simplifications.h"
-#include "../hyperblock/HyperBlock.h"
-#include "../data_utilities/DataUtil.h"
-#include "../hyperblock_generation/MergerHyperBlock.cuh"
-#include <vector>
-#include <cuda_runtime.h>
-#include <algorithm>
+
+// best threshold through some very basic testing was about 1.5% for removing useless blocks.
+#define REMOVAL_THRESHOLD 0.015
 
 // runs our three kernel functions which remove useless blocks.
 void Simplifications::removeUselessBlocks(std::vector<std::vector<std::vector<float>>> &data, std::vector<HyperBlock>& hyper_blocks) {
@@ -20,7 +17,9 @@ void Simplifications::removeUselessBlocks(std::vector<std::vector<std::vector<fl
      *     * notice how we are putting all data in, and all blocks together. this allows us to find errors as well. we may find that a block is letting in wrong class points this way.
      */
     int FIELD_LENGTH = data[0][0].size();
-
+    int datasetSize = 0;
+    for (auto &c : data)
+        datasetSize += c.size();
 
     std::vector<std::vector<float>> minMaxResult = DataUtil::flattenMinsMaxesForRUB(hyper_blocks, FIELD_LENGTH);
     std::vector<std::vector<float>> flattenedData =  DataUtil::flattenDataset(data);
@@ -102,9 +101,9 @@ void Simplifications::removeUselessBlocks(std::vector<std::vector<std::vector<fl
     cudaFree((void *)d_dataPointBlocks);
     cudaFree((void *)d_numPointsInBlocks);
 
-    // Remove hyperblocks that have no unique points.
+    // Remove hyperblocks that less than minBlockSize unique points.
     for (int i = numPointsInBlocks.size() - 1; i >= 0; i--) {
-        if (numPointsInBlocks[i] <= 2)
+        if (numPointsInBlocks[i] <= ceil(REMOVAL_THRESHOLD * datasetSize))
             hyper_blocks.erase(hyper_blocks.begin() + i);
     }
 }

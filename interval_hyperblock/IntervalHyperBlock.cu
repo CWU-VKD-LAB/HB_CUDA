@@ -636,7 +636,7 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
     // make our interval based blocks
     // intervalHyper(data, dataByAttribute, hyperBlocks);
     longestIntervalSupervisor(data, dataByAttribute, hyperBlocks);
-
+    cout << "Num blocks after interval" << hyperBlocks.size() << endl;
     cout << "STARTING MERGING" << endl;
     try{
         merger_cuda(data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
@@ -844,4 +844,8 @@ void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allDat
       hyperBlocks.insert(hyperBlocks.end(), classBlocks.begin(), classBlocks.end());
     }
 
+    // Assign them their size.
+    for(HyperBlock& hyperBlock : hyperBlocks) {
+        hyperBlock.findSize(allData);
+    }
 }

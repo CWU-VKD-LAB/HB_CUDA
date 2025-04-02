@@ -1,5 +1,6 @@
 #include "HyperBlock.h"
 #include <limits>
+#include <iostream>
 // Constructor definition
 HyperBlock::HyperBlock(const std::vector<std::vector<float>>& maxs, const std::vector<std::vector<float>>& mins, int cls) : maximums(maxs), minimums(mins), classNum(cls) {}
 
@@ -9,9 +10,6 @@ HyperBlock::HyperBlock(std::vector<std::vector<std::vector<float>>>& hb_data, in
     // Initialize maxes and mins with size and initial values
     std::vector<std::vector<float>> maxes(attr_count, std::vector<float>(1, -std::numeric_limits<float>::infinity()));
     std::vector<std::vector<float>> mins(attr_count, std::vector<float>(1, std::numeric_limits<float>::infinity()));
-
-    //std::cout << "Trying to access class number: " << cls << "\n" << std::endl;
-    //std::cout << "Number of attributes" << attr_count << std::endl;
 
     // Find max and min for each attribute
     for(const std::vector<float>& point : hb_data[0]){
@@ -25,10 +23,26 @@ HyperBlock::HyperBlock(std::vector<std::vector<std::vector<float>>>& hb_data, in
         }
     }
 
+    size = -1;
     maximums = maxes;
     minimums = mins;
     classNum = cls;
 }
+
+
+void HyperBlock::findSize(const std::vector<std::vector<std::vector<float>>>& data){
+    int size = 0;
+
+    #pragma omp parallel for reduction(+:size)
+    for(int i = 0; i < data.size(); i++){
+      for(const auto& point: data[i]){
+           size += inside_HB(point.size(), point.data());
+      }
+    }
+
+    this->size = size;
+}
+
 
 bool HyperBlock::inside_HB(int numAttributes, const float* point) {
     constexpr float EPSILON = 1e-6f;  // Small tolerance value

@@ -9,7 +9,7 @@
 #include <iostream>
 #include <cmath>
 #include <unordered_map>
-
+#include <omp.h>
 
 
 // Lets make a K-nn that goes through the unclassified points and sees how close they are to being
@@ -28,9 +28,9 @@ std::vector<std::vector<long>> Knn::closeToInkNN(std::vector<std::vector<std::ve
       classifications[i] = std::vector<float>(unclassifiedData[i].size());    // Put the std::vector for each class
     }
 
-    // For each class of points
+    #pragma omp parallel for
     for(int i = 0; i < NUM_CLASSES; i++){
-
+        #pragma omp parallel for
         // For each point in unclassified points
         for(int point = 0; point < unclassifiedData[i].size(); point++){
             // Use a priority queue to keep track of the top k best distances
@@ -51,23 +51,18 @@ std::vector<std::vector<long>> Knn::closeToInkNN(std::vector<std::vector<std::ve
                 }
             }
 
-            // Count votes for each class
-            std::vector<int> votes(NUM_CLASSES, 0);
-            while(!kNearest.empty()){
-                votes[kNearest.top().second]++;
-                kNearest.pop();
-            }
+           std::vector<float> weightedVotes(NUM_CLASSES, 0.0);
+while(!kNearest.empty()){
+    float dist = kNearest.top().first;
+    int cls = kNearest.top().second;
+    kNearest.pop();
 
+    float weight = (dist == 0) ? 1.0 : (1.0 / pow(dist, 2));  // Inverse squared weight
+    weightedVotes[cls] += weight;
+}
 
-            int majorityClass = 5;
-            int maxVotes = 0;
-
-            for(int c = 0; c < NUM_CLASSES; c++){
-                if(votes[c] > maxVotes){
-                   maxVotes = votes[c];
-                   majorityClass = c;
-                }
-            }
+// Assign the class with the highest weighted vote
+int majorityClass = std::distance(weightedVotes.begin(), std::max_element(weightedVotes.begin(), weightedVotes.end()));
 
             classifications[i][point] = majorityClass;
         }

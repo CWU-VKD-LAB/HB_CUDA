@@ -30,9 +30,9 @@ class IntervalHyperBlock {
         }
     };
 
-    static void longestIntervalWorker(std::vector<std::vector<DataATTR>> &attributeColumns, Interval &threadBestInterval, int threadID, int threadCount, std::atomic<int> &readyThreadsCount, char *currentPhase, std::unordered_set<std::pair<int, int>, PairHash, PairEq> &usedPoints, std::vector<char> &doneColumns);
+    static void intervalHyperWorker(std::vector<std::vector<DataATTR>> &attributeColumns, Interval &threadBestInterval, int threadID, int threadCount, std::atomic<int> &readyThreadsCount, char *currentPhase, std::unordered_set<std::pair<int, int>, PairHash, PairEq> &usedPoints, std::vector<char> &doneColumns);
 
-    static void longestIntervalSupervisor(std::vector<std::vector<std::vector<float>>> &realData, std::vector<std::vector<DataATTR>> &dataByAttribute, std::vector<HyperBlock> &hyperBlocks);
+    static void intervalHyperSupervisor(std::vector<std::vector<std::vector<float>>> &realData, std::vector<std::vector<DataATTR>> &dataByAttribute, std::vector<HyperBlock> &hyperBlocks);
 
     static Interval longestInterval(std::vector<DataATTR> &dataByAttribute, int attribute);
 

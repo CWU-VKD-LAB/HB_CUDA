@@ -104,7 +104,7 @@ void Simplifications::removeUselessBlocks(std::vector<std::vector<std::vector<fl
 
     // Remove hyperblocks that have no unique points.
     for (int i = numPointsInBlocks.size() - 1; i >= 0; i--) {
-        if (numPointsInBlocks[i] == 0)
+        if (numPointsInBlocks[i] <= 1)
             hyper_blocks.erase(hyper_blocks.begin() + i);
     }
 }

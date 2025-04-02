@@ -646,7 +646,6 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
     cout << "STARTING MERGING" << endl;
     try{
         merger_cuda(data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
-        cout << "BlOCK GENERATION FINISHED! WE FOUND: " << hyperBlocks.size() << " BLOCKS" << endl;
     } catch (exception e){
         cout << "Error in generateHBs: merger_cuda" << endl;
         cout << e.what() << endl;

@@ -843,6 +843,6 @@ void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allDat
 
     // Assign them their size.
     for(HyperBlock& hyperBlock : hyperBlocks) {
-        hyperBlock.findSize(allData);
+        hyperBlock.find_avg_and_size(allData);
     }
 }

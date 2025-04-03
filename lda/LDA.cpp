@@ -6,7 +6,7 @@
 #include <limits>
 #include <future>
 #include <thread>
-
+#define M_PI 3.14159265358979323846
 // our flag for if we want to apply arc cos to each vector or not. In DV it is applied,
 // and this gets us slightly better blocks.
 #define USE_TRIG

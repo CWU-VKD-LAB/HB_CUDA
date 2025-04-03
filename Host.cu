@@ -580,7 +580,7 @@ void runInteractive() {
                     IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
                 }
 
-                //for(HyperBlock& hb: hyperBlocks) hb.findSize(trainingData);
+                for(HyperBlock& hb: hyperBlocks) hb.find_avg_and_size(trainingData);
 
                 cout << "Finished Generating HyperBlocks" << endl;
                 PrintingUtil::waitForEnter();

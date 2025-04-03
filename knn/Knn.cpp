@@ -40,7 +40,7 @@ std::vector<std::vector<long>> Knn::closeToInkNN(std::vector<std::vector<std::ve
             for(const HyperBlock& hyperBlock : hyperBlocks){
                 // Find the distance between the HB center and the unclassified data point
                 
-                float distance =  hyperBlock.distance_to_HB(FIELD_LENGTH, unclassifiedData[i][point].data());
+                float distance =  hyperBlock.distance_to_HB_Avg(FIELD_LENGTH, unclassifiedData[i][point].data());
 
                 if(kNearest.size() < k){    // always add when queue is not at k yet.
                     kNearest.push(std::make_pair(distance, hyperBlock.classNum));
@@ -52,17 +52,17 @@ std::vector<std::vector<long>> Knn::closeToInkNN(std::vector<std::vector<std::ve
             }
 
            std::vector<float> weightedVotes(NUM_CLASSES, 0.0);
-while(!kNearest.empty()){
-    float dist = kNearest.top().first;
-    int cls = kNearest.top().second;
-    kNearest.pop();
+		   while(!kNearest.empty()){
+				float dist = kNearest.top().first;
+    			int cls = kNearest.top().second;
+   				kNearest.pop();
 
-    float weight = (dist == 0) ? 1.0 : (1.0 / pow(dist, 2));  // Inverse squared weight
-    weightedVotes[cls] += weight;
-}
+   				 float weight = (dist == 0) ? 1.0 : (1.0 / pow(dist, 2));  // Inverse squared weight
+    			weightedVotes[cls] += weight;
+			}
 
-// Assign the class with the highest weighted vote
-int majorityClass = std::distance(weightedVotes.begin(), std::max_element(weightedVotes.begin(), weightedVotes.end()));
+			// Assign the class with the highest weighted vote
+			int majorityClass = std::distance(weightedVotes.begin(), std::max_element(weightedVotes.begin(), weightedVotes.end()));
 
             classifications[i][point] = majorityClass;
         }
@@ -81,13 +81,10 @@ int majorityClass = std::distance(weightedVotes.begin(), std::max_element(weight
 }
 
 
-/////
-/////
-/////
-/////
-/////
 ////
-/////
+////
+////
+
 
 
 std::vector<std::vector<long>> Knn::blockPointkNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<std::vector<std::vector<float>>> classifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES){

@@ -52,7 +52,7 @@ bool HyperBlock::inside_HB(int numAttributes, const float* point) {
     return true;  
 }
 
-float HyperBlock::distance_to_HB(int numAttributes, const float* point) const {
+float HyperBlock::distance_to_HB_Edge(int numAttributes, const float* point) const {
     constexpr float EPSILON = 1e-6f;
     float totalDistanceSquared = 0.0f;
     for (int i = 0; i < numAttributes; i++) {
@@ -72,6 +72,51 @@ float HyperBlock::distance_to_HB(int numAttributes, const float* point) const {
 
     return std::sqrt(totalDistanceSquared);
 }
+
+float HyperBlock::distance_to_HB_Avg(int numAttributes, const float* point) const{
+    constexpr float EPSILON = 1e-6f;
+    float totalDistanceSquared = 0.0f;
+    for (int i = 0; i < numAttributes; i++) {
+        // If point is below the min bound (with epsilon tolerance)
+        if (point[i] < avgPoint[i] - EPSILON) {
+            float dist = avgPoint[i] - point[i];
+            totalDistanceSquared += dist * dist;
+        }
+        // If point is above the max bound (with epsilon tolerance)
+        else if (point[i] > avgPoint[i] + EPSILON) {
+            float dist = point[i] - avgPoint[i];
+            totalDistanceSquared += dist * dist;
+        }
+    }
+    return std::sqrt(totalDistanceSquared);
+}
+
+
+float HyperBlock::distance_to_HB_Combo(int numAttributes, const float* point) const {
+    constexpr float EPSILON = 1e-6f;
+    float totalDistanceSquared = 0.0f;
+    for (int i = 0; i < numAttributes; i++) {
+        // If point is below the min bound (with epsilon tolerance)
+        if (point[i] < minimums[i][0] - EPSILON) {
+            float dist = avgPoint[i] - point[i];
+            totalDistanceSquared += dist * dist;
+        }
+        // If point is above the max bound (with epsilon tolerance)
+        else if (point[i] > maximums[i][0] + EPSILON) {
+            float dist = point[i] - avgPoint[i];
+            totalDistanceSquared += dist * dist;
+        }
+        // If point is within bounds (including epsilon tolerance), distance is 0
+        // So we don't add anything to totalDistanceSquared
+    }
+
+    return std::sqrt(totalDistanceSquared);
+}
+
+
+
+
+
 
 /**
 * Previously this was just used to finmd the size of the hyperblock, but now we need to use it to find the average

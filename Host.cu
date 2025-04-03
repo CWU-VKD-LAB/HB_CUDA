@@ -47,8 +47,7 @@ map<int, string> CLASS_MAP_TESTING_INT;
 * We generate a confusion matrix, but allow for points to fall into multiple blocks at a time
 * that is why we go through blocks on outerloop and whole dataset on the inside.
 */
-std::vector<std::vector<long>> testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vector<std::vector<std::vector<float>>> &testSet, std::vector<std::vector<std::vector<float>>> &trainingSet){
-
+float testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vector<std::vector<std::vector<float>>> &testSet, std::vector<std::vector<std::vector<float>>> &trainingSet){
 
   	// Keep track of which points were never inside of a block, when a point is classifed we increment the map internal vectors correct positon
     // there should be CLASS_NUM unordered_maps or just hashmaps, in each will hold a vector<point_index, vector<int> of len(class_num)>
@@ -255,10 +254,12 @@ void runKFold(vector<vector<vector<float>>> &dataset) {
         for (int fold = 0; fold < k; fold++) {
             if (fold == i) continue; // skip test fold
 
+            // build our training data
             for (int cls = 0; cls < NUM_CLASSES; cls++) {
                 // Append all points from kFolds[fold][cls] to trainingData[cls]
                 trainingData[cls].insert(trainingData[cls].end(), kFolds[fold][cls].begin(), kFolds[fold][cls].end());
             }
+
         }
 
         // The test dataset for this iteration is simply fold i.
@@ -303,6 +304,8 @@ void runKFold(vector<vector<vector<float>>> &dataset) {
             }
         }
 
+
+        //acc += testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData);
         blockCount += hyperBlocks.size();
         cCount += clauseCount;
 
@@ -603,7 +606,7 @@ void runInteractive() {
             }
             case 8: { // TEST HYPERBLOCKS ON DATASET
                 std::cout << "Testing hyperblocks on testing dataset" << std::endl;
-                ultraConfusionMatrix = testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData);
+                testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData);
 
                 PrintingUtil::waitForEnter();
                 break;

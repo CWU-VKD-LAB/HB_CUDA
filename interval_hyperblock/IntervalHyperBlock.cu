@@ -3,19 +3,6 @@
 //
 
 #include "IntervalHyperBlock.h"
-#include <vector>
-#include <future>
-#include <algorithm>
-#include <csignal>
-#include <iostream>
-#include <map>
-#include <ostream>
-#include <unordered_set>
-#include <utility>
-
-#include "Interval.h"
-#include "DataAttr.h"
-#include "../hyperblock_generation/MergerHyperBlock.cuh"
 
 using namespace std;
 
@@ -65,7 +52,7 @@ condition_variable workersReady;    // used to signal boss man that we need more
 // has determined which is longest. then the threads mark all guys belonging to the longest interval, and we find the next longest interval.
 // the worker finds best interval he has, then put it into threadBestInterval. this is an array of intervals for the supervisor to run through. the supervisor just populates this array with the interval which is best
 // and then the workers mark all the points which are in that interval, in their own columns.
-void IntervalHyperBlock::longestIntervalWorker(vector<vector<DataATTR>> &attributeColumns, Interval &threadBestInterval, int threadID, int threadCount, atomic<int> &readyThreadsCount, char *currentPhase, unordered_set<pair<int, int>, PairHash, PairEq> &usedPoints, vector<char> &doneColumns) {
+void IntervalHyperBlock::intervalHyperWorker(vector<vector<DataATTR>> &attributeColumns, Interval &threadBestInterval, int threadID, int threadCount, atomic<int> &readyThreadsCount, char *currentPhase, unordered_set<pair<int, int>, PairHash, PairEq> &usedPoints, vector<char> &doneColumns) {
 
     // we run this loop of finding, wait, marking, wait until the supervisor sends us the STOP signal, meaning that there were no good intervals anywhere.
     while (true){
@@ -155,7 +142,7 @@ void IntervalHyperBlock::longestIntervalWorker(vector<vector<DataATTR>> &attribu
                 finalEnd--;
             }
             threadBestInterval.end = finalEnd;
-            threadBestInterval.size = finalEnd - threadBestInterval.start + 1;
+            threadBestInterval.size = finalEnd - threadBestInterval.start;
         }
 
         // ===========================================================
@@ -195,8 +182,10 @@ void IntervalHyperBlock::longestIntervalWorker(vector<vector<DataATTR>> &attribu
     }
 }
 
-// supervisor for when we are finding longest intervals
-void IntervalHyperBlock::longestIntervalSupervisor(vector<vector<vector<float>>> &realData, vector<vector<DataATTR>> &dataByAttribute, vector<HyperBlock> &hyperBlocks) {
+// EXACTLY THE SAME AS THE INTERVAL HYPER ALGORITHM, BUT IT USES A MANAGER WORKER SETUP INSTEAD OF LAUNCHING THREADS AND KILLING AND LAUNCHING AGAIN
+// takes in the training data which is broken up so that each value of each point is broken up into DataATTR's. finds longest interval of an attribute which is all one class.
+// then makes HBs out of all those points we found which belong to an interval.
+void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &realData, vector<vector<DataATTR>> &dataByAttribute, vector<HyperBlock> &hyperBlocks) {
 
     // sort the columns of data attributes
     for (auto &i : dataByAttribute) {
@@ -220,22 +209,21 @@ void IntervalHyperBlock::longestIntervalSupervisor(vector<vector<vector<float>>>
     // use this so that we have an early return condition. once we've found that a column doesn't have any more good intervals, we can just skip it.
     vector<char> doneColumns(dataByAttribute.size(), 0);
 
-    // now we are ready to launch all our threads.
-    vector<future<void>> futures(numWorkers);
+    vector<thread> workers;
+    workers.reserve(numWorkers);
 
     // launch all our workers using a bunch of nasty parameters.
     for (int i = 0; i < numWorkers; i++) {
-        futures.emplace_back(
-            async(launch::async, longestIntervalWorker,
-                  ref(dataByAttribute),          // pass dataByAttribute by reference
-                  ref(bestIntervals[i]),         // pass each Interval by reference
-                  i,                            // threadID
-                  numWorkers,                   // threadCount
-                  ref(readyThreads),             // pass atomic<int> by reference
-                  &currentPhase,                    // pass address of currentPhase (char*)
-                  ref(usedPoints),              // pass usedPoints by reference
-                  ref(doneColumns)
-                )
+        workers.emplace_back(
+     intervalHyperWorker,
+          ref(dataByAttribute),          // pass dataByAttribute by reference
+          ref(bestIntervals[i]),         // pass each Interval by reference
+          i,                            // threadID
+          numWorkers,                   // threadCount
+          ref(readyThreads),             // pass atomic<int> by reference
+          &currentPhase,                    // pass address of currentPhase (char*)
+          ref(usedPoints),              // pass usedPoints by reference
+          ref(doneColumns)
         );
     }
 
@@ -326,6 +314,11 @@ void IntervalHyperBlock::longestIntervalSupervisor(vector<vector<vector<float>>>
             supervisorReady.notify_all();
             break;
         }
+    }
+
+    for (auto &worker : workers) {
+        if (worker.joinable())
+            worker.join();
     }
 
     // at the end of that loop, we have a bunch of points which we have not put into blocks. We now make all those guys into their own one point blocks.
@@ -634,13 +627,17 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
 
     cout << "STARTING INTERVAL HYPER" << endl;
     // make our interval based blocks
+
+    // the two functions use identical logic, except that one uses a supervisor thread and workers, instead of
+    // constantly launching and killing threads each iteration. Supervisor version works better on any machine except cwu cluster.
     // intervalHyper(data, dataByAttribute, hyperBlocks);
+
     longestIntervalSupervisor(data, dataByAttribute, hyperBlocks);
     cout << "Num blocks after interval" << hyperBlocks.size() << endl;
+
     cout << "STARTING MERGING" << endl;
     try{
         merger_cuda(data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
-        cout << "BlOCK GENERATION FINISHED! WE FOUND: " << hyperBlocks.size() << " BLOCKS" << endl;
     } catch (exception e){
         cout << "Error in generateHBs: merger_cuda" << endl;
         cout << e.what() << endl;

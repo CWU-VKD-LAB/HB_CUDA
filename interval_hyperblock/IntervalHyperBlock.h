@@ -2,11 +2,24 @@
 // Created by asnyd on 3/20/2025.
 //
 #pragma once
-#include "Interval.h"
-#include "DataAttr.h"
 #include "../hyperblock/HyperBlock.h"
 #include <atomic>
 #include <unordered_set>
+
+#include <vector>
+#include <future>
+#include <algorithm>
+#include <csignal>
+#include <iostream>
+#include <map>
+#include <ostream>
+#include <unordered_set>
+#include <utility>
+#include <thread>
+
+#include "Interval.h"
+#include "DataAttr.h"
+#include "../hyperblock_generation/MergerHyperBlock.cuh"
 
 #ifndef INTERVALHYPERBLOCK_H
 #define INTERVALHYPERBLOCK_H
@@ -30,9 +43,9 @@ class IntervalHyperBlock {
         }
     };
 
-    static void longestIntervalWorker(std::vector<std::vector<DataATTR>> &attributeColumns, Interval &threadBestInterval, int threadID, int threadCount, std::atomic<int> &readyThreadsCount, char *currentPhase, std::unordered_set<std::pair<int, int>, PairHash, PairEq> &usedPoints, std::vector<char> &doneColumns);
+    static void intervalHyperWorker(std::vector<std::vector<DataATTR>> &attributeColumns, Interval &threadBestInterval, int threadID, int threadCount, std::atomic<int> &readyThreadsCount, char *currentPhase, std::unordered_set<std::pair<int, int>, PairHash, PairEq> &usedPoints, std::vector<char> &doneColumns);
 
-    static void longestIntervalSupervisor(std::vector<std::vector<std::vector<float>>> &realData, std::vector<std::vector<DataATTR>> &dataByAttribute, std::vector<HyperBlock> &hyperBlocks);
+    static void intervalHyperSupervisor(std::vector<std::vector<std::vector<float>>> &realData, std::vector<std::vector<DataATTR>> &dataByAttribute, std::vector<HyperBlock> &hyperBlocks);
 
     static Interval longestInterval(std::vector<DataATTR> &dataByAttribute, int attribute);
 

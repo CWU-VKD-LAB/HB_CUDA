@@ -2,11 +2,24 @@
 // Created by asnyd on 3/20/2025.
 //
 #pragma once
-#include "Interval.h"
-#include "DataAttr.h"
 #include "../hyperblock/HyperBlock.h"
 #include <atomic>
 #include <unordered_set>
+
+#include <vector>
+#include <future>
+#include <algorithm>
+#include <csignal>
+#include <iostream>
+#include <map>
+#include <ostream>
+#include <unordered_set>
+#include <utility>
+#include <thread>
+
+#include "Interval.h"
+#include "DataAttr.h"
+#include "../hyperblock_generation/MergerHyperBlock.cuh"
 
 #ifndef INTERVALHYPERBLOCK_H
 #define INTERVALHYPERBLOCK_H

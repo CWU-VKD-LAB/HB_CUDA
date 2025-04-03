@@ -4,7 +4,7 @@
 #include "Simplifications.h"
 
 // best threshold through some very basic testing was about 1.5% for removing useless blocks.
-#define REMOVAL_THRESHOLD 0.015
+#define REMOVAL_THRESHOLD 0.01f
 
 // runs our three kernel functions which remove useless blocks.
 void Simplifications::removeUselessBlocks(std::vector<std::vector<std::vector<float>>> &data, std::vector<HyperBlock>& hyper_blocks) {

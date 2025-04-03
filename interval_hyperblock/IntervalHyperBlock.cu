@@ -3,19 +3,6 @@
 //
 
 #include "IntervalHyperBlock.h"
-#include <vector>
-#include <future>
-#include <algorithm>
-#include <csignal>
-#include <iostream>
-#include <map>
-#include <ostream>
-#include <unordered_set>
-#include <utility>
-
-#include "Interval.h"
-#include "DataAttr.h"
-#include "../hyperblock_generation/MergerHyperBlock.cuh"
 
 using namespace std;
 
@@ -222,22 +209,21 @@ void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &
     // use this so that we have an early return condition. once we've found that a column doesn't have any more good intervals, we can just skip it.
     vector<char> doneColumns(dataByAttribute.size(), 0);
 
-    // now we are ready to launch all our threads.
-    vector<future<void>> futures(numWorkers);
+    vector<thread> workers;
+    workers.reserve(numWorkers);
 
     // launch all our workers using a bunch of nasty parameters.
     for (int i = 0; i < numWorkers; i++) {
-        futures.emplace_back(
-            async(launch::async, intervalHyperWorker,
-                  ref(dataByAttribute),          // pass dataByAttribute by reference
-                  ref(bestIntervals[i]),         // pass each Interval by reference
-                  i,                            // threadID
-                  numWorkers,                   // threadCount
-                  ref(readyThreads),             // pass atomic<int> by reference
-                  &currentPhase,                    // pass address of currentPhase (char*)
-                  ref(usedPoints),              // pass usedPoints by reference
-                  ref(doneColumns)
-                )
+        workers.emplace_back(
+     intervalHyperWorker,
+          ref(dataByAttribute),          // pass dataByAttribute by reference
+          ref(bestIntervals[i]),         // pass each Interval by reference
+          i,                            // threadID
+          numWorkers,                   // threadCount
+          ref(readyThreads),             // pass atomic<int> by reference
+          &currentPhase,                    // pass address of currentPhase (char*)
+          ref(usedPoints),              // pass usedPoints by reference
+          ref(doneColumns)
         );
     }
 
@@ -328,6 +314,11 @@ void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &
             supervisorReady.notify_all();
             break;
         }
+    }
+
+    for (auto &worker : workers) {
+        if (worker.joinable())
+            worker.join();
     }
 
     // at the end of that loop, we have a bunch of points which we have not put into blocks. We now make all those guys into their own one point blocks.

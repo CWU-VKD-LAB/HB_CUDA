@@ -631,7 +631,9 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
     // the two functions use identical logic, except that one uses a supervisor thread and workers, instead of
     // constantly launching and killing threads each iteration. Supervisor version works better on any machine except cwu cluster.
     // intervalHyper(data, dataByAttribute, hyperBlocks);
-    intervalHyperSupervisor(data, dataByAttribute, hyperBlocks);
+
+    longestIntervalSupervisor(data, dataByAttribute, hyperBlocks);
+    cout << "Num blocks after interval" << hyperBlocks.size() << endl;
 
     cout << "STARTING MERGING" << endl;
     try{
@@ -839,4 +841,8 @@ void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allDat
       hyperBlocks.insert(hyperBlocks.end(), classBlocks.begin(), classBlocks.end());
     }
 
+    // Assign them their size.
+    for(HyperBlock& hyperBlock : hyperBlocks) {
+        hyperBlock.findSize(allData);
+    }
 }

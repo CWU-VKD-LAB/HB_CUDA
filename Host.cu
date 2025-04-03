@@ -152,12 +152,12 @@ float testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vecto
     PrintingUtil::printConfusionMatrix(regularConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
     cout << "============================ END CONFUSION MATRIX ======================" << endl;
 
-	  cout << "Any point was inside" << anyPointWasInside <<  endl;
+	cout << "Any point was inside" << anyPointWasInside <<  endl;
 
 
     std::cout << "\n\n\n\n" << std::endl;
     std::cout << "============================ K-NN CONFUSION MATRIX ==================" << std::endl;
-    int k = 2;
+    int k = 3;
     std::vector<std::vector<long>> secondConfusionMatrix = Knn::closeToInkNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
 
      PrintingUtil::printConfusionMatrix(secondConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
@@ -174,7 +174,7 @@ float testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vecto
     cout << "============================ END DISTINCT POINT MATRIX ======================" << endl;
     cout << "\n\n\n\n" << endl;
 
-    return accuracy;
+    return regularConfusionMatrix;
 }
 
 /* This function computes the LDA ordering for a given training dataset.
@@ -304,7 +304,8 @@ void runKFold(vector<vector<vector<float>>> &dataset) {
             }
         }
 
-        acc += testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData);
+
+        //acc += testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData);
         blockCount += hyperBlocks.size();
         cCount += clauseCount;
 
@@ -315,6 +316,81 @@ void runKFold(vector<vector<vector<float>>> &dataset) {
     cout << "Average clause count " << float(cCount) / float (k) << endl;
     
 }
+
+
+/**
+* This should print out/return something
+* that will show the distribution of points in the dataset.
+* this will help us see how big our blocks typically are
+* along with this it will show us if we have too many small blocks.
+*/
+void blockSizeDistribution(const vector<HyperBlock>& hyperBlocks) {
+    if (hyperBlocks.empty()) {
+        cout << "No blocks to analyze.\n";
+        return;
+    }
+
+    // Find the min and max block sizes
+    int minSize = hyperBlocks[0].size;
+    int maxSize = hyperBlocks[0].size;
+
+    for (size_t i = 1; i < hyperBlocks.size(); ++i) {
+        minSize = min(minSize, hyperBlocks[i].size);
+        maxSize = max(maxSize, hyperBlocks[i].size);
+    }
+
+    // Dynamically determine the number of bins
+    int totalBlocks = hyperBlocks.size();
+    int numBins = min(static_cast<int>(sqrt(totalBlocks)), 50); // Adjust bin count dynamically
+    numBins = max(numBins, 10); // Ensure at least 10 bins
+
+    int binWidth = max(1, (maxSize - minSize + 1) / numBins); // Avoid division by zero
+
+    // Create bins
+    vector<pair<int, int>> bins;
+    for (int i = 0; i < numBins; ++i) {
+        int binStart = minSize + i * binWidth;
+        int binEnd = minSize + (i + 1) * binWidth - 1;
+        if (binEnd > maxSize) binEnd = maxSize;
+        bins.push_back(make_pair(binStart, binEnd));
+    }
+
+    map<string, int> binCounts; // Automatically keeps order
+
+    // Initialize bin counts
+    for (size_t i = 0; i < bins.size(); ++i) {
+        string label = to_string(bins[i].first) + "-" + to_string(bins[i].second);
+        binCounts[label] = 0;
+    }
+
+    // Categorize blocks into bins
+    for (size_t i = 0; i < hyperBlocks.size(); ++i) {
+        for (size_t j = 0; j < bins.size(); ++j) {
+            if (hyperBlocks[i].size >= bins[j].first && hyperBlocks[i].size <= bins[j].second) {
+                binCounts[to_string(bins[j].first) + "-" + to_string(bins[j].second)]++;
+                break;
+            }
+        }
+    }
+
+    // Output distribution (Ordered because map keeps keys sorted)
+    cout << "Block Size Distribution:\n";
+    for (map<string, int>::iterator it = binCounts.begin(); it != binCounts.end(); ++it) {
+        double percentage = (it->second * 100.0) / totalBlocks;
+        cout << it->first << " size: " << fixed << setprecision(2) << percentage << "% - (" << it->second << " blocks)\n";
+    }
+
+     // Output in CSV format: bin_start,bin_end,count
+    cout << "bin_start,bin_end,count\n";
+    for (map<string, int>::iterator it = binCounts.begin(); it != binCounts.end(); ++it) {
+        string range = it->first;
+        size_t dashPos = range.find("-");
+        int binStart = stoi(range.substr(0, dashPos));
+        int binEnd = stoi(range.substr(dashPos + 1));
+        cout << binStart << "," << binEnd << "," << it->second << "\n";
+    }
+}
+
 
 // -------------------------------------------------------------------------
 // Asynchronous mode: run when argc >= 2
@@ -481,6 +557,14 @@ void runInteractive() {
                 getline(cin, hyperBlocksImportFileName);
                 hyperBlocks = DataUtil::loadBasicHBsFromCSV(hyperBlocksImportFileName);
                 cout << "HyperBlocks imported from file " << hyperBlocksImportFileName << " successfully" << endl;
+
+
+                for(HyperBlock& hb: hyperBlocks){
+                  hb.find_avg_and_size(trainingData);
+                }
+
+                blockSizeDistribution(hyperBlocks);
+
                 PrintingUtil::waitForEnter();
                 break;
             }
@@ -498,6 +582,9 @@ void runInteractive() {
                     hyperBlocks.clear();
                     IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
                 }
+
+                for(HyperBlock& hb: hyperBlocks) hb.find_avg_and_size(trainingData);
+
                 cout << "Finished Generating HyperBlocks" << endl;
                 PrintingUtil::waitForEnter();
                 break;
@@ -508,6 +595,8 @@ void runInteractive() {
                 int totalPoints = 0;
 
                 for (const auto &c : trainingData) totalPoints += c.size();
+
+                //for(HyperBlock& hb: hyperBlocks) hb.findSize(trainingData);
 
                 cout << "After removing useless blocks we have: " << result[1] << " clauses\n";
                 cout << "We got a final total of: " << hyperBlocks.size() << " blocks." << endl;

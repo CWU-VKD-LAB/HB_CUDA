@@ -557,7 +557,7 @@ void runInteractive() {
 
 
                 for(HyperBlock& hb: hyperBlocks){
-                  hb.findSize(trainingData);
+                  hb.find_avg_and_size(trainingData);
                 }
 
                 blockSizeDistribution(hyperBlocks);

@@ -30,20 +30,6 @@ HyperBlock::HyperBlock(std::vector<std::vector<std::vector<float>>>& hb_data, in
 }
 
 
-void HyperBlock::findSize(const std::vector<std::vector<std::vector<float>>>& data){
-    int size = 0;
-
-    #pragma omp parallel for reduction(+:size)
-    for(int i = 0; i < data.size(); i++){
-      for(const auto& point: data[i]){
-           size += inside_HB(point.size(), point.data());
-      }
-    }
-
-    this->size = size;
-}
-
-
 bool HyperBlock::inside_HB(int numAttributes, const float* point) {
     constexpr float EPSILON = 1e-6f;  // Small tolerance value
     
@@ -85,4 +71,50 @@ float HyperBlock::distance_to_HB(int numAttributes, const float* point) const {
     }
 
     return std::sqrt(totalDistanceSquared);
+}
+
+/**
+* Previously this was just used to finmd the size of the hyperblock, but now we need to use it to find the average
+* point too. This should be done by adding all the points together and then at the end dividing each attribute by size.
+* this will allow for us to know where the "true" center of the block is.
+*/
+void HyperBlock::find_avg_and_size(const std::vector<std::vector<std::vector<float>>>& data) {
+    int size = 0;
+    std::vector<float> sumPoint(data[0][0].size(), 0.0f); // Initialize sum vector with zeros
+
+    #pragma omp parallel
+    {
+        std::vector<float> localSum(data[0][0].size(), 0.0f);
+        int localSize = 0;
+
+        #pragma omp for nowait
+        for (int i = 0; i < data.size(); i++) {
+            for (const auto& point : data[i]) {
+                if (inside_HB(point.size(), point.data())) {
+                    localSize++;
+                    for (size_t j = 0; j < point.size(); j++) {
+                        localSum[j] += point[j];
+                    }
+                }
+            }
+        }
+
+        #pragma omp critical
+        {
+            size += localSize;
+            for (size_t j = 0; j < sumPoint.size(); j++) {
+                sumPoint[j] += localSum[j];
+            }
+        }
+    }
+
+    // Compute the average point
+    if (size > 0) {
+        for (float& val : sumPoint) {
+            val /= size;
+        }
+    }
+
+    this->size = size;
+    this->avgPoint = sumPoint;
 }

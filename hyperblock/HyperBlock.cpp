@@ -1,6 +1,5 @@
 #include "HyperBlock.h"
-#include <limits>
-#include <iostream>
+
 // Constructor definition
 HyperBlock::HyperBlock(const std::vector<std::vector<float>>& maxs, const std::vector<std::vector<float>>& mins, int cls) : maximums(maxs), minimums(mins), classNum(cls) {}
 

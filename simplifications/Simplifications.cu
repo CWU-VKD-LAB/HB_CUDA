@@ -2,7 +2,6 @@
 // Created by asnyd on 3/20/2025.
 //
 #include "Simplifications.h"
-#include "../Host.cu"
 // best threshold through some very basic testing was about 1.5% for removing useless blocks.
 #define REMOVE_BY_PERCENTAGE false
 #define REMOVAL_PERCENTAGE 0.01f

@@ -3,6 +3,8 @@
 
 #include <vector>
 #include <cmath>
+#include <limits>
+#include <iostream>
 class HyperBlock {
 private:
 public:

@@ -5,7 +5,6 @@
 #include "../hyperblock/HyperBlock.h"
 #include <atomic>
 #include <unordered_set>
-
 #include <vector>
 #include <future>
 #include <algorithm>

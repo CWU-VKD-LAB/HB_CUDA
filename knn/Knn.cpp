@@ -10,7 +10,7 @@
 #include <cmath>
 #include <unordered_map>
 #include <omp.h>
-
+#include <algorithm>
 
 // Lets make a K-nn that goes through the unclassified points and sees how close they are to being
 // inside of each of the blocks. If the value for a attribute is within the bounds of the block we wont add any

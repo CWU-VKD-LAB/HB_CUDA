@@ -632,7 +632,7 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
     // constantly launching and killing threads each iteration. Supervisor version works better on any machine except cwu cluster.
     // intervalHyper(data, dataByAttribute, hyperBlocks);
 
-    longestIntervalSupervisor(data, dataByAttribute, hyperBlocks);
+    intervalHyperSupervisor(data, dataByAttribute, hyperBlocks);
     cout << "Num blocks after interval" << hyperBlocks.size() << endl;
 
     cout << "STARTING MERGING" << endl;

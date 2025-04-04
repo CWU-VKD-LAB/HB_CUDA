@@ -174,7 +174,7 @@ float testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vecto
     cout << "============================ END DISTINCT POINT MATRIX ======================" << endl;
     cout << "\n\n\n\n" << endl;
 
-    return regularConfusionMatrix;
+    return accuracy;
 }
 
 /* This function computes the LDA ordering for a given training dataset.
@@ -305,7 +305,7 @@ void runKFold(vector<vector<vector<float>>> &dataset) {
         }
 
 
-        //acc += testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData);
+        acc += testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData);
         blockCount += hyperBlocks.size();
         cCount += clauseCount;
 

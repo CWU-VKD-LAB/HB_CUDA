@@ -35,6 +35,48 @@ static bool checkBackwards(vector<DataATTR> &dataByAttribute, int currentStart) 
     // if we go all the way to the end with no issues, return true
     return true;
 }
+
+// helper function. returns how many indexes we can move forward while still maintaining the integrity of our pure interval
+static int checkForwards(vector<DataATTR> &dataByAttribute, int currentStart, int targetClass) {
+    int n = dataByAttribute.size();
+    int end = currentStart;
+
+    // 1) Move 'end' forward as long as it's the same classNum == targetClass.
+    while (end + 1 < n && dataByAttribute[end + 1].classNum == targetClass) {
+        end++;
+    }
+    // Now 'end' is the last contiguous index in the same class.
+
+    // 2) If the next item (end+1) is still in range and:
+    //    - has the SAME-ISH as dataByAttribute[end],
+    //    - but is a DIFFERENT class,
+    //    then we must trim off the last items with that value
+    //    because that attribute value is "shared" by a different class.
+    if (end + 1 < n) {
+        float nextVal = dataByAttribute[end + 1].value;
+        bool differentClass = (dataByAttribute[end + 1].classNum != targetClass);
+        bool sameValue = closeEnough(dataByAttribute[end].value, nextVal);
+        // If we have a conflict (same value, different class),
+        // remove *all* items that share this value from the tail
+        if (differentClass && sameValue) {
+            float conflictVal = nextVal;
+            // Trim backward while the end item has the conflictVal
+            while (end >= currentStart && closeEnough(dataByAttribute[end].value, conflictVal)) {
+                end--;
+            }
+        }
+    }
+
+    // 3) Prevent going below the start (in case we had to trim).
+    if (end < currentStart) {
+        // means the conflict happened right away,
+        // so the valid interval is effectively just "start" itself or empty.
+        return currentStart;
+    }
+
+    return end;
+}
+
 #define USED true
 #define STOP 2
 // the reason for these is that it needs to be different values. the threads send intervals, and we change the state.
@@ -94,13 +136,7 @@ void IntervalHyperBlock::intervalHyperWorker(vector<vector<DataATTR>> &attribute
                 int startClass = attributeColumns[column][currentStart].classNum;
 
                 // we are going to go on forward until we find a class mismatch. we are looking for 100% accurate intervals
-                int currentEnd = currentStart;
-                while (currentEnd < n) {
-                    if (attributeColumns[column][currentEnd].classNum != startClass) {
-                        break;
-                    }
-                    currentEnd++;
-                }
+                int currentEnd = checkForwards(attributeColumns[column], currentStart, startClass);
 
                 // once we are done, we simply check if this is our largest interval and update it if so.
                 int length = currentEnd - currentStart;
@@ -109,45 +145,27 @@ void IntervalHyperBlock::intervalHyperWorker(vector<vector<DataATTR>> &attribute
                 if (length > columnBestInterval.size && length > 1) {
                     columnBestInterval.size = length;
                     columnBestInterval.start = currentStart;
-                    columnBestInterval.end = currentEnd - 1;
+                    columnBestInterval.end = currentEnd;
                     columnBestInterval.dominantClass = startClass;
                     columnBestInterval.attribute = column;
                 }
-                currentStart = currentEnd;
+                currentStart = currentEnd + 1;
             } // end of one current start loop
 
             // if this column's is better than our current, update the current best
             if (columnBestInterval.size > threadBestInterval.size && columnBestInterval.size > 1) {
                 threadBestInterval = columnBestInterval;
             }
-			//cout << "Best size: " << columnBestInterval.size << endl;
+
+            // this is the reason we need a column best and worker best. that allows us to know whether there are intervals left to find in an attribute, even if it's not the best.
             if (columnBestInterval.size < 2) {
                 doneColumns[column] = 1;
             }
-
         } // end of one column
 
-        // final check. if our biggest interval has a goofy edge case.
-        // the edge case is when the last value in our interval is actually identical to a value of another class, this means we must remove the values which are matching from our class.
-        int finalEnd = threadBestInterval.end;
-        // if we won't go out of bounds by checking the next one
-        if (finalEnd < n - 1 && finalEnd >= 0) {
-            // get our next value
-            float neighborVal = attributeColumns[threadBestInterval.attribute][threadBestInterval.end + 1].value;
-
-            // while there is a match between the next value and where we are trying to end, we have to trim off our end guy.
-            // this prevents us from making an interval which includes a value which would be shared between our class and another class.
-            while (finalEnd > threadBestInterval.start && closeEnough(neighborVal, attributeColumns[threadBestInterval.attribute][finalEnd].value)) {
-                finalEnd--;
-            }
-            threadBestInterval.end = finalEnd;
-            threadBestInterval.size = finalEnd - threadBestInterval.start;
-        }
-		cout << "thread best: " << threadBestInterval.size << endl;
         // ===========================================================
-        // NOW WE WAIT FOR ALL THREADS TO FINISH AND GET HERE.
+        // NOW WE WAIT FOR ALL THREADS TO FINISH THEIR COLUMNS AND GET HERE.
         // ===========================================================
-
         ++readyThreadsCount;
         // let the supervisor know someone else is done. once our counter gets to numWorkers, he is awoken
         // save the current phase so that we know when it has changed.
@@ -216,15 +234,15 @@ void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &
     // launch all our workers using a bunch of nasty parameters.
     for (int i = 0; i < numWorkers; i++) {
         workers.emplace_back(
-     	intervalHyperWorker,
-          ref(dataByAttribute),          // pass dataByAttribute by reference
-          ref(bestIntervals[i]),         // pass each Interval by reference
-          i,                            // threadID
-          numWorkers,                   // threadCount
-          ref(readyThreads),             // pass atomic<int> by reference
-          &currentPhase,                    // pass address of currentPhase (char*)
-          ref(usedPoints),              // pass usedPoints by reference
-          ref(doneColumns)
+            intervalHyperWorker,
+            ref(dataByAttribute),          // pass dataByAttribute by reference
+            ref(bestIntervals[i]),         // pass each Interval by reference
+          	i,                            // threadID
+          	numWorkers,                   // threadCount
+            ref(readyThreads),             // pass atomic<int> by reference
+            &currentPhase,                    // pass address of currentPhase (char*)
+            ref(usedPoints),              // pass usedPoints by reference
+            ref(doneColumns)
         );
     }
 
@@ -641,7 +659,7 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
     // intervalHyper(data, dataByAttribute, hyperBlocks);
 
     intervalHyperSupervisor(data, dataByAttribute, hyperBlocks);
-    cout << "Num blocks after interval" << hyperBlocks.size() << endl;
+    cout << "Num blocks after interval: " << hyperBlocks.size() << endl;
 
     cout << "STARTING MERGING" << endl;
     try{

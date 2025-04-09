@@ -106,12 +106,12 @@ void IntervalHyperBlock::intervalHyperWorker(vector<vector<DataATTR>> &attribute
         threadBestInterval.size = -1;
         threadBestInterval.dominantClass = -1;
 
-        // threadID corresponds to the first column we check. then we stride by number of threads to the next column.
-        int n = (int)attributeColumns[threadID].size();
         Interval emptyInterval(-1,-1,-1,-1,-1);
 
         // run through all columns, with a stride of number of threads.
         for (int column = threadID; column < attributeColumns.size(); column += threadCount) {
+
+            int n = (int)attributeColumns[column].size();
 
             if (doneColumns[column]) {
                 continue;
@@ -194,6 +194,17 @@ void IntervalHyperBlock::intervalHyperWorker(vector<vector<DataATTR>> &attribute
                 if (usedPoints.find(point) != usedPoints.end()) {
                     dataAtt.used = USED;
                 }
+            }
+
+            // if this is the column which we got the best global interval from:
+            // we are going to remove all but the start of the interval, since we don't need it.
+            // this makes it a little bit faster to continue to run through intervals constantly.
+            if (column == threadBestInterval.attribute) {
+                // inclusive bound, so that we remove the second element, and then it's an exclusive bound, so we remove all the way to the end of the interval.
+                attributeColumns[column].erase(
+                    attributeColumns[column].begin() + (threadBestInterval.start + 1),
+                    attributeColumns[column].begin() + (threadBestInterval.end + 1)
+                );
             }
         }
         // continue back around to searching

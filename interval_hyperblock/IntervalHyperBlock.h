@@ -43,6 +43,8 @@ class IntervalHyperBlock {
         }
     };
 
+
+
     static void intervalHyperWorker(std::vector<std::vector<DataATTR>> &attributeColumns, Interval &threadBestInterval, int threadID, int threadCount, std::atomic<int> &readyThreadsCount, char *currentPhase, std::unordered_set<std::pair<int, int>, PairHash, PairEq> &usedPoints, std::vector<char> &doneColumns);
 
     static void intervalHyperSupervisor(std::vector<std::vector<std::vector<float>>> &realData, std::vector<std::vector<DataATTR>> &dataByAttribute, std::vector<HyperBlock> &hyperBlocks);

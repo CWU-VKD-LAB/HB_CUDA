@@ -3,11 +3,9 @@
 #pragma once
 #include <vector>
 #include "../hyperblock/HyperBlock.h"
-#include <vector>
 #include <cuda_runtime.h>
 #include "../data_utilities/DataUtil.h"
 #include "../hyperblock_generation/MergerHyperBlock.cuh"
-#include <vector>
 #include <algorithm>
 #ifndef SIMPLIFICATIONS_H
 #define SIMPLIFICATIONS_H

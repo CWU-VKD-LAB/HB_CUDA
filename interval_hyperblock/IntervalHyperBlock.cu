@@ -5,14 +5,16 @@
 #include "IntervalHyperBlock.h"
 
 using namespace std;
-
+#define USED true
 #define EPSILON 0.000001
-// comparing float helper
+
+// comparing float helper function.
 static bool closeEnough(float a, float b) {
     return abs(a - b) < EPSILON;
 }
 
 // helper function. checks if there are any of the exact same value that our current start of an interval has, of the wrong class behind it
+// basically tells us whether or not an index is a valid place we can start an interval from
 static bool checkBackwards(vector<DataATTR> &dataByAttribute, int currentStart) {
     //------------------------------------------------------------------
     // 2) BACKWARD CHECK for mismatch among same-value items
@@ -36,13 +38,20 @@ static bool checkBackwards(vector<DataATTR> &dataByAttribute, int currentStart) 
     return true;
 }
 
-// helper function. returns how many indexes we can move forward while still maintaining the integrity of our pure interval
-static int checkForwards(vector<DataATTR> &dataByAttribute, int currentStart, int targetClass) {
+// helper function. returns how many indexes we can move forward while still maintaining the integrity of our pure interval, and
+// also returns the count of points which we are using for the first time in this interval. Meaning the count of previously unused points.
+static pair<int, int> checkForwards(vector<DataATTR> &dataByAttribute, int currentStart, int targetClass) {
     int n = dataByAttribute.size();
     int end = currentStart;
 
+    int notUsedYetPoints = 0;
     // 1) Move 'end' forward as long as it's the same classNum == targetClass.
     while (end + 1 < n && dataByAttribute[end + 1].classNum == targetClass) {
+
+        // we need to return how many points we are using for the first time. This a better indicator of size for an interval.
+        // it could be 50 points long interval, but 49 are used, that is not going to speed up the removal process much.
+        if (dataByAttribute[end + 1].used != USED)
+            notUsedYetPoints++;
         end++;
     }
     // Now 'end' is the last contiguous index in the same class.
@@ -62,7 +71,13 @@ static int checkForwards(vector<DataATTR> &dataByAttribute, int currentStart, in
             float conflictVal = nextVal;
             // Trim backward while the end item has the conflictVal
             while (end >= currentStart && closeEnough(dataByAttribute[end].value, conflictVal)) {
+
+                // if the point is unused, but we aren't using it, shrink the counter
+                if (dataByAttribute[end].used != USED)
+                    notUsedYetPoints--;
+
                 end--;
+
             }
         }
     }
@@ -71,13 +86,12 @@ static int checkForwards(vector<DataATTR> &dataByAttribute, int currentStart, in
     if (end < currentStart) {
         // means the conflict happened right away,
         // so the valid interval is effectively just "start" itself or empty.
-        return currentStart;
+        return {currentStart, 0};
     }
 
-    return end;
+    return {end, notUsedYetPoints};
 }
 
-#define USED true
 #define STOP 2
 // the reason for these is that it needs to be different values. the threads send intervals, and we change the state.
 // once the supervisor is ready, he changes it to the other one and away they go again.
@@ -99,20 +113,16 @@ void IntervalHyperBlock::intervalHyperWorker(vector<vector<DataATTR>> &attribute
     // we run this loop of finding, wait, marking, wait until the supervisor sends us the STOP signal, meaning that there were no good intervals anywhere.
     while (true){
 
-        // initialize with this so if we find nobody bigger than 1 we just return this.
-        threadBestInterval.start = -1;
-        threadBestInterval.end = -1;
-        threadBestInterval.attribute = threadID;
-        threadBestInterval.size = -1;
-        threadBestInterval.dominantClass = -1;
-
         Interval emptyInterval(-1,-1,-1,-1,-1);
+        // set with empty, and if we DO find a good one we obviously replace
+        threadBestInterval = emptyInterval;
 
         // run through all columns, with a stride of number of threads.
         for (int column = threadID; column < attributeColumns.size(); column += threadCount) {
 
             int n = (int)attributeColumns[column].size();
 
+            // if we have already found there are no good intervals to make with this column, we can skip.
             if (doneColumns[column]) {
                 continue;
             }
@@ -139,12 +149,15 @@ void IntervalHyperBlock::intervalHyperWorker(vector<vector<DataATTR>> &attribute
                 int startClass = attributeColumns[column][currentStart].classNum;
 
                 // we are going to go on forward until we find a class mismatch. we are looking for 100% accurate intervals
-                int currentEnd = checkForwards(attributeColumns[column], currentStart, startClass);
+                // the first thing is the furthest end we can include in the interval purely, and the second is the amount of points
+                // which we are using for the first time in the interval. it seems to work slightly better than simply using the size as top - bottom of interval
+                pair<int, int> result = checkForwards(attributeColumns[column], currentStart, startClass);
+                int currentEnd = result.first;
+                int uniquePoints = result.second;
 
                 // once we are done, we simply check if this is our largest interval and update it if so.
-                int length = currentEnd - currentStart;
-                if (length > columnBestInterval.size && length > 1) {
-                    columnBestInterval.size = length;
+                if (uniquePoints > columnBestInterval.size && uniquePoints > 1) {
+                    columnBestInterval.size = uniquePoints;
                     columnBestInterval.start = currentStart;
                     columnBestInterval.end = currentEnd;
                     columnBestInterval.dominantClass = startClass;
@@ -167,7 +180,9 @@ void IntervalHyperBlock::intervalHyperWorker(vector<vector<DataATTR>> &attribute
         // ===========================================================
         // NOW WE WAIT FOR ALL THREADS TO FINISH THEIR COLUMNS AND GET HERE.
         // ===========================================================
+
         ++readyThreadsCount;
+
         // let the supervisor know someone else is done. once our counter gets to numWorkers, he is awoken
         // save the current phase so that we know when it has changed.
         char lastState = *currentPhase;
@@ -552,12 +567,6 @@ void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, 
             HyperBlock h(maxes, mins, best.dominantClass);
             hyperBlocks.push_back(h);
 
-            // --- REMOVAL PHASE ---
-            // Remove the points that were just used from each column in remainingData.
-            // --- REMOVAL PHASE ---
-
-
-            // DONE BY EVERYONE
             for (auto & att : remainingData) {
                 for (auto & dataAtt : att) {
 
@@ -573,7 +582,7 @@ void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, 
             }
         }
 
-        // once all the attributes returned us on intervals or just intervals of one, we break.
+        // once all the attributes returned us no intervals or just intervals of one, we break.
         else
             break;
     }
@@ -657,10 +666,9 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
     cout << "STARTING INTERVAL HYPER" << endl;
     // make our interval based blocks
 
-    // the two functions use identical logic, except that one uses a supervisor thread and workers, instead of
+    // the two functions use almost identical logic, except that one uses a supervisor thread and workers, instead of
     // constantly launching and killing threads each iteration. Supervisor version works better on any machine except cwu cluster.
     // intervalHyper(data, dataByAttribute, hyperBlocks);
-
     intervalHyperSupervisor(data, dataByAttribute, hyperBlocks);
     cout << "Num blocks after interval: " << hyperBlocks.size() << endl;
 

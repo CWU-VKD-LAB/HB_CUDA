@@ -5,9 +5,8 @@
 #include "IntervalHyperBlock.h"
 
 using namespace std;
-#define USED true
-#define EPSILON 0.000001
 
+#define EPSILON 0.000001
 // comparing float helper function.
 static bool closeEnough(float a, float b) {
     return abs(a - b) < EPSILON;
@@ -50,7 +49,7 @@ static pair<int, int> checkForwards(vector<DataATTR> &dataByAttribute, int curre
 
         // we need to return how many points we are using for the first time. This a better indicator of size for an interval.
         // it could be 50 points long interval, but 49 are used, that is not going to speed up the removal process much.
-        if (dataByAttribute[end + 1].used != USED)
+        if (dataByAttribute[end + 1].used != true)
             notUsedYetPoints++;
         end++;
     }
@@ -73,7 +72,7 @@ static pair<int, int> checkForwards(vector<DataATTR> &dataByAttribute, int curre
             while (end >= currentStart && closeEnough(dataByAttribute[end].value, conflictVal)) {
 
                 // if the point is unused, but we aren't using it, shrink the counter
-                if (dataByAttribute[end].used != USED)
+                if (dataByAttribute[end].used != true)
                     notUsedYetPoints--;
 
                 end--;
@@ -94,12 +93,11 @@ static pair<int, int> checkForwards(vector<DataATTR> &dataByAttribute, int curre
 
 #define STOP 2
 // the reason for these is that it needs to be different values. the threads send intervals, and we change the state.
-// once the supervisor is ready, he changes it to the other one and away they go again.
+// once the supervisor is ready, he changes it to the other one and away they go again. Without this, the workers don't stop and
+// wait for the supervisor to be ready
 #define FLIP 1
 #define FLOP 0
 
-// supervisor is going to update this after everyone has found their own best intervals. Supervisor goes through and finds best.
-// then the threads are all going to go through and mark all points which are a part of that interval in their own columns.
 mutex mtx;
 condition_variable supervisorReady; // used to signal all the workers when they can work
 condition_variable workersReady;    // used to signal boss man that we need more work
@@ -108,7 +106,10 @@ condition_variable workersReady;    // used to signal boss man that we need more
 // has determined which is longest. then the threads mark all guys belonging to the longest interval, and we find the next longest interval.
 // the worker finds best interval he has, then put it into threadBestInterval. this is an array of intervals for the supervisor to run through. the supervisor just populates this array with the interval which is best
 // and then the workers mark all the points which are in that interval, in their own columns.
-void IntervalHyperBlock::intervalHyperWorker(vector<vector<DataATTR>> &attributeColumns, Interval &threadBestInterval, int threadID, int threadCount, atomic<int> &readyThreadsCount, char *currentPhase, unordered_set<pair<int, int>, PairHash, PairEq> &usedPoints, vector<char> &doneColumns) {
+void IntervalHyperBlock::intervalHyperWorker(vector<vector<DataATTR>> &attributeColumns, Interval &threadBestInterval, int threadID, int threadCount, atomic<int> &readyThreadsCount, char *currentPhase, unordered_set<pair<int, int>, PairHash, PairEq> &usedPoints, vector<char> &doneColumns, int COMMAND_LINE_ARGS_CLASS) {
+
+    // if the class is -1 we are doing them all. If not, we can treat all wrong class points as countercases, and don't build intervals from them
+    bool doingOneClass = (COMMAND_LINE_ARGS_CLASS != -1) ? true : false;
 
     // we run this loop of finding, wait, marking, wait until the supervisor sends us the STOP signal, meaning that there were no good intervals anywhere.
     while (true){
@@ -131,7 +132,8 @@ void IntervalHyperBlock::intervalHyperWorker(vector<vector<DataATTR>> &attribute
             int currentStart = 0;
             while (currentStart < n) {
                 // find our first start of the column
-                while (currentStart < n && attributeColumns[column][currentStart].used == USED) {
+                // if we have used the point, or, we are doing one class, and this is the wrong class point, we skip it and don't consider it as a start.
+                while (currentStart < n && (attributeColumns[column][currentStart].used == true || (doingOneClass && attributeColumns[column][currentStart].classNum != COMMAND_LINE_ARGS_CLASS))) {
                     currentStart++;
                 }
 
@@ -207,7 +209,7 @@ void IntervalHyperBlock::intervalHyperWorker(vector<vector<DataATTR>> &attribute
                 // using the stupid unordered map is going to be way faster than keeping a list an iterating the list a bunch of times.
                 pair <int, int> point = {dataAtt.classNum, dataAtt.classIndex};
                 if (usedPoints.find(point) != usedPoints.end()) {
-                    dataAtt.used = USED;
+                    dataAtt.used = true;
                 }
             }
 
@@ -229,7 +231,7 @@ void IntervalHyperBlock::intervalHyperWorker(vector<vector<DataATTR>> &attribute
 // EXACTLY THE SAME AS THE INTERVAL HYPER ALGORITHM, BUT IT USES A MANAGER WORKER SETUP INSTEAD OF LAUNCHING THREADS AND KILLING AND LAUNCHING AGAIN
 // takes in the training data which is broken up so that each value of each point is broken up into DataATTR's. finds longest interval of an attribute which is all one class.
 // then makes HBs out of all those points we found which belong to an interval.
-void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &realData, vector<vector<DataATTR>> &dataByAttribute, vector<HyperBlock> &hyperBlocks) {
+void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &realData, vector<vector<DataATTR>> &dataByAttribute, vector<HyperBlock> &hyperBlocks, int COMMAND_LINE_ARGS_CLASS) {
 
     // sort the columns of data attributes
     for (auto &i : dataByAttribute) {
@@ -267,7 +269,8 @@ void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &
             ref(readyThreads),             // pass atomic<int> by reference
             &currentPhase,                    // pass address of currentPhase (char*)
             ref(usedPoints),              // pass usedPoints by reference
-            ref(doneColumns)
+            ref(doneColumns),
+            COMMAND_LINE_ARGS_CLASS
         );
     }
 
@@ -370,14 +373,19 @@ void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &
     // we only have to use one column, since all the data points are in each column.
     vector<pair<int, int>> notUsedPoints;
     for (auto &dataAtt : dataByAttribute[0]) {
-        if (dataAtt.used != USED) {
+        if (dataAtt.used != true) {
             notUsedPoints.push_back({dataAtt.classNum, dataAtt.classIndex});
         }
     }
 
-    // loop through each class and all their points, and find the guys who are not used, and make blocks out of them.
+    // loop through all the points, and find the guys who are not used, and make blocks out of them.
     for (auto &point : notUsedPoints) {
         int classNum = point.first;
+
+        // if we are just doign one class, and that class is not the class of this dataPoint, then we skip it. don't make blocks unnecessarily
+        if (COMMAND_LINE_ARGS_CLASS != -1 && COMMAND_LINE_ARGS_CLASS != classNum)
+            continue;
+
         int classIndex = point.second;
 
         // copy this point into it's own HB.
@@ -396,6 +404,7 @@ void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &
     }
 }
 
+// use with the regular interval hyper below. Used with openMP or std::futures to launch a thread to get longest attribute, but it is inefficient because you make a kill so many threads.
 Interval IntervalHyperBlock::longestInterval(std::vector<DataATTR> &dataByAttribute, int attribute)
 {
     Interval bestInterval(-1, -1, -1, attribute, -1);
@@ -525,7 +534,7 @@ void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, 
         // if there was not we are obviously just done.
 
         if (best.size > 1) {
-            // DONE BY SUPERVISOR AND USED BY EVERYONE
+            // DONE BY SUPERVISOR AND true BY EVERYONE
             for (int i = best.start; i <= best.end; i++) {
                 DataATTR d = remainingData[best.attribute][i];
                 if (!d.used)
@@ -574,7 +583,7 @@ void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, 
                     for (auto &removed : usedIDs) {
                         if (dataAtt.classNum == removed.first && dataAtt.classIndex == removed.second) {
                             // Mark it used in the att-th column
-                            dataAtt.used = USED;
+                            dataAtt.used = true;
                             break;
                         }
                     }
@@ -592,7 +601,7 @@ void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, 
     // we only have to use one column, since all the data points are in each column.
     vector<pair<int, int>> notUsedPoints;
     for (auto &dataAtt : remainingData[0]) {
-        if (dataAtt.used != USED) {
+        if (dataAtt.used != true) {
             notUsedPoints.push_back({dataAtt.classNum, dataAtt.classIndex});
         }
     }
@@ -669,7 +678,7 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
     // the two functions use almost identical logic, except that one uses a supervisor thread and workers, instead of
     // constantly launching and killing threads each iteration. Supervisor version works better on any machine except cwu cluster.
     // intervalHyper(data, dataByAttribute, hyperBlocks);
-    intervalHyperSupervisor(data, dataByAttribute, hyperBlocks);
+    intervalHyperSupervisor(data, dataByAttribute, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
     cout << "Num blocks after interval: " << hyperBlocks.size() << endl;
 
     cout << "STARTING MERGING" << endl;

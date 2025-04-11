@@ -84,7 +84,92 @@ std::vector<std::vector<long>> Knn::closeToInkNN(std::vector<std::vector<std::ve
 ////
 ////
 ////
+std::vector<std::vector<long>> Knn::closestBlock(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int NUM_CLASSES){
 
+
+    int FIELD_LENGTH = hyperBlocks[0].maximums.size();
+
+    // Keep track of assignments with something
+    std::vector<std::vector<float>> classifications(NUM_CLASSES);    // [class][pointIndex]
+    for(int i = 0; i < NUM_CLASSES; i++){
+        classifications[i] = std::vector<float>(unclassifiedData[i].size());    // Put the std::vector for each class
+    }
+
+    for(int i = 0; i < NUM_CLASSES; i++){
+
+        #pragma omp parallel for
+        // For each point in unclassified points
+        for(int point = 0; point < unclassifiedData[i].size(); point++){
+
+            // we take the closest HB. But, there is some caveats. We must consider some things. Imagine missing an interval by .10, small miss. But if that interval itself is
+            // only .05 wide, meaning it is a very tight interval, then missing by that distance is actually huge. In this case, we have missed by 200% the width of the interval. that is what we add.
+            // now we take the block with the smallest distance as a ratio.
+            float bestDistanceAsRatio = std::numeric_limits<float>::infinity();
+            // another consideration. Let's imagine that out of 10 intervals in this simplified HB, 8 are removed. And we had a total miss of 200%. That means that we have missed badly on the only
+            // intervals which even matter. So in this case, we don't want to take that guy. So we need to also consider the amount of intervals which 'count'.
+            int bestClass = -1;
+
+            // Go through all the blocks and find the distances to their centers
+            for(const HyperBlock& hyperBlock : hyperBlocks){
+                float currentDistanceRatio = 0.0f;
+                int numIntervalsNotRemoved = 0;
+
+                for (int attribute = 0; attribute < FIELD_LENGTH; attribute++) {
+
+                    // att is value of our attribute in that point
+                    float att = unclassifiedData[i][point][attribute];
+
+                    // best distance ratio in most cases, is just the ratio for that attribute. but we have to allow for disjunctions.
+                    float bestAttributeDistanceRatio = std::numeric_limits<float>::infinity();
+
+                    // mini loop. if we didn't allow disjunctive units, this wouldn't need to be a loop.
+                    for (int c = 0; c < hyperBlock.minimums[attribute].size(); c++) {
+
+                        // NEEDS FIXING FOR DISJUNCTIONS
+                        if (hyperBlock.minimums[attribute][c] != 0.0f || hyperBlock.maximums[attribute][c] != 1.0f) {
+                            numIntervalsNotRemoved++;
+                        }
+
+                        // take distance to closer edge.
+                        float distance;
+                        if (att < hyperBlock.minimums[attribute][c]) {
+                            distance = hyperBlock.minimums[attribute][c] - att;
+                        } else if (att > hyperBlock.maximums[attribute][c]) {
+                            distance = att - hyperBlock.maximums[attribute][c];
+                        } else {
+                            bestAttributeDistanceRatio = 0.0f;
+                            break;
+                        }
+
+                        float intervalWidth = hyperBlock.maximums[attribute][c] - hyperBlock.minimums[attribute][c];
+                        bestAttributeDistanceRatio = std::min(distance / intervalWidth, bestAttributeDistanceRatio);
+                    }
+                    // if there was a positive distance. we increment the count of missed attributes, and then increase ratio.
+                    currentDistanceRatio += bestAttributeDistanceRatio;
+                }
+
+                // divide the distance ratio by the number of interals we were out of. So that we get an "average miss ratio"
+                currentDistanceRatio /= numIntervalsNotRemoved;
+                if (currentDistanceRatio < bestDistanceAsRatio) {
+                    bestDistanceAsRatio = currentDistanceRatio;
+                    bestClass = hyperBlock.classNum;
+                }
+            }
+            classifications[i][point] = bestClass;
+        }
+    }
+
+    std::vector<std::vector<long>> regularConfusionMatrix(NUM_CLASSES, std::vector<long>(NUM_CLASSES, 0));
+
+    // Go through the classes.
+    for(int classN = 0; classN < NUM_CLASSES; classN++){
+        for(int point = 0; point < classifications[classN].size(); point++){
+            regularConfusionMatrix[classN][classifications[classN][point]]++;
+        }
+    }
+
+    return regularConfusionMatrix;
+}
 
 
 std::vector<std::vector<long>> Knn::blockPointkNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<std::vector<std::vector<float>>> classifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES){

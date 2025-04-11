@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <cmath>
+#include <utility>
 class HyperBlock {
 private:
 public:
@@ -12,6 +13,9 @@ public:
     int size;
 
     std::vector<float> avgPoint;
+
+    // top and bottom pairs is the indexes which are top and bottom of the sorted list of dataATTR's in the interval and merging without cuda.
+    std::vector<std::pair<int, int>> topBottomPairs;
 
     // Constructor
     HyperBlock(const std::vector<std::vector<float>>& maxs, const std::vector<std::vector<float>>& mins, int cls);

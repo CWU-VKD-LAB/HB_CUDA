@@ -404,8 +404,8 @@ void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &
     }
 }
 
-// use with the regular interval hyper below. Used with openMP or std::futures to launch a thread to get longest attribute, but it is inefficient because you make a kill so many threads.
-Interval IntervalHyperBlock::longestInterval(std::vector<DataATTR> &dataByAttribute, int attribute)
+// use with the regular interval hyper below. Used with openMP or futures to launch a thread to get longest attribute, but it is inefficient because you make a kill so many threads.
+Interval IntervalHyperBlock::longestInterval(vector<DataATTR> &dataByAttribute, int attribute)
 {
     Interval bestInterval(-1, -1, -1, attribute, -1);
     int n = static_cast<int>(dataByAttribute.size());
@@ -680,10 +680,10 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
     // intervalHyper(data, dataByAttribute, hyperBlocks);
     intervalHyperSupervisor(data, dataByAttribute, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
     cout << "Num blocks after interval: " << hyperBlocks.size() << endl;
-
     cout << "STARTING MERGING" << endl;
     try{
-        merger_cuda(data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
+        //merger_cuda(data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
+        mergerNotInCuda(data, hyperBlocks, dataByAttribute);
     } catch (exception e){
         cout << "Error in generateHBs: merger_cuda" << endl;
         cout << e.what() << endl;
@@ -892,3 +892,243 @@ void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allDat
         hyperBlock.find_avg_and_size(allData);
     }
 }
+
+
+// helper function. takes in a block, and the DataByAttribute columns. What we do is just check our interval of each attribute.
+// we make a list of wrong class points in each column. Then we take that smallest list, and query all those other lists, and if any point
+// is inside of all the other lists, (inside our bounds for all attributes) we fail. if every wrong class point is missing from ast least one list, we pass
+bool IntervalHyperBlock::checkMergable(vector<vector<DataATTR>> &dataByAttribute, HyperBlock &h) {
+
+    int FIELD_LENGTH = dataByAttribute.size();
+
+    // each thread has a local set to themselves
+    vector<unordered_set<pair<int, int>, PairHash, PairEq>> localSets(FIELD_LENGTH);
+
+    // compute all rows in parallel
+    omp_set_num_threads(FIELD_LENGTH);
+    #pragma omp parallel for
+    for (int column = 0; column < FIELD_LENGTH; column++) {
+        // one thread per column. we basically just determine if a point is in the bounds of the HB for that attribute, and if so, we put him in our set of terrorists.
+        // go through each column's interval of attributes, and find guys who are wrong class.
+        // they go on terrorism watchlist, and at the end, everybody finds if they are sharing same guy on a watchlist or not.
+        for (int start = h.topBottomPairs[column].first; start <= h.topBottomPairs[column].second; start++) {
+            DataATTR &d = dataByAttribute[column][start];
+            if (d.classNum != h.classNum) {
+                localSets[column].insert({d.classNum, d.classIndex});
+            }
+        }
+    }
+
+    // find the smallest set our of each set from all columns
+    auto smallestSet = min_element(
+        localSets.begin(), localSets.end(),
+        [](const unordered_set<pair<int, int>, PairHash, PairEq>& a,
+           const unordered_set<pair<int, int>, PairHash, PairEq>& b) {
+             return a.size() < b.size();
+        }
+    );
+
+    if (smallestSet != localSets.end()) {
+        for (const auto& point : *smallestSet) {
+
+            // start assuming it is in all. and then if it misses any, we can continue to the next point
+            bool inAll = true;
+
+            // check all other sets. we are checking whether any point from our smallest list of points is present in ALL other attributes.
+            // if it is outside of even one, that means it's not in our HB, and we are valid merging, at least in the case of that point.
+            for (const auto& otherSet : localSets) {
+                if (&otherSet == &(*smallestSet)) continue;
+
+                // if it wasn't in that set, we pass this point and go onto the next.
+                if (otherSet.find(point) == otherSet.end()) {
+                    inAll = false;
+                    break;
+                }
+            }
+
+            // if the wrong class point (terrorist) were in all sets. that means we have a point in all of our bounds. and we have to not take this merge.
+            if (inAll) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+#define KILL 1
+#define LIVE 0
+void IntervalHyperBlock::mergerNotInCuda(vector<vector<vector<float>>> &trainingData, vector<HyperBlock> &hyperBlocks, vector<vector<DataATTR>> &pointsBrokenUp) {
+
+    int FIELD_LENGTH = hyperBlocks[0].minimums.size();
+
+    // the basic algorithm is this. we are going to maintain a terrorist watchlist.
+    // we find all points which are in our bounds for any attributes. when we are expanding our bounds to include
+    // new friends, we find all points which now might be in our new bound obviously, and add to watchlist. Then we just check the watchlist.
+    // for each block
+    vector<vector<HyperBlock>> inputBlocks(trainingData.size());
+
+    for (HyperBlock &h : hyperBlocks) {
+
+        // Ensure we have a pair for each attribute.
+        // Using resize is better than reserve here because we want to create FIELD_LENGTH elements,
+        // which we then update.
+        h.topBottomPairs.resize(FIELD_LENGTH);
+
+        // For each attribute (column), perform a binary search.
+        for (int attribute = 0; attribute < FIELD_LENGTH; attribute++) {
+
+            // Get the sorted vector of DataATTR for this attribute.
+            const vector<DataATTR>& columnPoints = pointsBrokenUp[attribute];
+
+            // Our target interval for this attribute (assuming each is stored as a one-element vector)
+            float lowerVal = h.minimums[attribute][0];
+            float upperVal = h.maximums[attribute][0];
+
+            // Binary search:
+            // lower_bound: first element whose value is not less than lowerVal.
+            auto lowIt = lower_bound(columnPoints.begin(), columnPoints.end(), lowerVal,
+                [](const DataATTR &d, float value) {
+                    return d.value < value;
+                });
+
+            // upper_bound: first element whose value is greater than upperVal.
+            auto highIt = upper_bound(columnPoints.begin(), columnPoints.end(), upperVal,
+                [](float value, const DataATTR &d) {
+                    return value < d.value;
+                });
+
+            // Determine indices:
+            // If lowIt reached the end, then no elements are ≥ lowerVal.
+            int lowIndex = (lowIt != columnPoints.end()) ? static_cast<int>(lowIt - columnPoints.begin()) : -1;
+
+            // For the topmost index, we want the last index in the range.
+            // upper_bound returns the first element greater than upperVal.
+            // If highIt equals columnPoints.begin(), then even the first element is greater than upperVal.
+            int highIndex = (highIt != columnPoints.begin()) ? static_cast<int>(highIt - columnPoints.begin()) - 1 : -1;
+
+            // Optionally, you might want to check whether these indices make sense.
+            // For example, if lowIndex == -1 or highIndex == -1 or if lowIndex > highIndex,
+            // it means no valid element was found for that attribute.
+            // You can handle that case as needed.
+
+            // Store the pair of indices (bottommost, topmost) for this attribute.
+            h.topBottomPairs[attribute] = make_pair(lowIndex, highIndex);
+        }
+
+        // add the HyperBlock to inputBlocks
+        inputBlocks[h.classNum].emplace_back(h);
+    }
+
+
+    for (int classN = 0; classN < inputBlocks.size(); classN++) {
+
+        vector<HyperBlock>& blocks = inputBlocks[classN];
+
+        vector<char> mergableFlags(blocks.size(), 0);
+        vector<char> deleteFlags(blocks.size(), LIVE);
+
+        // go through each seed block. now what we do is we are going to have to make that rearranging business happen just like in merger_cuda.
+        for (int seed = 0; seed < blocks.size(); seed++) {
+
+            HyperBlock &seedBlock = blocks[seed];
+
+            // now we check if this block is mergeable to all the blocks after it.
+            for (int candidateBlock = seed + 1; candidateBlock < blocks.size(); candidateBlock++) {
+
+                HyperBlock &candidate = blocks[candidateBlock];
+
+                // make it a copy of candidate for now. the bounds' values don't matter unless we pass the test, at which point we update them.
+                HyperBlock combinedBlock(candidate.minimums, candidate.maximums, candidate.classNum);
+                combinedBlock.topBottomPairs.resize(FIELD_LENGTH);
+
+                for (int attribute = 0; attribute < FIELD_LENGTH; attribute++) {
+                    // new block has max of the two tops, and min of the two bottoms.
+                    combinedBlock.topBottomPairs[attribute] = {min(seedBlock.topBottomPairs[attribute].first,candidate.topBottomPairs[attribute].first),
+                                                                    max(seedBlock.topBottomPairs[attribute].second, candidate.topBottomPairs[attribute].second)};
+                }
+
+                // check merging using set based checking instead of brute force checking the entire dataset.
+                if (checkMergable(pointsBrokenUp, combinedBlock)) {
+                    mergableFlags[candidateBlock] = true;
+                    deleteFlags[seed] = KILL; // we can kill the seedblock if we are able to merge with any blocks.
+
+                    vector<vector<float>> combinedMins(FIELD_LENGTH);
+                    vector<vector<float>> combinedMaxes(FIELD_LENGTH);
+
+                    for (int attribute = 0; attribute < FIELD_LENGTH; attribute++) {
+                        combinedMins[attribute].push_back(min(seedBlock.minimums[attribute][0], candidate.minimums[attribute][0]));
+                        combinedMaxes[attribute].push_back(max(seedBlock.maximums[attribute][0], candidate.maximums[attribute][0]));
+                    }
+                    // copy our new bounds into this block.
+                    candidate.minimums = combinedMins;
+                    candidate.maximums = combinedMaxes;
+
+                    candidate.topBottomPairs = combinedBlock.topBottomPairs;
+                }
+            }
+
+            // after we have checked all our candidate blocks, we are going to rearrange the blocks like this.
+            // if we merged, we go to the back of the line. BUT, blocks which were earlier in the blocks go to the back, and ones which were later go to front.
+            // meaning that if block 1 merged, and block N merged, block 1 gets put in behind block N.
+
+            // Gather indices for blocks after 'seed'
+            vector<int> indices;
+            for (int i = seed + 1; i < blocks.size(); i++) {
+                indices.push_back(i);
+            }
+
+            // Sort these indices based on mergableFlags criteria.
+            sort(indices.begin(), indices.end(), [&](int a, int b) {
+                if (mergableFlags[a] != mergableFlags[b])
+                    return mergableFlags[a] < mergableFlags[b]; // false (0) first; i.e., non-mergeable remain at front.
+                if (mergableFlags[a]) // if both are true, sort by index descending (later block comes first)
+                    return a > b;
+                return a < b; // if both are false, keep the original order.
+            });
+
+            // Rebuild sorted arrays.
+            // First, copy blocks, mergableFlags, and deleteFlags from indices 0 to seed (unchanged)
+            vector<HyperBlock> sortedBlocks;
+            vector<char> sortedMergable;
+            vector<char> sortedDelete;
+            for (int i = 0; i <= seed; i++) {
+                sortedBlocks.push_back(blocks[i]);
+                sortedMergable.push_back(mergableFlags[i]);
+                sortedDelete.push_back(deleteFlags[i]);
+            }
+            
+            // Then, append the sorted blocks for indices > seed.
+            for (int i : indices) {
+                sortedBlocks.push_back(blocks[i]);
+                sortedMergable.push_back(mergableFlags[i]);
+                sortedDelete.push_back(deleteFlags[i]);
+            }
+
+            // Update the originals with the newly ordered data.
+            blocks = move(sortedBlocks);
+            mergableFlags = move(sortedMergable);
+            deleteFlags = move(sortedDelete);
+
+            // Reset all mergeable flags to 0.
+            fill(mergableFlags.begin(), mergableFlags.end(), 0);
+        }
+
+        // now once we are done with that merging business. we simply remove all the blocks which were marked KILL
+        blocks.erase(
+        remove_if(blocks.begin(), blocks.end(),
+            [&](const HyperBlock& block) {
+                size_t index = &block - &blocks[0];
+                return deleteFlags[index] == KILL;
+            }),
+            blocks.end()
+        );
+    }
+    // add all the blocks from each class back to hyperBlocks pointer
+    hyperBlocks.clear();
+    for (vector<HyperBlock>& blocks : inputBlocks) {
+        hyperBlocks.insert(hyperBlocks.end(), blocks.begin(), blocks.end());
+    }
+}
+
+
+

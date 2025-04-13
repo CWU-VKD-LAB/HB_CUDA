@@ -901,12 +901,9 @@ bool IntervalHyperBlock::checkMergable(vector<vector<DataATTR>> &dataByAttribute
 
     int FIELD_LENGTH = dataByAttribute.size();
 
-    // each thread has a local set to themselves
+    // each column has a local set to themselves
     vector<unordered_set<pair<int, int>, PairHash, PairEq>> localSets(FIELD_LENGTH);
 
-    // compute all rows in parallel
-    omp_set_num_threads(FIELD_LENGTH);
-    #pragma omp parallel for
     for (int column = 0; column < FIELD_LENGTH; column++) {
         // one thread per column. we basically just determine if a point is in the bounds of the HB for that attribute, and if so, we put him in our set of terrorists.
         // go through each column's interval of attributes, and find guys who are wrong class.
@@ -921,38 +918,42 @@ bool IntervalHyperBlock::checkMergable(vector<vector<DataATTR>> &dataByAttribute
 
     // find the smallest set our of each set from all columns
     auto smallestSet = min_element(
-        localSets.begin(), localSets.end(),
-        [](const unordered_set<pair<int, int>, PairHash, PairEq>& a,
-           const unordered_set<pair<int, int>, PairHash, PairEq>& b) {
-             return a.size() < b.size();
+        localSets.begin(),
+        localSets.end(),
+        [](const unordered_set<pair<int,int>, PairHash, PairEq> &a,
+           const unordered_set<pair<int,int>, PairHash, PairEq> &b) {
+            return a.size() < b.size();
         }
     );
 
+
     if (smallestSet != localSets.end()) {
-        for (const auto& point : *smallestSet) {
+        // For each of the other sets, remove elements not present in that set
+        for (auto it = localSets.begin(); it != localSets.end(); ++it) {
+            if (it == smallestSet) {
+                continue; // skip comparing smallest set to itself
+            }
 
-            // start assuming it is in all. and then if it misses any, we can continue to the next point
-            bool inAll = true;
-
-            // check all other sets. we are checking whether any point from our smallest list of points is present in ALL other attributes.
-            // if it is outside of even one, that means it's not in our HB, and we are valid merging, at least in the case of that point.
-            for (const auto& otherSet : localSets) {
-                if (&otherSet == &(*smallestSet)) continue;
-
-                // if it wasn't in that set, we pass this point and go onto the next.
-                if (otherSet.find(point) == otherSet.end()) {
-                    inAll = false;
-                    break;
+            // Remove from *smallestSet any element that is NOT in *it
+            for (auto stIt = smallestSet->begin(); stIt != smallestSet->end(); ) {
+                if (it->find(*stIt) == it->end()) {
+                    stIt = smallestSet->erase(stIt);
+                } else {
+                    ++stIt;
                 }
             }
 
-            // if the wrong class point (terrorist) were in all sets. that means we have a point in all of our bounds. and we have to not take this merge.
-            if (inAll) {
-                return false;
+            // If the intersection becomes empty, we can return early
+            if (smallestSet->empty()) {
+                return true;
             }
         }
     }
-    return true;
+
+    // If after all comparisons we didn't empty the smallest set,
+    // it means there's at least one element in all sets => fail
+    return smallestSet == localSets.end() || smallestSet->empty();
+
 }
 
 #define KILL 1
@@ -1027,12 +1028,15 @@ void IntervalHyperBlock::mergerNotInCuda(vector<vector<vector<float>>> &training
         vector<char> mergableFlags(blocks.size(), 0);
         vector<char> deleteFlags(blocks.size(), LIVE);
 
-        // go through each seed block. now what we do is we are going to have to make that rearranging business happen just like in merger_cuda.
-        for (int seed = 0; seed < blocks.size(); seed++) {
+        for (int seed = 0; seed < blocks.size() - 1; seed++) {
 
             HyperBlock &seedBlock = blocks[seed];
 
             // now we check if this block is mergeable to all the blocks after it.
+            // go through each seed block. now what we do is we are going to have to make that rearranging business happen just like in merger_cuda.
+            omp_set_num_threads(min((int)blocks.size() - 1 - seed, omp_get_num_procs()));
+
+            #pragma omp parallel for
             for (int candidateBlock = seed + 1; candidateBlock < blocks.size(); candidateBlock++) {
 
                 HyperBlock &candidate = blocks[candidateBlock];

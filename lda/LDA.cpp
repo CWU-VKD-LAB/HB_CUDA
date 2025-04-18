@@ -35,9 +35,7 @@ std::vector<float> partialMean(const std::vector<std::vector<float>>& data,
 // --------------------------------------------------------------
 // 2) A helper to compute a partial scatter matrix for [start, end)
 // --------------------------------------------------------------
-std::vector<std::vector<float>> partialScatter(const std::vector<std::vector<float>>& data,
-                                               const std::vector<float>& mean,
-                                               int start, int end)
+std::vector<std::vector<float>> partialScatter(const std::vector<std::vector<float>>& data, const std::vector<float>& mean, int start, int end)
 {
     int numFeatures = static_cast<int>(mean.size());
     // Create a local scatter matrix
@@ -106,8 +104,7 @@ std::vector<std::vector<float>> inverse(const std::vector<std::vector<float>>& m
 // --------------------------------------------------------------
 // Simple matrix-vector multiply
 // --------------------------------------------------------------
-std::vector<float> matrixVectorMultiply(const std::vector<std::vector<float>>& A,
-                                        const std::vector<float>& v) {
+std::vector<float> matrixVectorMultiply(const std::vector<std::vector<float>>& A, const std::vector<float>& v) {
     int rows = A.size();
     int cols = A[0].size();
     std::vector<float> result(rows, 0.0f);

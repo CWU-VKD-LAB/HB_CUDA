@@ -23,7 +23,11 @@ HyperBlock::HyperBlock(std::vector<std::vector<std::vector<float>>>& hb_data, in
         }
     }
 
-    size = -1;
+    int s = 0;
+    for (std::vector<std::vector<float>> &classData : hb_data)
+        s += classData.size();
+
+    size = s;
     maximums = maxes;
     minimums = mins;
     classNum = cls;

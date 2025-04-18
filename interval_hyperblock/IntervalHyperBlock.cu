@@ -682,15 +682,14 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
     cout << "Num blocks after interval: " << hyperBlocks.size() << endl;
     cout << "STARTING MERGING" << endl;
     try{
-        //merger_cuda(data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
-        mergerNotInCuda(data, hyperBlocks, dataByAttribute);
+        merger_cuda(data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
+        //mergerNotInCuda(data, hyperBlocks, dataByAttribute);
     } catch (exception e){
         cout << "Error in generateHBs: merger_cuda" << endl;
         cout << e.what() << endl;
     }
 }
 
-// Source
 void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allData, vector<HyperBlock>& hyperBlocks, int COMMAND_LINE_ARGS_CLASS) {
 
     int NUM_CLASSES = allData.size();
@@ -892,7 +891,6 @@ void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allDat
         hyperBlock.find_avg_and_size(allData);
     }
 }
-
 
 // helper function. takes in a block, and the DataByAttribute columns. What we do is just check our interval of each attribute.
 // we make a list of wrong class points in each column. Then we take that smallest list, and query all those other lists, and if any point

@@ -23,6 +23,7 @@ HyperBlock::HyperBlock(std::vector<std::vector<std::vector<float>>>& hb_data, in
     }
 
     size = -1;
+    pointIndices = std::vector<std::vector<int>>();
     maximums = maxes;
     minimums = mins;
     classNum = cls;
@@ -49,6 +50,20 @@ bool HyperBlock::inside_HB(int numAttributes, const float* point) {
     }
 
     return true;  
+}
+
+
+// Returns how many bounds the point was in.
+int HyperBlock::inside_N_Bounds(int numAttributes, const float* point) {
+    constexpr float EPSILON = 1e-6f;
+    int numIn = 0;
+
+    for (int i = 0; i < numAttributes; i++)
+        for (int j = 0; j < maximums[i].size(); j++)
+            if ((point[i] + EPSILON >= minimums[i][j]) && (point[i] - EPSILON <= maximums[i][j]))
+                numIn++;
+
+    return numIn;
 }
 
 float HyperBlock::distance_to_HB_Edge(int numAttributes, const float* point) const {
@@ -123,42 +138,56 @@ float HyperBlock::distance_to_HB_Combo(int numAttributes, const float* point) co
 * this will allow for us to know where the "true" center of the block is.
 */
 void HyperBlock::find_avg_and_size(const std::vector<std::vector<std::vector<float>>>& data) {
-    int size = 0;
+    int totalSize = 0;
     std::vector<float> sumPoint(data[0][0].size(), 0.0f); // Initialize sum vector with zeros
+    pointIndices.clear();
+    pointIndices.resize(data.size());
 
+    // Thread-local storage
     #pragma omp parallel
     {
         std::vector<float> localSum(data[0][0].size(), 0.0f);
         int localSize = 0;
+        std::vector<std::vector<int>> localIndices(data.size()); // Thread-local indices
 
         #pragma omp for nowait
-        for (int i = 0; i < data.size(); i++) {
-            for (const auto& point : data[i]) {
+        for (int classIdx = 0; classIdx < data.size(); classIdx++) {
+            for (int pointIdx = 0; pointIdx < data[classIdx].size(); pointIdx++) {
+                const auto& point = data[classIdx][pointIdx];
                 if (inside_HB(point.size(), point.data())) {
                     localSize++;
                     for (size_t j = 0; j < point.size(); j++) {
                         localSum[j] += point[j];
                     }
+                    localIndices[classIdx].push_back(pointIdx); // Track which point matched
                 }
             }
         }
 
+        // Merge thread-local results into shared variables
         #pragma omp critical
         {
-            size += localSize;
+            totalSize += localSize;
             for (size_t j = 0; j < sumPoint.size(); j++) {
                 sumPoint[j] += localSum[j];
+            }
+            for (int classIdx = 0; classIdx < data.size(); classIdx++) {
+                pointIndices[classIdx].insert(
+                    pointIndices[classIdx].end(),
+                    localIndices[classIdx].begin(),
+                    localIndices[classIdx].end()
+                );
             }
         }
     }
 
-    // Compute the average point
-    if (size > 0) {
+    // Compute average point
+    if (totalSize > 0) {
         for (float& val : sumPoint) {
-            val /= size;
+            val /= totalSize;
         }
     }
 
-    this->size = size;
+    this->size = totalSize;
     this->avgPoint = sumPoint;
 }

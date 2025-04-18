@@ -119,7 +119,7 @@ void DataUtil::saveNormalizedVersionToCsv(std::string fileName, std::vector<std:
     }
 
     // Assuming all classes have at least one point, get feature count from the first point of the first class
-    int featureCount = data[0][0].size();
+    int featureCount = FIELD_LENGTH;
 
     // Write the header
     for (int i = 0; i < featureCount; i++) {

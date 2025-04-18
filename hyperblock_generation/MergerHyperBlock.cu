@@ -6,13 +6,11 @@
 // REFACTORED MERGER HYPER BLOCKS KERNEL FUNCTION. DOESN'T NEED THE COOPERATIVE GROUPS.
 // WRAP IN A LOOP. launch mergerHyperBlocks with i up to N - 1 as seed index, each time then rearrange, then reset.
 // ------------------------------------------------------------------------------------------------
-
 // Define a macro to compare float4's for equality.
 #define COMPARE_FLOAT4(a, b) ( (((a).x == (b).x) && ((a).y == (b).y) && ((a).z == (b).z) && ((a).w == (b).w)) ? 0 : 1 )
 // Define simple min/max macros for scalar floats.
 #define min_f(a, b) ((a) > (b) ? (b) : (a))
 #define max_f(a, b) ((a) > (b) ? (a) : (b))
-
 // Hybrid kernel that uses block-level cooperation but vectorizes with float4's.
 __global__ void mergerHyperBlocks(
     const int seedIndex, 
@@ -174,7 +172,6 @@ __global__ void mergerHyperBlocks(
         __syncthreads();
     }
 }
-
 
 __global__ void rearrangeSeedQueue(const int deadSeedNum, int *readSeedQueue, int *writeSeedQueue, int *deleteFlags, int *mergable, const int numBlocks){
 

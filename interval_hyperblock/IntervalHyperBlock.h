@@ -15,7 +15,8 @@
 #include <unordered_set>
 #include <utility>
 #include <thread>
-
+#include <numeric>
+#include <omp.h>
 #include "Interval.h"
 #include "DataAttr.h"
 #include "../hyperblock_generation/MergerHyperBlock.cuh"
@@ -42,9 +43,11 @@ class IntervalHyperBlock {
         }
     };
 
-    static void intervalHyperWorker(std::vector<std::vector<DataATTR>> &attributeColumns, Interval &threadBestInterval, int threadID, int threadCount, std::atomic<int> &readyThreadsCount, char *currentPhase, std::unordered_set<std::pair<int, int>, PairHash, PairEq> &usedPoints, std::vector<char> &doneColumns);
 
-    static void intervalHyperSupervisor(std::vector<std::vector<std::vector<float>>> &realData, std::vector<std::vector<DataATTR>> &dataByAttribute, std::vector<HyperBlock> &hyperBlocks);
+
+    static void intervalHyperWorker(std::vector<std::vector<DataATTR>> &attributeColumns, Interval &threadBestInterval, int threadID, int threadCount, std::atomic<int> &readyThreadsCount, char *currentPhase, std::unordered_set<std::pair<int, int>, PairHash, PairEq> &usedPoints, std::vector<char> &doneColumns, int COMMAND_LINE_ARGS_CLASS);
+
+    static void intervalHyperSupervisor(std::vector<std::vector<std::vector<float>>> &realData, std::vector<std::vector<DataATTR>> &dataByAttribute, std::vector<HyperBlock> &hyperBlocks, int COMMAND_LINE_ARGS_CLASS);
 
     static Interval longestInterval(std::vector<DataATTR> &dataByAttribute, int attribute);
 
@@ -57,6 +60,10 @@ class IntervalHyperBlock {
     static void generateHBs(std::vector<std::vector<std::vector<float>>>& data, std::vector<HyperBlock>& hyperBlocks, std::vector<int> &bestAttributes,int FIELD_LENGTH, int COMMAND_LINE_ARGS_CLASS);
 
 	static void merger_cuda(const std::vector<std::vector<std::vector<float>>>& allData, std::vector<HyperBlock>& hyperBlocks, int COMMAND_LINE_ARGS_CLASS);
+
+    static void mergerNotInCuda(std::vector<std::vector<std::vector<float>>> &trainingData, std::vector<HyperBlock> &hyperBlocks, std::vector<std::vector<DataATTR>> &pointsBrokenUp);
+
+    static bool checkMergable(std::vector<std::vector<DataATTR>> &dataByAttribute, HyperBlock &h);
 };
 
 #endif //INTERVALHYPERBLOCK_H

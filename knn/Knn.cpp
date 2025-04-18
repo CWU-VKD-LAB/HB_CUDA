@@ -104,6 +104,7 @@ std::vector<std::vector<long>> Knn::closeToInkNN(std::vector<std::vector<std::ve
 ////
 ////
 ////
+std::vector<std::vector<long>> Knn::closestBlock(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int NUM_CLASSES){
 
 std::vector<std::vector<long>> Knn::mostAttributesInKnn(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES){
 
@@ -174,6 +175,90 @@ std::vector<std::vector<long>> Knn::mostAttributesInKnn(std::vector<std::vector<
 
 
 
+
+    int FIELD_LENGTH = hyperBlocks[0].maximums.size();
+
+    // Keep track of assignments with something
+    std::vector<std::vector<float>> classifications(NUM_CLASSES);    // [class][pointIndex]
+    for(int i = 0; i < NUM_CLASSES; i++){
+        classifications[i] = std::vector<float>(unclassifiedData[i].size());    // Put the std::vector for each class
+    }
+
+    for(int i = 0; i < NUM_CLASSES; i++){
+
+        #pragma omp parallel for
+        // For each point in unclassified points
+        for(int point = 0; point < unclassifiedData[i].size(); point++){
+
+            // we take the closest HB. But, there is some caveats. We must consider some things. Imagine missing an interval by .10, small miss. But if that interval itself is
+            // only .05 wide, meaning it is a very tight interval, then missing by that distance is actually huge. In this case, we have missed by 200% the width of the interval. that is what we add.
+            // now we take the block with the smallest distance as a ratio.
+            float bestDistanceAsRatio = std::numeric_limits<float>::infinity();
+            // another consideration. Let's imagine that out of 10 intervals in this simplified HB, 8 are removed. And we had a total miss of 200%. That means that we have missed badly on the only
+            // intervals which even matter. So in this case, we don't want to take that guy. So we need to also consider the amount of intervals which 'count'.
+            int bestClass = -1;
+
+            // Go through all the blocks and find the distances to their centers
+            for(const HyperBlock& hyperBlock : hyperBlocks){
+                float currentDistanceRatio = 0.0f;
+                int numIntervalsNotRemoved = 0;
+
+                for (int attribute = 0; attribute < FIELD_LENGTH; attribute++) {
+
+                    // att is value of our attribute in that point
+                    float att = unclassifiedData[i][point][attribute];
+
+                    // best distance ratio in most cases, is just the ratio for that attribute. but we have to allow for disjunctions.
+                    float bestAttributeDistanceRatio = std::numeric_limits<float>::infinity();
+
+                    // mini loop. if we didn't allow disjunctive units, this wouldn't need to be a loop.
+                    for (int c = 0; c < hyperBlock.minimums[attribute].size(); c++) {
+
+                        // NEEDS FIXING FOR DISJUNCTIONS
+                        if (hyperBlock.minimums[attribute][c] != 0.0f || hyperBlock.maximums[attribute][c] != 1.0f) {
+                            numIntervalsNotRemoved++;
+                        }
+
+                        // take distance to closer edge.
+                        float distance;
+                        if (att < hyperBlock.minimums[attribute][c]) {
+                            distance = hyperBlock.minimums[attribute][c] - att;
+                        } else if (att > hyperBlock.maximums[attribute][c]) {
+                            distance = att - hyperBlock.maximums[attribute][c];
+                        } else {
+                            bestAttributeDistanceRatio = 0.0f;
+                            break;
+                        }
+
+                        float intervalWidth = hyperBlock.maximums[attribute][c] - hyperBlock.minimums[attribute][c];
+                        bestAttributeDistanceRatio = std::min(distance / intervalWidth, bestAttributeDistanceRatio);
+                    }
+                    // if there was a positive distance. we increment the count of missed attributes, and then increase ratio.
+                    currentDistanceRatio += bestAttributeDistanceRatio;
+                }
+
+                // divide the distance ratio by the number of interals we were out of. So that we get an "average miss ratio"
+                currentDistanceRatio /= numIntervalsNotRemoved;
+                if (currentDistanceRatio < bestDistanceAsRatio) {
+                    bestDistanceAsRatio = currentDistanceRatio;
+                    bestClass = hyperBlock.classNum;
+                }
+            }
+            classifications[i][point] = bestClass;
+        }
+    }
+
+    std::vector<std::vector<long>> regularConfusionMatrix(NUM_CLASSES, std::vector<long>(NUM_CLASSES, 0));
+
+    // Go through the classes.
+    for(int classN = 0; classN < NUM_CLASSES; classN++){
+        for(int point = 0; point < classifications[classN].size(); point++){
+            regularConfusionMatrix[classN][classifications[classN][point]]++;
+        }
+    }
+
+    return regularConfusionMatrix;
+}
 
 
 std::vector<std::vector<long>> Knn::blockPointkNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<std::vector<std::vector<float>>> classifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES){
@@ -435,3 +520,197 @@ float Knn::euclideanDistancePoints(const std::vector<float>& point2, const std::
     return sqrt(sumSquaredDifference);
 }
 
+/**
+*    This is the function we will use to classify data that was outside the bounds of all hyperBlocks
+*
+*    We will take a point and find its K Nearest Neigbors and then use a simple voting majority of these
+*    to assign the point to the correct class.
+*
+*/
+std::vector<std::vector<long>> Knn::mergableKNN(std::vector<std::vector<std::vector<float>>> &unclassifiedData, std::vector<std::vector<std::vector<float>>> &trainingData, std::vector<HyperBlock> &hyperBlocks, int NUM_CLASSES) {
+
+    int FIELD_LENGTH = trainingData[0][0].size();
+
+    // our confusion matrix
+    // make each vector for each point
+    std::vector<std::vector<int>> predictedLabels(NUM_CLASSES);
+    for (int actualClass = 0; actualClass < NUM_CLASSES; actualClass++) {
+        predictedLabels[actualClass].resize(unclassifiedData[actualClass].size());
+    }
+
+    // now we just take our training data, and first break it up by column exactly how we did in in the interval HB generation portion.
+    std::vector<std::vector<DataATTR>> dataByAttribute = IntervalHyperBlock::separateByAttribute(trainingData, FIELD_LENGTH);
+
+    for (HyperBlock &block : hyperBlocks) {
+        // now we set up the top and bottom pairs for each block just to make sure that the bounds are made.
+        block.topBottomPairs.resize(FIELD_LENGTH);
+
+        // For each attribute (column), perform a binary search. we are just making the bounds of each attribute for each HB in index form.
+        for (int attribute = 0; attribute < FIELD_LENGTH; attribute++) {
+
+            // Get the sorted vector of DataATTR for this attribute.
+            const std::vector<DataATTR>& columnPoints = dataByAttribute[attribute];
+
+            // Our target interval for this attribute (assuming each is stored as a one-element vector)
+            float lowerVal = block.minimums[attribute][0];
+            float upperVal = block.maximums[attribute][0];
+
+            // lower_bound: first element whose value is not less than lowerVal.
+            auto lowIt = lower_bound(columnPoints.begin(), columnPoints.end(), lowerVal,
+                [](const DataATTR &d, float value) {
+                    return d.value < value;
+            });
+
+            // upper_bound: first element whose value is greater than upperVal.
+            auto highIt = upper_bound(columnPoints.begin(), columnPoints.end(), upperVal,
+                [](float value, const DataATTR &d) {
+                    return value < d.value;
+            });
+
+            // Determine indices:
+            // If lowIt reached the end, then no elements are ≥ lowerVal.
+            int lowIndex = (lowIt != columnPoints.end()) ? static_cast<int>(lowIt - columnPoints.begin()) : -1;
+
+            // For the topmost index, we want the last index in the range.
+            // upper_bound returns the first element greater than upperVal.
+            // If highIt equals columnPoints.begin(), then even the first element is greater than upperVal.
+            int highIndex = (highIt != columnPoints.begin()) ? static_cast<int>(highIt - columnPoints.begin()) - 1 : -1;
+
+            // Store the pair of indices (bottommost, topmost) for this attribute.
+            block.topBottomPairs[attribute] = std::make_pair(lowIndex, highIndex);
+        }
+    }
+
+    // now we can go through the list of unclassified points, and pick the block which is most legally mergeable to our new point
+    for (int actualClass = 0; actualClass < NUM_CLASSES; actualClass++) {
+        auto &pointsInClass = unclassifiedData[actualClass];
+
+        // for each point of each class.
+        for (int pIndex = 0; pIndex < pointsInClass.size(); pIndex++) {
+            auto &point = pointsInClass[pIndex];
+
+            // tells us which index this point would be in in the sorted columns if inserted. we don't actually put it in though, that would change the data.
+            std::vector<int> pointIndicesByColumn(FIELD_LENGTH, -1);
+
+            // set up our vector which tells us which indices the point would land at.
+            for (int attribute = 0; attribute < FIELD_LENGTH; attribute++) {
+
+                float pointVal = point[attribute];
+
+                const std::vector<DataATTR> &columnPoints = dataByAttribute[attribute];
+                // find the index which our point would go at in this column.
+                auto indexIt = std::lower_bound(
+                    columnPoints.begin(), columnPoints.end(), pointVal,
+                    [](const DataATTR &d, float value) { return d.value < value; });
+
+                int index = std::distance(columnPoints.begin(), indexIt);
+                if (index == columnPoints.size())
+                    index--;
+                pointIndicesByColumn[attribute] = index;
+            }
+
+            int bestClass = -1;
+            float bestAcc = 0.0f;
+            int bestBlockSize = 0;
+            for (HyperBlock &block : hyperBlocks) {
+
+                // now that our block is made, we can determine how many wrong points are going to fall in if we included this guy.
+                // use the merge check to determine how "mergeable" this point is to each block, and we use the "most mergeable" class.
+                float acc = mergeCheck(pointIndicesByColumn, block, dataByAttribute);
+
+                // if the accuracy is better, or within .1% and we have a bigger block, we are using this block.
+                if (acc > bestAcc || (std::fabs(acc - bestAcc) < .001f && block.size > bestBlockSize) ) {
+                    bestClass = block.classNum;
+                    bestAcc = acc;
+                    bestBlockSize = block.size;
+                }
+            }
+
+            predictedLabels[actualClass][pIndex] = bestClass;
+        }
+    }
+
+    // build and return the confusion matrix
+    std::vector<std::vector<long>> confusionMatrix(NUM_CLASSES, std::vector<long>(NUM_CLASSES, 0));
+
+    for (int actualClass = 0; actualClass < NUM_CLASSES; actualClass++) {
+        for (int pIdx = 0; pIdx < predictedLabels[actualClass].size(); pIdx++) {
+            int predictedClass = predictedLabels[actualClass][pIdx];
+            confusionMatrix[actualClass][predictedClass]++;
+        }
+    }
+
+    return confusionMatrix;
+}
+
+// returns amount of wrong class points which would fall into our HB bounds if we did include this point in the block.
+// doesn't change the block itself, just changes it hypothetically. we will call this the justin herbert algorithm.
+// same logic as the checking mergeable we implemented for the interval Hyper without cuda merging stuff, but returns the wrong count instead of just true or false.
+//  ───────────────────────────────────────────────────────────────
+//  Evaluate the accuracy of HyperBlock `hb` if we enlarged it just
+//  enough to include the unclassified point whose per‑column index
+//  is given in insertIdx
+//  ───────────────────────────────────────────────────────────────
+float Knn::mergeCheck(std::vector<int> &insertIdx, HyperBlock &hb, std::vector<std::vector<DataATTR>> &columns) {
+    const int D = columns.size();
+
+    // 1.  Make a local copy of bounds and enlarge with the new point.
+    std::vector<std::pair<int,int>> bounds = hb.topBottomPairs;
+    for (int d = 0; d < D; ++d) {
+        bounds[d].first  = std::min(bounds[d].first,  insertIdx[d]);
+        bounds[d].second = std::max(bounds[d].second, insertIdx[d]);
+    }
+
+    // 2.  Choose the attribute with the SMALLEST interval → fewest candidates.
+    int pivot = 0;
+    std::size_t span = std::numeric_limits<std::size_t>::max();
+    for (int d = 0; d < D; ++d) {
+        std::size_t cur = bounds[d].second - bounds[d].first + 1;
+        if (cur < span) { span = cur; pivot = d; }
+    }
+
+    std::size_t wrong = 0;
+
+    // 3.  Scan candidate rows in the pivot column only.
+    const auto& col = columns[pivot];
+    for (int idx = bounds[pivot].first; idx <= bounds[pivot].second; ++idx) {
+        const DataATTR& attr = col[idx];
+
+        // Skip rows that already belong to the block’s class.
+        if (attr.classNum == hb.classNum) continue;
+
+        // Check every other dimension quickly; bail on first failure.
+        bool inside = true;
+        int row = attr.classIndex;
+        for (int d = 0; d < D; ++d) {
+
+            if (d == pivot)
+                continue;
+
+            float v = columns[d][row].value;
+            bool ok = false;
+            const auto& mins = hb.minimums[d];
+            const auto& maxs = hb.maximums[d];
+
+            for (std::size_t c = 0; c < mins.size(); ++c) {
+                if (v >= mins[c] && v <= maxs[c]) {
+                    ok = true;
+                    break;
+                }
+            }
+
+            // new point might have extended the bound
+            if (!ok && v >= columns[d][insertIdx[d]].value && v <= columns[d][insertIdx[d]].value) ok = true;
+
+            if (!ok) {
+                inside = false;
+                break;
+            }
+        }
+
+        if (inside) ++wrong;
+    }
+
+    // 4.  Accuracy if we accept the point (+1 correct) and wrong extras.
+    return float(hb.size + 1) / float(hb.size + 1 + wrong);
+}

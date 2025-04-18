@@ -5,7 +5,7 @@
 // best threshold through some very basic testing was about 1.5% for removing useless blocks.
 #define REMOVE_BY_PERCENTAGE false
 #define REMOVAL_PERCENTAGE 0.01f
-#define REMOVAL_COUNT 3
+#define REMOVAL_COUNT 7
 
 // runs our three kernel functions which remove useless blocks.
 void Simplifications::removeUselessBlocks(std::vector<std::vector<std::vector<float>>> &data, std::vector<HyperBlock>& hyper_blocks) {

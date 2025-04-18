@@ -17,10 +17,8 @@
 // distance to the sum. If the value is outside the bounds we will add the distance to the sum.
 std::vector<std::vector<long>> Knn::closeToInkNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES){
     // Basically we will do the same thing, we will just need to change our distancce thingy around.
-
     int FIELD_LENGTH = hyperBlocks[0].maximums.size();
-    std::cout << "Field Length: " << FIELD_LENGTH << std::endl;
-    if(k > hyperBlocks.size()) k = (int) sqrt(hyperBlocks.size());
+    if (k > hyperBlocks.size()) k = (int)sqrt(hyperBlocks.size());
 
     // Keep track of assignments with something
     std::vector<std::vector<float>> classifications(NUM_CLASSES);    // [class][pointIndex]
@@ -28,43 +26,64 @@ std::vector<std::vector<long>> Knn::closeToInkNN(std::vector<std::vector<std::ve
       classifications[i] = std::vector<float>(unclassifiedData[i].size());    // Put the std::vector for each class
     }
 
-    #pragma omp parallel for
-    for(int i = 0; i < NUM_CLASSES; i++){
-        #pragma omp parallel for
-        // For each point in unclassified points
-        for(int point = 0; point < unclassifiedData[i].size(); point++){
-            // Use a priority queue to keep track of the top k best distances
+    std::vector<std::vector<std::vector<std::vector<float>>>> misclassifiedPoints(hyperBlocks.size(), std::vector<std::vector<std::vector<float>>>(NUM_CLASSES));
+    std::vector<int> blockWrongs(hyperBlocks.size(), 0);
+
+    for (int i = 0; i < NUM_CLASSES; i++) {
+        for (int point = 0; point < unclassifiedData[i].size(); point++) {
             std::priority_queue<std::pair<float, int>> kNearest;
 
-            // Go through all the blocks and find the disstances to their centers
-            for(const HyperBlock& hyperBlock : hyperBlocks){
-                // Find the distance between the HB center and the unclassified data point
-                
-                float distance =  hyperBlock.distance_to_HB_Avg(FIELD_LENGTH, unclassifiedData[i][point].data());
+            for (int hb = 0; hb < hyperBlocks.size(); hb++) {
+                float distance = hyperBlocks[hb].distance_to_HB_Avg(FIELD_LENGTH, unclassifiedData[i][point].data());
 
-                if(kNearest.size() < k){    // always add when queue is not at k yet.
-                    kNearest.push(std::make_pair(distance, hyperBlock.classNum));
-                }
-                else if(distance < kNearest.top().first){ // Queue is big enough, and this distance is better than the worst in queue
-                    kNearest.pop();    // pop the max (worst distance)
-                    kNearest.push(std::make_pair(distance, hyperBlock.classNum));    // push the better distance.
+                if (kNearest.size() < k) {
+                    kNearest.push({distance, hb});
+                } else if (distance < kNearest.top().first) {
+                    kNearest.pop();
+                    kNearest.push({distance, hb});
                 }
             }
+			std::vector<int> votes(NUM_CLASSES, 0);
+			std::vector<int> contributingBlocks;
+			std::priority_queue<std::pair<float, int>> kNearestCopy = kNearest;
 
-           std::vector<float> weightedVotes(NUM_CLASSES, 0.0);
-		   while(!kNearest.empty()){
-				float dist = kNearest.top().first;
-    			int cls = kNearest.top().second;
-   				kNearest.pop();
+			// Repeat until we break the tie or run out of neighbors
+			while (!kNearestCopy.empty()) {
+    		// Reset votes and contributingBlocks
+    		std::fill(votes.begin(), votes.end(), 0);
+    		contributingBlocks.clear();
 
-   				 float weight = (dist == 0) ? 1.0 : (1.0 / pow(dist, 2));  // Inverse squared weight
-    			weightedVotes[cls] += weight;
-			}
+    		// Make a temp copy to iterate current kNearestCopy
+    		std::priority_queue<std::pair<float, int>> tempCopy = kNearestCopy;
 
-			// Assign the class with the highest weighted vote
-			int majorityClass = std::distance(weightedVotes.begin(), std::max_element(weightedVotes.begin(), weightedVotes.end()));
+    	while (!tempCopy.empty()) {
+        	int hbIndex = tempCopy.top().second;
+        	int cls = hyperBlocks[hbIndex].classNum;
+        	votes[cls]++;
+        	contributingBlocks.push_back(hbIndex);
+        	tempCopy.pop();
+    	}
 
-            classifications[i][point] = majorityClass;
+    	// Check for tie
+    	int maxVotes = *std::max_element(votes.begin(), votes.end());
+    	int numMax = std::count(votes.begin(), votes.end(), maxVotes);
+
+   		if (numMax == 1) break; // Single winner, exit loop
+
+    	// Tie exists -> remove the farthest block and try again
+    	kNearestCopy.pop();
+	}
+
+	// Determine the final classification
+	int majorityClass = std::distance(votes.begin(), std::max_element(votes.begin(), votes.end()));
+	classifications[i][point] = majorityClass;
+
+            if (majorityClass != i && !contributingBlocks.empty()) {
+                // Track the first block in the list as the primary contributor
+                int mainBlame = contributingBlocks[0];
+                blockWrongs[mainBlame]++;
+                misclassifiedPoints[mainBlame][i].push_back(unclassifiedData[i][point]);
+            }
         }
     }
 
@@ -81,10 +100,80 @@ std::vector<std::vector<long>> Knn::closeToInkNN(std::vector<std::vector<std::ve
 }
 
 
+
 ////
 ////
 ////
 std::vector<std::vector<long>> Knn::closestBlock(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int NUM_CLASSES){
+
+std::vector<std::vector<long>> Knn::mostAttributesInKnn(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES){
+
+    if(k > hyperBlocks.size()) k = (int) sqrt(hyperBlocks.size());
+    int FIELD_LENGTH = hyperBlocks[0].maximums.size();
+
+    std::vector<std::vector<float>> classifications(NUM_CLASSES);    // [class][pointIndex]
+    for(int i = 0; i < NUM_CLASSES; i++){
+      classifications[i] = std::vector<float>(unclassifiedData[i].size());    // Put the std::vector for each class
+    }
+
+    // Now we want to run the K-nn on the unclassified points
+     // For each class of points
+    for(int i = 0; i < NUM_CLASSES; i++){
+
+        // For each point in unclassified points
+        for(int uPoint = 0; uPoint < unclassifiedData[i].size(); uPoint++){
+            // Use a priority queue to keep track of the top k best distances
+            std::priority_queue<std::pair<int, int>> kNearest;
+
+            for (int hb = 0; hb < hyperBlocks.size(); hb++) {
+                int attrsOutside = FIELD_LENGTH - hyperBlocks[hb].inside_N_Bounds(unclassifiedData[i][uPoint].size(), unclassifiedData[i][uPoint].data());
+
+                if (kNearest.size() < k) {
+                    kNearest.push({attrsOutside, hb});
+                } else if (attrsOutside < kNearest.top().first) {
+                    kNearest.pop();
+                    kNearest.push({attrsOutside, hb});
+                }
+            }
+
+            // Tally up class votes
+            std::vector<int> votes(NUM_CLASSES, 0);
+            while (!kNearest.empty()) {
+                int predictedClass = hyperBlocks[kNearest.top().second].classNum;
+                votes[predictedClass]++;
+                kNearest.pop();
+            }
+
+            // Determine majority vote
+            int majorityClass = -1;
+            int maxVotes = -1;
+            for (int c = 0; c < NUM_CLASSES; ++c) {
+                if (votes[c] > maxVotes) {
+                    maxVotes = votes[c];
+                    majorityClass = c;
+                }
+            }
+
+            // WE WILL ASSUME WE DONT HAVE A ID COLUMN.
+            classifications[i][uPoint] = majorityClass;
+        }
+    }
+
+    std::vector<std::vector<long>> regularConfusionMatrix(NUM_CLASSES, std::vector<long>(NUM_CLASSES, 0));
+
+    // Go through the classes.
+    for(int classN = 0; classN < NUM_CLASSES; classN++){
+        for(int point = 0; point < classifications[classN].size(); point++)
+            regularConfusionMatrix[classN][classifications[classN][point]]++;
+    }
+
+    return regularConfusionMatrix;
+
+}
+
+
+
+
 
 
     int FIELD_LENGTH = hyperBlocks[0].maximums.size();
@@ -254,6 +343,73 @@ std::vector<std::vector<long>> Knn::blockPointkNN(std::vector<std::vector<std::v
     return regularConfusionMatrix;
 }
 
+std::vector<std::vector<long>> Knn::pureKnn(
+    std::vector<std::vector<std::vector<float>>> unclassifiedData,
+    std::vector<std::vector<std::vector<float>>> classifiedData,
+    int k, int NUM_CLASSES) {
+
+    int FIELD_LENGTH = classifiedData[0][0].size();
+
+    // This will hold the predicted class for each unclassified point
+    std::vector<std::vector<int>> classifications(NUM_CLASSES); // [trueClass][pointIndex]
+    for (int i = 0; i < NUM_CLASSES; i++) {
+        classifications[i] = std::vector<int>(unclassifiedData[i].size(), -1);
+    }
+
+    // For each unclassified point
+    for (int trueClass = 0; trueClass < NUM_CLASSES; ++trueClass) {
+        for (int u = 0; u < unclassifiedData[trueClass].size(); ++u) {
+
+            std::priority_queue<std::pair<float, int>> kNearest; // {distance, classLabel}
+
+            // Compare to all classified points
+            for (int cClass = 0; cClass < NUM_CLASSES; ++cClass) {
+                for (int c = 0; c < classifiedData[cClass].size(); ++c) {
+                    float distance = Knn::euclideanDistancePoints(
+                        unclassifiedData[trueClass][u], classifiedData[cClass][c], FIELD_LENGTH);
+
+                    if (kNearest.size() < k) {
+                        kNearest.push({distance, cClass});
+                    } else if (distance < kNearest.top().first) {
+                        kNearest.pop();
+                        kNearest.push({distance, cClass});
+                    }
+                }
+            }
+
+            // Tally up class votes
+            std::vector<int> votes(NUM_CLASSES, 0);
+            while (!kNearest.empty()) {
+                int predictedClass = kNearest.top().second;
+                votes[predictedClass]++;
+                kNearest.pop();
+            }
+
+            // Determine majority vote
+            int majorityClass = -1;
+            int maxVotes = -1;
+            for (int c = 0; c < NUM_CLASSES; ++c) {
+                if (votes[c] > maxVotes) {
+                    maxVotes = votes[c];
+                    majorityClass = c;
+                }
+            }
+
+            classifications[trueClass][u] = majorityClass;
+        }
+    }
+
+    // Build confusion matrix
+    std::vector<std::vector<long>> confusionMatrix(NUM_CLASSES, std::vector<long>(NUM_CLASSES, 0));
+    for (int trueClass = 0; trueClass < NUM_CLASSES; ++trueClass) {
+        for (int p = 0; p < classifications[trueClass].size(); ++p) {
+            int predictedClass = classifications[trueClass][p];
+            confusionMatrix[trueClass][predictedClass]++;
+        }
+    }
+
+    return confusionMatrix;
+}
 
 
 /**

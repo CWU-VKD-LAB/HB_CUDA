@@ -3,11 +3,13 @@
 //
 
 #include "IntervalHyperBlock.h"
-
+#include <algorithm>
 using namespace std;
 
-#define EPSILON 0.000001
-// comparing float helper function.
+
+#define EPSILON 1e-6
+// comparing float helper
+
 static bool closeEnough(float a, float b) {
     return abs(a - b) < EPSILON;
 }
@@ -113,21 +115,19 @@ void IntervalHyperBlock::intervalHyperWorker(vector<vector<DataATTR>> &attribute
 
     // we run this loop of finding, wait, marking, wait until the supervisor sends us the STOP signal, meaning that there were no good intervals anywhere.
     while (true){
-
         Interval emptyInterval(-1,-1,-1,-1,-1);
         // set with empty, and if we DO find a good one we obviously replace
         threadBestInterval = emptyInterval;
 
         // run through all columns, with a stride of number of threads.
         for (int column = threadID; column < attributeColumns.size(); column += threadCount) {
-
             int n = (int)attributeColumns[column].size();
 
             // if we have already found there are no good intervals to make with this column, we can skip.
             if (doneColumns[column]) {
                 continue;
             }
-
+          
             Interval columnBestInterval = emptyInterval;
             int currentStart = 0;
             while (currentStart < n) {
@@ -241,7 +241,9 @@ void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &
     }
 
     // get our number of workers and set up our vector of intervals for them to populate.
-    int numWorkers = min(thread::hardware_concurrency(), (int)dataByAttribute.size());
+    int numWorkers = fmin(thread::hardware_concurrency(), (int)dataByAttribute.size());
+    numWorkers = 1;
+    cout << "Number of workers: " << numWorkers << endl;
     Interval initializer{-1, -1, -1, -1, -1};
     vector<Interval> bestIntervals(numWorkers, initializer);
 
@@ -264,8 +266,8 @@ void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &
             intervalHyperWorker,
             ref(dataByAttribute),          // pass dataByAttribute by reference
             ref(bestIntervals[i]),         // pass each Interval by reference
-          i,                            // threadID
-          numWorkers,                   // threadCount
+          	i,                            // threadID
+          	numWorkers,                   // threadCount
             ref(readyThreads),             // pass atomic<int> by reference
             &currentPhase,                    // pass address of currentPhase (char*)
             ref(usedPoints),              // pass usedPoints by reference
@@ -291,10 +293,14 @@ void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &
         Interval bestInterval(initializer);
         for (auto interval : bestIntervals) {
             // if this one is better just copy it
+            cout << "Best size supervisor: " << interval.size << endl;
             if (interval.size > bestInterval.size && interval.size > 1) {
                 bestInterval = interval;
             }
         }
+
+
+
 
         // fill that interval through all of bestIntervals
         for (int i = 0; i < numWorkers; i++) {
@@ -402,11 +408,14 @@ void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &
         HyperBlock h(maxes, mins, classNum);
         hyperBlocks.push_back(h);
     }
+
+    cout << "Made it to the end" << endl;
 }
 
 // use with the regular interval hyper below. Used with openMP or futures to launch a thread to get longest attribute, but it is inefficient because you make a kill so many threads.
 Interval IntervalHyperBlock::longestInterval(vector<DataATTR> &dataByAttribute, int attribute)
 {
+    cout << "Attribute ran on: " << attribute << endl;
     Interval bestInterval(-1, -1, -1, attribute, -1);
     int n = static_cast<int>(dataByAttribute.size());
     int currentStart = 0;

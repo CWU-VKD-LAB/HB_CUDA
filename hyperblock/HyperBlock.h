@@ -3,7 +3,10 @@
 
 #include <vector>
 #include <cmath>
+#include <limits>
+#include <iostream>
 #include <utility>
+
 class HyperBlock {
 private:
 public:
@@ -11,6 +14,9 @@ public:
     std::vector<std::vector<float>> minimums;
     int classNum;
     int size;
+
+    // This will hold the indices of which points are in the block [classIdx][pointIdx]
+    std::vector<std::vector<int>> pointIndices;
 
     std::vector<float> avgPoint;
 
@@ -26,6 +32,7 @@ public:
 
     bool inside_HB(int numAttributes, const float* point);
     void find_avg_and_size(const std::vector<std::vector<std::vector<float>>>& data);
+    int inside_N_Bounds(int numAttributes, const float* point);
 
 };
 

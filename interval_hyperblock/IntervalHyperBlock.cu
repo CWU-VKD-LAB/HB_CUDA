@@ -16,7 +16,7 @@ static bool closeEnough(float a, float b) {
 
 // helper function. checks if there are any of the exact same value that our current start of an interval has, of the wrong class behind it
 // basically tells us whether or not an index is a valid place we can start an interval from
-static bool checkBackwards(vector<DataATTR> &dataByAttribute, int currentStart) {
+static bool checkValidStart(vector<DataATTR> &dataByAttribute, int currentStart) {
     //------------------------------------------------------------------
     // 2) BACKWARD CHECK for mismatch among same-value items
     //------------------------------------------------------------------
@@ -46,7 +46,6 @@ static pair<int, int> checkForwards(vector<DataATTR> &dataByAttribute, int curre
     int end = currentStart;
 
     int notUsedYetPoints = 0;
-    // 1) Move 'end' forward as long as it's the same classNum == targetClass.
     while (end + 1 < n && dataByAttribute[end + 1].classNum == targetClass) {
 
         // we need to return how many points we are using for the first time. This a better indicator of size for an interval.
@@ -55,7 +54,6 @@ static pair<int, int> checkForwards(vector<DataATTR> &dataByAttribute, int curre
             notUsedYetPoints++;
         end++;
     }
-    // Now 'end' is the last contiguous index in the same class.
 
     // 2) If the next item (end+1) is still in range and:
     //    - has the SAME-ISH as dataByAttribute[end],
@@ -83,7 +81,6 @@ static pair<int, int> checkForwards(vector<DataATTR> &dataByAttribute, int curre
         }
     }
 
-    // 3) Prevent going below the start (in case we had to trim).
     if (end < currentStart) {
         // means the conflict happened right away,
         // so the valid interval is effectively just "start" itself or empty.
@@ -91,6 +88,88 @@ static pair<int, int> checkForwards(vector<DataATTR> &dataByAttribute, int curre
     }
 
     return {end, notUsedYetPoints};
+}
+
+static pair <int, int> checkBackwards(vector<DataATTR> &dataByAttribute, int currentStart, int targetClass) {
+
+    if (!checkValidStart(dataByAttribute, currentStart)) {
+        return {currentStart, 0};
+    }
+
+    // extend down while we legally can
+    int beg = currentStart;
+    int freshPoints = 0;
+    while (beg - 1 >= 0 && checkValidStart(dataByAttribute, beg - 1)) {
+        if (!dataByAttribute[beg-1].used)
+            ++freshPoints;
+        --beg;
+    }
+
+    // no trimming step here – if we ever hit a conflict, we’d have caught it in step 0
+    return { beg, freshPoints };
+}
+
+// generate a HB from each seed case, we simply make a block of the pure attribute around each attribute of each case.
+// so we would generate a block from each case, and then we end up merging them all.
+// Assumes ‑std=c++17 and OpenMP enabled (‑fopenmp / /openmp)
+void IntervalHyperBlock::pureBlockIntervalHyper(vector<vector<DataATTR>> &dataByAttribute, vector<vector<vector<float>>> &trainingData,vector<HyperBlock> &hyperBlocks,int COMMAND_LINE_ARGS_CLASS) {
+    const int FIELD_LENGTH = dataByAttribute.size();
+    bool doOneClass = (COMMAND_LINE_ARGS_CLASS != -1);
+
+    for (int classification = 0; classification < trainingData.size(); classification++) {
+
+        if (doOneClass && classification != COMMAND_LINE_ARGS_CLASS)
+            continue;
+
+        // go through each point
+        #pragma omp parallel for schedule(static)
+        for (int point = 0; point < trainingData[classification].size(); ++point) {
+            /* 2 · containers to remember where the seed sits in every column   */
+            vector<int> attrPos (FIELD_LENGTH, -1);   // index inside column
+            vector<float> lower (FIELD_LENGTH);       // placeholder for bounds
+            vector<float> upper (FIELD_LENGTH);
+
+            /* 3 · binary‑search each attribute column ------------------------*/
+            for (int d = 0; d < FIELD_LENGTH; ++d) {
+
+                const float seedVal = trainingData[classification][point][d];
+                auto &column = dataByAttribute[d];
+
+                /* lower_bound on value (columns already sorted by value) */
+                auto it = lower_bound(column.begin(), column.end(), seedVal, [](const DataATTR &a, float v){ return a.value < v; });
+
+                /* Walk forward over duplicates until we match classNum & classIndex */
+                while (it != column.end() && it->value != seedVal && !(it->classIndex == point && it->classNum == classification)) {
+                    ++it;
+                }
+
+                // track where we are in each column
+                attrPos[d] = static_cast<int>(distance(column.begin(), it));
+
+                // now our checking up and down
+                int upperIndex = checkForwards(column, attrPos[d], classification).first;
+
+                int lowerIndex = checkBackwards(column, attrPos[d], classification).first;
+
+                // set up our bounds with the values of furthest we can expand in each attribute
+                lower[d] = column[lowerIndex].value;
+                upper[d] = column[upperIndex].value;
+            }
+
+            // make a block out of the bounds we have just found
+            vector<vector<float>> maxes(dataByAttribute.size(), vector<float>(1, -numeric_limits<float>::infinity()));
+            vector<vector<float>> mins(dataByAttribute.size(), vector<float>(1, numeric_limits<float>::infinity()));
+            for (int attribute = 0; attribute < FIELD_LENGTH; attribute++) {
+                mins[attribute][0] = lower[attribute];
+                maxes[attribute][0] = upper[attribute];
+            }
+
+            HyperBlock block(maxes, mins, classification);
+
+            #pragma omp critical
+            hyperBlocks.emplace_back(move(block));
+        }
+    }
 }
 
 #define STOP 2
@@ -103,7 +182,6 @@ static pair<int, int> checkForwards(vector<DataATTR> &dataByAttribute, int curre
 mutex mtx;
 condition_variable supervisorReady; // used to signal all the workers when they can work
 condition_variable workersReady;    // used to signal boss man that we need more work
-
 // worker function. we spawn a bunch of threads, who come here and find longest intervals in each attribute. rather than returning, they simply wait here until the supervisor
 // has determined which is longest. then the threads mark all guys belonging to the longest interval, and we find the next longest interval.
 // the worker finds best interval he has, then put it into threadBestInterval. this is an array of intervals for the supervisor to run through. the supervisor just populates this array with the interval which is best
@@ -142,7 +220,7 @@ void IntervalHyperBlock::intervalHyperWorker(vector<vector<DataATTR>> &attribute
 
                 // checking backwards to make sure we don't have the same value, class mismatch issue.
                 // if we do have that issue, we are just going to try the next one.
-                if (!checkBackwards(attributeColumns[column], currentStart)) {
+                if (!checkValidStart(attributeColumns[column], currentStart)) {
                     currentStart++;
                     continue;
                 }
@@ -437,7 +515,7 @@ Interval IntervalHyperBlock::longestInterval(vector<DataATTR> &dataByAttribute, 
 
         // if our back check failed, that means there is a matching value behind us, from the wrong class.
         // this means we have to just move on as an interval of ONE no matter what. we aren't using intervals of one, so just continue
-        if (!checkBackwards(dataByAttribute, currentStart)) {
+        if (!checkValidStart(dataByAttribute, currentStart)) {
             // move one and carry on
             currentStart++;
             continue;
@@ -686,13 +764,17 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
 
     // the two functions use almost identical logic, except that one uses a supervisor thread and workers, instead of
     // constantly launching and killing threads each iteration. Supervisor version works better on any machine except cwu cluster.
+
     // intervalHyper(data, dataByAttribute, hyperBlocks);
-    intervalHyperSupervisor(data, dataByAttribute, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
+    // intervalHyperSupervisor(data, dataByAttribute, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
+    pureBlockIntervalHyper(dataByAttribute, data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
+
     cout << "Num blocks after interval: " << hyperBlocks.size() << endl;
     cout << "STARTING MERGING" << endl;
     try{
         merger_cuda(data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
-        //mergerNotInCuda(data, hyperBlocks, dataByAttribute);
+        // dataByAttribute = separateByAttribute(data, FIELD_LENGTH);
+        // mergerNotInCuda(data, hyperBlocks, dataByAttribute);
     } catch (exception e){
         cout << "Error in generateHBs: merger_cuda" << endl;
         cout << e.what() << endl;

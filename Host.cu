@@ -679,6 +679,7 @@ void runInteractive() {
                 }
 
                 findBestParameters(trainingData, maxRemoval, maxK);
+                PrintingUtil::waitForEnter();
                 break;
             }
             case 11: {

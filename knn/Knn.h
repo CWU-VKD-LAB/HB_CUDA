@@ -14,6 +14,8 @@
 
 class Knn {
     public:
+
+       static int K;
        static float euclideanDistanceBounds(const std::vector<std::vector<float>>& blockBound, const std::vector<float>& point, int FIELD_LENGTH);
        static std::vector<std::vector<long>> kNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES);
        static float euclideanDistancePoints(const std::vector<float>& point2, const std::vector<float>& point, int FIELD_LENGTH);
@@ -24,7 +26,5 @@ class Knn {
        static float mergeCheck(std::vector<int> &insertIdx, HyperBlock &h, std::vector<std::vector<DataATTR>> &dataByAttribute);
        static std::vector<std::vector<long>> pureKnn(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<std::vector<std::vector<float>>> classifiedData, int k, int NUM_CLASSES);
 };
-
-
 
 #endif //KNN_H

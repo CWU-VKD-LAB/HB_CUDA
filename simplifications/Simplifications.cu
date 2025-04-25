@@ -2,10 +2,7 @@
 // Created by asnyd on 3/20/2025.
 //
 #include "Simplifications.h"
-// best threshold through some very basic testing was about 1.5% for removing useless blocks.
-#define REMOVE_BY_PERCENTAGE false
-#define REMOVAL_PERCENTAGE 0.01f
-#define REMOVAL_COUNT 2
+int Simplifications::REMOVAL_COUNT = 0;
 
 // runs our three kernel functions which remove useless blocks.
 void Simplifications::removeUselessBlocks(std::vector<std::vector<std::vector<float>>> &data, std::vector<HyperBlock>& hyper_blocks) {
@@ -102,20 +99,12 @@ void Simplifications::removeUselessBlocks(std::vector<std::vector<std::vector<fl
     cudaFree((void *)d_dataPointBlocks);
     cudaFree((void *)d_numPointsInBlocks);
 
-#if REMOVE_BY_PERCENTAGE
-    // Remove hyperblocks that less than percentage * dataset size unique points.
-    for (int i = numPointsInBlocks.size() - 1; i >= 0; i--) {
-        if (numPointsInBlocks[i] <= ceil(REMOVAL_PERCENTAGE * datasetSize))
-            hyper_blocks.erase(hyper_blocks.begin() + i);
-    }
-#else
     // Remove blocks with less than our count of unique points
     // unique points refers to the amount of points which are classified uniquely by this particular block.
     for (int i = numPointsInBlocks.size() - 1; i >= 0; i--) {
         if (numPointsInBlocks[i] <= REMOVAL_COUNT)
             hyper_blocks.erase(hyper_blocks.begin() + i);
     }
-#endif
 }
 
 void Simplifications::removeUselessAttr(std::vector<HyperBlock>& hyper_blocks, std::vector<std::vector<std::vector<float>>>& data, std::vector<std::vector<int>>& attributeOrderings) {

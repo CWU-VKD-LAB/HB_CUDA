@@ -799,17 +799,21 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
     cout << "STARTING INTERVAL HYPER" << endl;
     // make our interval based blocks
 
-    // the two functions use almost identical logic, except that one uses a supervisor thread and workers, instead of
+    // these two functions use almost identical logic, except that one uses a supervisor thread and workers, instead of
     // constantly launching and killing threads each iteration. Supervisor version works better on any machine except cwu cluster.
-
     // intervalHyper(data, dataByAttribute, hyperBlocks);
     // intervalHyperSupervisor(data, dataByAttribute, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
+
+    // makes blocks by finding pure area surrounding a point of correct class, slightly different than usual way where we take the longest interval, and use those points to find our bounds in each attribute.
     pureBlockIntervalHyper(dataByAttribute, data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
 
     cout << "Num blocks after interval: " << hyperBlocks.size() << endl;
     cout << "STARTING MERGING" << endl;
     try{
         merger_cuda(data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
+
+        // not in cuda is a more efficient algorithm, but is slower because its not on GPU.
+        // if we run into more time challenges, our lives may be simpler if we revisit the merger cuda function.
         // dataByAttribute = separateByAttribute(data, FIELD_LENGTH);
         // mergerNotInCuda(data, hyperBlocks, dataByAttribute);
     } catch (exception e){

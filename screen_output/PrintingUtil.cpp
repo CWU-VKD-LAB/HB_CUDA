@@ -38,8 +38,9 @@ void PrintingUtil::displayMainMenu() {
     std::cout << "7. Simplify hyperblocks.\n";
     std::cout << "8. Test hyperblocks on dataset.\n";
     std::cout << "9. K Fold Cross Validation.\n";
+    std::cout << "10. Find Best Parameters\n\n";
     std::cout << std::endl;
-    std::cout << "10. Exit\n\n";
+    std::cout << "11. Exit\n\n";
 }
 
 float PrintingUtil::printConfusionMatrix(std::vector<std::vector<long>>& data, const int NUM_CLASSES, std::map<int, std::string>& CLASS_MAP_INT) {

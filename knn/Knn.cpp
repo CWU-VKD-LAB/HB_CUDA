@@ -78,8 +78,6 @@ std::vector<std::vector<long>> Knn::closeToInkNN(std::vector<std::vector<std::ve
     return regularConfusionMatrix;
 }
 
-
-
 ////
 ////
 ////
@@ -253,10 +251,7 @@ std::vector<std::vector<long>> Knn::blockPointkNN(std::vector<std::vector<std::v
     return regularConfusionMatrix;
 }
 
-std::vector<std::vector<long>> Knn::pureKnn(
-    std::vector<std::vector<std::vector<float>>> unclassifiedData,
-    std::vector<std::vector<std::vector<float>>> classifiedData,
-    int k, int NUM_CLASSES) {
+std::vector<std::vector<long>> Knn::pureKnn(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<std::vector<std::vector<float>>> classifiedData, int NUM_CLASSES, int k = Knn::K) {
 
     int FIELD_LENGTH = classifiedData[0][0].size();
 

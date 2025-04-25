@@ -47,7 +47,7 @@ map<int, string> CLASS_MAP_TESTING_INT;
 * We generate a confusion matrix, but allow for points to fall into multiple blocks at a time
 * that is why we go through blocks on outerloop and whole dataset on the inside.
 */
-float testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vector<std::vector<std::vector<float>>> &testSet, std::vector<std::vector<std::vector<float>>> &trainingSet){
+float testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vector<std::vector<std::vector<float>>> &testSet, std::vector<std::vector<std::vector<float>>> &trainingSet, int k = 3){
 
   	// Keep track of which points were never inside of a block, when a point is classifed we increment the map internal vectors correct positon
     // there should be CLASS_NUM unordered_maps or just hashmaps, in each will hold a vector<point_index, vector<int> of len(class_num)>
@@ -158,12 +158,11 @@ float testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vecto
     std::cout << "\n\n\n\n" << std::endl;
     std::cout << "============================ K-NN CONFUSION MATRIX ==================" << std::endl;
 
-    // int k = 3;
     // std::vector<std::vector<long>> secondConfusionMatrix = Knn::closeToInkNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
     // std::vector<std::vector<long>> secondConfusionMatrix = Knn::closestBlock(unclassifiedPointVec, hyperBlocks, NUM_CLASSES);
     // std::vector<std::vector<long>> secondConfusionMatrix = Knn::kNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
     // std::vector<std::vector<long>> secondConfusionMatrix = Knn::mergableKNN(unclassifiedPointVec, trainingSet, hyperBlocks, NUM_CLASSES);
-    std::vector<std::vector<long>> secondConfusionMatrix = Knn::pureKnn(unclassifiedPointVec, trainingSet, 3, NUM_CLASSES);
+    std::vector<std::vector<long>> secondConfusionMatrix = Knn::pureKnn(unclassifiedPointVec, trainingSet, NUM_CLASSES, k);
     PrintingUtil::printConfusionMatrix(secondConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
     cout << "============================ END K-NN MATRIX ======================" << endl;
 
@@ -221,29 +220,35 @@ void computeLDAOrdering(const vector<vector<vector<float>>>& trainingData, vecto
     }
 }
 
-void runKFold(vector<vector<vector<float>>> &dataset) {
+vector<float> runKFold(vector<vector<vector<float>>> &dataset,  bool takeUserInput = false, int removalCount = 0, int nearestNeighborK = 3) {
+
     if (dataset.empty()) {
         cout << "Please enter a training dataset before using K Fold validation" << endl;
-        return;
+        return {-1, -1, -1};
     }
 
-    cout << "Please Enter a K value:\t";
     int k;
-    cin >> k;
+    // if we're taking input run it like normal. using this variable lets us just do it this way.
+    if (takeUserInput) {
+        cout << "Please Enter a K value:\t";
+        cin >> k;
 
-    // Clear the newline from the input buffer.
-    cin.ignore(numeric_limits<streamsize>::max(), '\n');
-
-    if (cin.fail() || k < 2) {
-        cout << "Error: Invalid input. Please enter a valid integer greater than 1." << endl;
-        // Clear the error state and ignore any remaining input.
-        cin.clear();
+        // Clear the newline from the input buffer.
         cin.ignore(numeric_limits<streamsize>::max(), '\n');
-        return;
+
+        if (cin.fail() || k < 2) {
+            cout << "Error: Invalid input. Please enter a valid integer greater than 1." << endl;
+            // Clear the error state and ignore any remaining input.
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            return {-1, -1, -1};
+        }
     }
+    // if we're not using user input, we are testing for best accuracy and we can use 10.
+    else
+        k = 10;
 
     vector<vector<vector<vector<float>>>> kFolds = DataUtil::splitDataset(dataset, k);
-
     // stats trackers for cross folds.
     float acc = 0.0f;
     int blockCount = 0;
@@ -302,26 +307,48 @@ void runKFold(vector<vector<vector<float>>> &dataset) {
         int clauseCount = 0;
         for (const auto &hb : hyperBlocks) {
             for (int a = 0; a < FIELD_LENGTH; a++) {
-                if (hb.minimums[a][0] == 0.0f && hb.maximums[a][0] == 1.0f)
-                    continue;
-                else
+                if (hb.minimums[a][0] != 0.0f || hb.maximums[a][0] != 1.0f)
                     clauseCount++;
             }
         }
 
-
         acc += testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData);
         blockCount += hyperBlocks.size();
         cCount += clauseCount;
-
     } // end of one train/test loop
 
-    cout << "OVERALL ACCURACY " << float(acc) / float(k) << endl;
-    cout << "Average block count " << float(blockCount) / float (k) << endl;
-    cout << "Average clause count " << float(cCount) / float (k) << endl;
-    
+    float avgAcc = float (acc) / float(k);
+    float blockAvg = float(blockCount) / float(k);
+    float clauseAvg = float(cCount) / float(k);
+
+    cout << "OVERALL ACCURACY " << avgAcc << endl;
+    cout << "Average block count " << blockAvg << endl;
+    cout << "Average clause count " << clauseAvg << endl;
+
+    return {avgAcc, blockAvg, clauseAvg};
 }
 
+// function which is going to test brute force with different removing useless blocks thresholds and k values for KNN to determine best accuracy we can find across k fold validation with 10 folds.
+void findBestParameters(vector<vector<vector<float>>> &dataset, int maxRemovalCount, int maxK) {
+
+    if (dataset.empty()) {
+        cout << "Please enter a training dataset before testing parameters" << endl;
+        return;
+    }
+
+    vector<float> bestResults = {-1, -1, -1};
+    for (int removalCount = 0; removalCount < maxRemovalCount; removalCount++) {
+        cout << "TESTING WITH REMOVAL COUNT: " << removalCount << "------------------------------" << endl;
+
+        Simplifications::REMOVAL_COUNT = removalCount;
+        for (int k = 0; k < maxK; k++) {
+            vector<float> results = runKFold(dataset, false, removalCount, k);
+            if (results[0] > bestResults[0])
+                bestResults = results;
+        }
+    }
+    cout << "Best accuracy: " << bestResults[0] << "\nBlock Count Average w/best results: " << bestResults[1] << "\nClause Count Average: " << bestResults[2] << endl;
+}
 
 /**
 * This should print out/return something
@@ -616,11 +643,45 @@ void runInteractive() {
                 break;
             }
             case 9: {
-                runKFold(trainingData);
+                runKFold(trainingData, true);
                 PrintingUtil::waitForEnter();
                 break;
             }
             case 10: {
+
+                int maxRemoval;
+                int maxK;
+
+                cout << "Please enter a max threshold size to test our blocks with " << endl;
+                cin >> maxRemoval;
+                // Clear the newline from the input buffer.
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
+                if (cin.fail() || maxRemoval < 0) {
+                    cout << "Error: Invalid input. Please enter a valid integer greater than 1." << endl;
+                    // Clear the error state and ignore any remaining input.
+                    cin.clear();
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                    return;
+                }
+
+                cout << "Please enter a max K value to test our KNN with " << endl;
+                cin >> maxK;
+                // Clear the newline from the input buffer.
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
+                if (cin.fail() || maxK < 0) {
+                    cout << "Error: Invalid input. Please enter a valid integer greater than 1." << endl;
+                    // Clear the error state and ignore any remaining input.
+                    cin.clear();
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                    return;
+                }
+
+                findBestParameters(trainingData, maxRemoval, maxK);
+                break;
+            }
+            case 11: {
                 running = false;
                 break;
             }

@@ -162,8 +162,8 @@ float testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vecto
     // std::vector<std::vector<long>> secondConfusionMatrix = Knn::closeToInkNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
     // std::vector<std::vector<long>> secondConfusionMatrix = Knn::closestBlock(unclassifiedPointVec, hyperBlocks, NUM_CLASSES);
     // std::vector<std::vector<long>> secondConfusionMatrix = Knn::kNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
-    std::vector<std::vector<long>> secondConfusionMatrix = Knn::mergableKNN(unclassifiedPointVec, trainingSet, hyperBlocks, NUM_CLASSES);
-
+    // std::vector<std::vector<long>> secondConfusionMatrix = Knn::mergableKNN(unclassifiedPointVec, trainingSet, hyperBlocks, NUM_CLASSES);
+    std::vector<std::vector<long>> secondConfusionMatrix = Knn::pureKnn(unclassifiedPointVec, trainingSet, 3, NUM_CLASSES);
     PrintingUtil::printConfusionMatrix(secondConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
     cout << "============================ END K-NN MATRIX ======================" << endl;
 

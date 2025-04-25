@@ -170,6 +170,43 @@ void IntervalHyperBlock::pureBlockIntervalHyper(vector<vector<DataATTR>> &dataBy
             hyperBlocks.emplace_back(move(block));
         }
     }
+
+    // now we go through and for each block we just check if the block is all the way inside a previous block already, if so we are going to remove it.
+    // --- after you finish generating the blocks -------------------------------
+    const int nBlocks = hyperBlocks.size();
+    vector<char> keep(nBlocks, 1);      // we keep if true.
+
+    // mark redundant blocks in parallel
+    #pragma omp parallel for schedule(static)
+    for (int i = 1; i < nBlocks; ++i) {
+        const HyperBlock &small = hyperBlocks[i];
+        for (int j = 0; j <  i; ++j) {
+
+            const HyperBlock &big = hyperBlocks[j];
+            bool inside = true;
+            for (int d = 0; d < FIELD_LENGTH; ++d) {
+
+                if (big.maximums[d][0] < small.maximums[d][0] || big.minimums[d][0] > small.minimums[d][0]) {
+                    inside = false;
+                    break;
+                }
+            }
+            if (inside) {
+                keep[i] = 0;
+                break;
+            } // mark for deletion and stop early
+        }
+    }
+
+    int w = 0;
+    for (int r = 0; r < nBlocks; ++r)
+        if (keep[r]) {
+            if (w != r) // ← guard against self-move
+                hyperBlocks[w] = std::move(hyperBlocks[r]);
+            ++w;
+        }
+    hyperBlocks.erase(hyperBlocks.begin() + w, hyperBlocks.end());
+
 }
 
 #define STOP 2
@@ -794,15 +831,6 @@ void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allDat
         numPoints += classData.size();
     }
 
-    // Count blocks per class
-    vector<int> numBlocksOfEachClass(NUM_CLASSES, 0);
-    for (const auto& hb : hyperBlocks) {
-        numBlocksOfEachClass[hb.classNum]++;
-    }
-
-    vector<vector<HyperBlock>> inputBlocks(NUM_CLASSES);
-    vector<vector<HyperBlock>> resultingBlocks(NUM_CLASSES);
-
     int PADDED_LENGTH = ((FIELD_LENGTH + 3) / 4) * 4;
     // Find best occupancy
     int sharedMemSize = 2 * PADDED_LENGTH * sizeof(float);
@@ -820,8 +848,12 @@ void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allDat
          goToClass = COMMAND_LINE_ARGS_CLASS + 1;
     }
 
+    vector<vector<HyperBlock>> inputBlocks(NUM_CLASSES);
+    vector<vector<HyperBlock>> resultingBlocks(NUM_CLASSES);
+    vector<int> numBlocksOfEachClass(NUM_CLASSES, 0);
     for (HyperBlock& hyperBlock : hyperBlocks) {
         // store this block in the slot which corresponds to it's class.
+        numBlocksOfEachClass[hyperBlock.classNum]++;
         inputBlocks[hyperBlock.classNum].push_back(hyperBlock);
     }
 
@@ -836,12 +868,6 @@ void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allDat
         // Compute grid size to cover all HBs. we already know our ideal block size from before.
         int gridSize = ((numBlocksOfEachClass[classN]) + blockSize - 1) / blockSize;
 
-        #ifdef DEBUG
-        cout << "Grid size: " << gridSize << endl;
-        cout << "Block size: " << blockSize << endl;
-        cout << "Shared memory size: " << sharedMemSize << endl;
-        #endif
-
         int currentClassBlockLengthFlattened = inputBlocks[classN].size() * PADDED_LENGTH;
 
         // Allocate host memory
@@ -854,7 +880,7 @@ void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allDat
 
         // Fill hyperblock array
         for (int i = 0; i < inputBlocks[classN].size(); i++) {
-            HyperBlock h = inputBlocks[classN][i];
+            HyperBlock &h = inputBlocks[classN][i];
             for (int j = 0; j < FIELD_LENGTH; j++) {
                 hyperBlockMinsC[i * PADDED_LENGTH + j] = h.minimums[j][0];
                 hyperBlockMaxesC[i * PADDED_LENGTH + j] = h.maximums[j][0];

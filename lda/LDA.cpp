@@ -348,24 +348,49 @@ int predictClass(const std::vector<LDAClassifier>& classifiers, const std::vecto
 
 // testMultiClassAccuracy: loops over each sample in inputData (labeled by class),
 // predicts its class using predictClass, and computes overall accuracy.
-void testMultiClassAccuracy(const std::vector<LDAClassifier>& classifiers,
-                            const std::vector<std::vector<std::vector<float>>>& inputData) {
+std::vector<int> testMultiClassAccuracy(const std::vector<LDAClassifier>& classifiers,
+                                        const std::vector<std::vector<std::vector<float>>>& inputData) {
     int numClasses = inputData.size();
+    std::vector<int> correctPerClass(numClasses, 0);
+    std::vector<int> totalPerClass(numClasses, 0);
+    int totalCorrect = 0;
     int totalSamples = 0;
-    int correct = 0;
 
-    for (int i = 0; i < numClasses; i++) {
-        for (const auto &sample: inputData[i]) {
+    for (int i = 0; i < numClasses; ++i) {
+        for (const auto& sample : inputData[i]) {
             int predicted = predictClass(classifiers, sample);
             if (predicted == i) {
-                correct++;
+                ++correctPerClass[i];
+                ++totalCorrect;
             }
-            totalSamples++;
+            ++totalPerClass[i];
+            ++totalSamples;
         }
     }
 
-    float accuracy = static_cast<float>(correct) / totalSamples;
-    std::cout << "Overall multi-class accuracy: " << accuracy * 100.0f << "%" << std::endl;
+    // Compute per-class accuracy and associate with class index
+    std::vector<std::pair<int, float>> classAcc;
+    for (int i = 0; i < numClasses; ++i) {
+        float acc = totalPerClass[i] > 0 ? static_cast<float>(correctPerClass[i]) / totalPerClass[i] : 0.0f;
+        classAcc.push_back(std::make_pair(i, acc));
+    }
+
+    // Sort by descending accuracy
+    std::sort(classAcc.begin(), classAcc.end(),
+              [](const std::pair<int, float>& a, const std::pair<int, float>& b) {
+                  return a.second > b.second;
+              });
+
+    // Extract sorted class indices
+    std::vector<int> ordering;
+    for (const auto& pair : classAcc) {
+        ordering.push_back(pair.first);
+    }
+
+    for(int i = 0; i < ordering.size(); i++) {
+      std::cout << ordering[i] << " " << std::endl;
+    }
+    return ordering;
 }
 
 // --------------------------------------------------------------
@@ -378,7 +403,7 @@ void testMultiClassAccuracy(const std::vector<LDAClassifier>& classifiers,
  * Returns a vector of separation vectors (with optional arccos normalization),
  * one per class.
  */
-std::vector<std::vector<float>> linearDiscriminantAnalysis(const std::vector<std::vector<std::vector<float>>>& inputData) {
+std::pair<std::vector<std::vector<float>>, std::vector<int>> linearDiscriminantAnalysis(const std::vector<std::vector<std::vector<float>>>& inputData) {
     int numClasses = inputData.size();
     std::vector<LDAClassifier> classifiers(numClasses); // one classifier per class
 
@@ -426,7 +451,7 @@ std::vector<std::vector<float>> linearDiscriminantAnalysis(const std::vector<std
     }
 
     // Evaluate accuracy
-    testMultiClassAccuracy(classifiers, inputData);
+    std::vector<int> classOrder = testMultiClassAccuracy(classifiers, inputData);
 
-    return separationVectors;
+    return std::make_pair(separationVectors, classOrder);
 }

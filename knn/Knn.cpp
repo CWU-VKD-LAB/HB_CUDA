@@ -12,6 +12,9 @@
 #include <omp.h>
 #include <algorithm>
 
+
+constexpr float EPSILON = 1e-6f;
+
 // Lets make a K-nn that goes through the unclassified points and sees how close they are to being
 // inside of each of the blocks. If the value for a attribute is within the bounds of the block we wont add any
 // distance to the sum. If the value is outside the bounds we will add the distance to the sum.
@@ -100,8 +103,7 @@ std::vector<std::vector<long>> Knn::closeToInkNN(std::vector<std::vector<std::ve
 }
 
 
-
-////
+/*
 ////
 ////
 std::vector<std::vector<long>> Knn::closestBlock(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int NUM_CLASSES){
@@ -259,89 +261,9 @@ std::vector<std::vector<long>> Knn::mostAttributesInKnn(std::vector<std::vector<
 
     return regularConfusionMatrix;
 }
+*/
 
 
-std::vector<std::vector<long>> Knn::blockPointkNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<std::vector<std::vector<float>>> classifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES){
-    
-    if(k > hyperBlocks.size()) k = (int) sqrt(hyperBlocks.size());
-    int FIELD_LENGTH = hyperBlocks[0].maximums.size();
-
-    std::vector<std::vector<float>> classifications(NUM_CLASSES);    // [class][pointIndex]
-    for(int i = 0; i < NUM_CLASSES; i++){
-      classifications[i] = std::vector<float>(unclassifiedData[i].size());    // Put the std::vector for each class
-    }
-
-    // Go through all the classified data of each class and mark for each point EVERY BLOCK IT IS IN
-    std::unordered_map<int, std::vector<int>> pointsInBlocks;
-    for(int i = 0; i < NUM_CLASSES; i++){
-        for(int p = 0; p < classifiedData[i].size(); p++){
-            for(int block = 0; block < hyperBlocks.size(); block++){
-                if(hyperBlocks[block].inside_HB(FIELD_LENGTH, classifiedData[i][p].data())){
-                    pointsInBlocks[p].push_back(block);
-                }
-            }
-        }
-    }
-
-    // Now we want to run the K-nn on the unclassified points
-     // For each class of points
-    for(int i = 0; i < NUM_CLASSES; i++){
-
-        // For each point in unclassified points
-        for(int uPoint = 0; uPoint < unclassifiedData[i].size(); uPoint++){
-            // Use a priority queue to keep track of the top k best distances
-            std::priority_queue<std::pair<float, int>> kNearest;
-
-            // Go through all the classified points to find the closest one and whatever class thats in use.
-            for(int cPoint = 0; cPoint < classifiedData[i].size(); cPoint++){
-                float distance = Knn::euclideanDistancePoints(unclassifiedData[i][uPoint], classifiedData[i][cPoint], FIELD_LENGTH);
-
-                if(kNearest.size() < k){
-                    kNearest.push(std::make_pair(distance, cPoint));
-                }
-                else if(distance < kNearest.top().first){
-                    kNearest.pop();
-                    kNearest.push(std::make_pair(distance, cPoint));
-                }
-            }
-
-            // Count votes for each class
-            std::vector<int> votes(NUM_CLASSES, 0);
-            while(!kNearest.empty()){
-                // kNearest.top().second is the index of the classified point,
-                // we need to increment for each of the blocks that point falls into. (pointsInBlocks)
-                for(int block : pointsInBlocks[kNearest.top().second]){
-                    votes[hyperBlocks[block].classNum]++;
-                }
-                kNearest.pop();
-            }
-
-            int majorityClass = -1;
-            int maxVotes = -1;
-
-            for(int c = 0; c < NUM_CLASSES; c++){
-                if(votes[c] > maxVotes){
-                   maxVotes = votes[c];
-                   majorityClass = c;
-                }
-            }
-
-            // WE WILL ASSUME WE DONT HAVE A ID COLUMN.
-            // WE WILL ASSSUME THE LAST COLUMN IS A CLASS COLUMN
-            classifications[i][uPoint] = majorityClass;
-        }
-    }
-
-    std::vector<std::vector<long>> regularConfusionMatrix(NUM_CLASSES, std::vector<long>(NUM_CLASSES, 0));
-
-    // Go through the classes.
-    for(int classN = 0; classN < NUM_CLASSES; classN++){
-        for(int point = 0; point < classifications[classN].size(); point++)
-            regularConfusionMatrix[classN][classifications[classN][point]]++;  
-    }
-
-    return regularConfusionMatrix;
-}
 
 std::vector<std::vector<long>> Knn::pureKnn(
     std::vector<std::vector<std::vector<float>>> unclassifiedData,
@@ -419,75 +341,67 @@ std::vector<std::vector<long>> Knn::pureKnn(
 *    to assign the point to the correct class.
 *
 */
-std::vector<std::vector<long>> Knn::kNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES){
-
+std::vector<std::vector<long>> Knn::kNN(
+    std::vector<std::vector<std::vector<float>>> unclassifiedData,
+    std::vector<HyperBlock>& hyperBlocks,
+    int k,
+    int NUM_CLASSES
+) {
     int FIELD_LENGTH = hyperBlocks[0].maximums.size();
     std::cout << "Field Length: " << FIELD_LENGTH << std::endl;
 
-    if(k > hyperBlocks.size()) k = (int) sqrt(hyperBlocks.size());
+    if (k > hyperBlocks.size()) k = (int)std::sqrt(hyperBlocks.size());
 
-    // Keep track of assignments with something
-    std::vector<std::vector<float>> classifications(NUM_CLASSES);    // [class][pointIndex]
-    for(int i = 0; i < NUM_CLASSES; i++){
-      classifications[i] = std::vector<float>(unclassifiedData[i].size());    // Put the std::vector for each class
+    std::vector<std::vector<float>> classifications(NUM_CLASSES);
+    for (int i = 0; i < NUM_CLASSES; i++) {
+        classifications[i] = std::vector<float>(unclassifiedData[i].size());
     }
 
-    // For each class of points
-    for(int i = 0; i < NUM_CLASSES; i++){
+    for (int i = 0; i < NUM_CLASSES; i++) {
+        for (int point = 0; point < unclassifiedData[i].size(); point++) {
+            // Store all distances
+            std::vector<std::pair<float, int>> allDistances;
 
-        // For each point in unclassified points
-        for(int point = 0; point < unclassifiedData[i].size(); point++){
-            // Use a priority queue to keep track of the top k best distances
-            std::priority_queue<std::pair<float, int>> kNearest;
-
-            // Go through all the blocks and find the disstances to their centers
-            for(const auto& hyperBlock : hyperBlocks){
-                // Find the distance between the HB center and the unclassified data point
-                float bottomDist = Knn::euclideanDistanceBounds(hyperBlock.minimums, unclassifiedData[i][point], FIELD_LENGTH);
-                float topDist = Knn::euclideanDistanceBounds(hyperBlock.maximums, unclassifiedData[i][point], FIELD_LENGTH);
-
+            for (const auto& hyperBlock : hyperBlocks) {
+                float bottomDist = Knn::euclideanDistanceBounds(hyperBlock.tamedMin, unclassifiedData[i][point], FIELD_LENGTH);
+                float topDist = Knn::euclideanDistanceBounds(hyperBlock.tamedMax, unclassifiedData[i][point], FIELD_LENGTH);
 
                 float distance = std::min(bottomDist, topDist);
-
-                if(kNearest.size() < k){    // always add when queue is not at k yet.
-                    kNearest.push(std::make_pair(distance, hyperBlock.classNum));
-                }
-                else if(distance < kNearest.top().first){ // Queue is big enough, and this distance is better than the worst in queue
-                    kNearest.pop();    // pop the max (worst distance)
-                    kNearest.push(std::make_pair(distance, hyperBlock.classNum));    // push the better distance.
-                }
+                allDistances.emplace_back(distance, hyperBlock.classNum);
             }
 
-            // Count votes for each class
+            // Get the k closest elements
+            std::nth_element(allDistances.begin(), allDistances.begin() + k, allDistances.end());
+            std::vector<std::pair<float, int>> kNearest(allDistances.begin(), allDistances.begin() + k);
+
+            // Find max distance in kNearest to ignore
+            auto worstIt = std::max_element(kNearest.begin(), kNearest.end());
+            kNearest.erase(worstIt);  // remove worst
+
+            // Count votes excluding the farthest
             std::vector<int> votes(NUM_CLASSES, 0);
-            while(!kNearest.empty()){
-                votes[kNearest.top().second]++;
-                kNearest.pop();
+            for (const auto& pair : kNearest) {
+                votes[pair.second]++;
             }
 
-
-            int majorityClass = 5;
+            int majorityClass = -1;
             int maxVotes = 0;
 
-            for(int c = 0; c < NUM_CLASSES; c++){
-                if(votes[c] > maxVotes){
-                   maxVotes = votes[c];
-                   majorityClass = c;
+            for (int c = 0; c < NUM_CLASSES; c++) {
+                if (votes[c] > maxVotes) {
+                    maxVotes = votes[c];
+                    majorityClass = c;
                 }
             }
 
-            // WE WILL ASSUME WE DONT HAVE A ID COLUMN.
-            // WE WILL ASSSUME THE LAST COLUMN IS A CLASS COLUMN
             classifications[i][point] = majorityClass;
         }
     }
 
     std::vector<std::vector<long>> regularConfusionMatrix(NUM_CLASSES, std::vector<long>(NUM_CLASSES, 0));
-
-    // Go through the classes.
-    for(int classN = 0; classN < NUM_CLASSES; classN++){
-        for(int point = 0; point < classifications[classN].size(); point++){
-            regularConfusionMatrix[classN][classifications[classN][point]]++;
+    for (int classN = 0; classN < NUM_CLASSES; classN++) {
+        for (int point = 0; point < classifications[classN].size(); point++) {
+            regularConfusionMatrix[classN][(int)classifications[classN][point]]++;
         }
     }
 
@@ -496,11 +410,11 @@ std::vector<std::vector<long>> Knn::kNN(std::vector<std::vector<std::vector<floa
 
 
 //EUCLIDEAN DISTANCE OF TWO VECTORS, comparing a point to a block bound (2-D vector for disjunctions)
-float Knn::euclideanDistanceBounds(const std::vector<std::vector<float>>& blockBound, const std::vector<float>& point, int FIELD_LENGTH){
+float Knn::euclideanDistanceBounds(const std::vector<float>& blockBound, const std::vector<float>& point, int FIELD_LENGTH){
     float sumSquaredDifference = 0.0f;
 
     for(int i = 0; i < FIELD_LENGTH; i++){
-        float diff = blockBound[i][0] - point[i];
+        float diff = blockBound[i] - point[i];
         sumSquaredDifference += diff * diff;
     }
 
@@ -713,4 +627,351 @@ float Knn::mergeCheck(std::vector<int> &insertIdx, HyperBlock &hb, std::vector<s
 
     // 4.  Accuracy if we accept the point (+1 correct) and wrong extras.
     return float(hb.size + 1) / float(hb.size + 1 + wrong);
+}
+
+
+
+
+
+
+
+
+std::vector<std::vector<long>> Knn::bruteMergable(
+    std::vector<std::vector<std::vector<float>>> unclassifiedData,
+    std::vector<std::vector<std::vector<float>>> classifiedData,
+    std::vector<HyperBlock>& hyperBlocks,
+    int k,
+    int NUM_CLASSES
+) {
+    constexpr float EPSILON = 1e-6f;
+    constexpr int NUM_SAMPLES = 300; // Sampling limit for each class
+
+    int FIELD_LENGTH = hyperBlocks[0].maximums.size();
+    std::vector<std::vector<float>> classifications(NUM_CLASSES);
+
+    for (int i = 0; i < NUM_CLASSES; i++) {
+        classifications[i] = std::vector<float>(unclassifiedData[i].size());
+    }
+
+    // Pre-process hyperblocks by class for faster access
+    std::vector<std::vector<size_t>> blocksByClass(NUM_CLASSES);
+    for (size_t i = 0; i < hyperBlocks.size(); i++) {
+        blocksByClass[hyperBlocks[i].classNum].push_back(i);
+    }
+
+    // Stores min and max average impurity for each class of blocks
+    std::vector<std::pair<float, float>> classImpurityRange(NUM_CLASSES, {std::numeric_limits<float>::max(), std::numeric_limits<float>::min()});
+
+    // Store average impurity metrics for each class combination
+    std::vector<std::vector<float>> classMetrics(NUM_CLASSES, std::vector<float>(NUM_CLASSES, 0.0f));
+
+    // Create a single vector of all classified points with their class labels for faster iteration
+    struct ClassifiedPoint {
+        std::vector<float> point;
+        int classLabel;
+    };
+    std::vector<ClassifiedPoint> allClassifiedPoints;
+    allClassifiedPoints.reserve(std::accumulate(
+        classifiedData.begin(),
+        classifiedData.end(),
+        0,
+        [](size_t sum, const auto& vec) { return sum + vec.size(); }
+    ));
+
+    for (int cls = 0; cls < NUM_CLASSES; cls++) {
+        for (const auto& point : classifiedData[cls]) {
+            allClassifiedPoints.push_back({point, cls});
+        }
+    }
+
+    // First phase: Gather metrics using sampling
+    #pragma omp parallel for schedule(dynamic)
+    for (int i = 0; i < NUM_CLASSES; i++) {
+        // Pick samples for this class
+        std::vector<std::vector<float>> classSamples;
+        int sampleCount = std::min(NUM_SAMPLES, static_cast<int>(classifiedData[i].size()));
+
+        // Create a copy of indices that we can shuffle
+        std::vector<int> indices(classifiedData[i].size());
+        std::iota(indices.begin(), indices.end(), 0);
+
+        // Use a thread-safe random generator
+        unsigned int seed = std::hash<std::thread::id>{}(std::this_thread::get_id());
+        std::shuffle(indices.begin(), indices.end(), std::default_random_engine(seed));
+
+        // Select the first sampleCount indices
+        for (int j = 0; j < sampleCount; j++) {
+            classSamples.push_back(classifiedData[i][indices[j]]);
+        }
+
+        // Thread-local metrics to avoid contention
+        std::vector<std::pair<float, int>> threadMetrics(NUM_CLASSES, {0.0f, 0});
+
+        // For each target class, calculate metrics
+        for (int targetClass = 0; targetClass < NUM_CLASSES; targetClass++) {
+            if (blocksByClass[targetClass].empty()) continue;
+
+            float totalImpurity = 0.0f;
+            int validMerges = 0;
+
+            // Process each sample with each block of target class
+            for (const auto& sample : classSamples) {
+                for (size_t blockIdx : blocksByClass[targetClass]) {
+                    const auto& block = hyperBlocks[blockIdx];
+
+                    // Calculate expansion area efficiently
+                    bool anyChanges = false;
+                    std::vector<std::pair<float, float>> expansionRanges(FIELD_LENGTH, {0.0f, 0.0f});
+                    std::vector<bool> hasExpansion(FIELD_LENGTH, false);
+
+                    for (int attr = 0; attr < FIELD_LENGTH; attr++) {
+                        if (sample[attr] < block.minimums[attr][0]) {
+                            expansionRanges[attr].first = sample[attr];
+                            expansionRanges[attr].second = block.minimums[attr][0];
+                            hasExpansion[attr] = true;
+                            anyChanges = true;
+                        } else if (sample[attr] > block.maximums[attr][0]) {
+                            expansionRanges[attr].first = block.maximums[attr][0];
+                            expansionRanges[attr].second = sample[attr];
+                            hasExpansion[attr] = true;
+                            anyChanges = true;
+                        }
+                    }
+
+                    if (!anyChanges) continue;
+
+                    // Count points in expansion area
+                    int rightCls = 0;
+                    int wrongCls = 0;
+
+                    for (const auto& cp : allClassifiedPoints) {
+                        // Skip if point is already in the block
+                        bool insideBlock = true;
+                        for (int attr = 0; attr < FIELD_LENGTH; attr++) {
+                            if (cp.point[attr] < block.minimums[attr][0] - EPSILON || cp.point[attr] > block.maximums[attr][0] + EPSILON) {
+                                insideBlock = false;
+                                break;
+                            }
+                        }
+                        if (insideBlock) continue;
+
+                        // Check if point is in any expansion area
+                        bool inExpansion = false;
+                        for (int attr = 0; attr < FIELD_LENGTH; attr++) {
+                            if (hasExpansion[attr] &&
+                                cp.point[attr] >= expansionRanges[attr].first - EPSILON &&
+                                cp.point[attr] <= expansionRanges[attr].second + EPSILON) {
+                                inExpansion = true;
+                                break;
+                            }
+                        }
+
+                        if (inExpansion) {
+                            if (cp.classLabel == targetClass) {
+                                rightCls++;
+                            } else {
+                                wrongCls++;
+                            }
+                        }
+                    }
+
+                    // Calculate impurity
+                    if (rightCls + wrongCls > 0) {
+                        float impurity = static_cast<float>(wrongCls) / (rightCls + wrongCls);
+                        totalImpurity += impurity;
+                        validMerges++;
+                    }
+                }
+            }
+
+            if (validMerges > 0) {
+                threadMetrics[targetClass].first = totalImpurity;
+                threadMetrics[targetClass].second = validMerges;
+            }
+        }
+
+        // Merge thread-local results to global metrics
+        #pragma omp critical
+        {
+            for (int targetClass = 0; targetClass < NUM_CLASSES; targetClass++) {
+                if (threadMetrics[targetClass].second > 0) {
+                    float avgImpurity = threadMetrics[targetClass].first / threadMetrics[targetClass].second;
+                    classMetrics[targetClass][i] = avgImpurity;
+
+                    // Update min/max range
+                    if (avgImpurity < classImpurityRange[targetClass].first) {
+                        classImpurityRange[targetClass].first = avgImpurity;
+                    }
+                    if (avgImpurity > classImpurityRange[targetClass].second) {
+                        classImpurityRange[targetClass].second = avgImpurity;
+                    }
+                }
+            }
+        }
+    }
+
+    // Second phase: Classify unclassified data
+    std::vector<std::vector<long>> results(NUM_CLASSES);
+
+    // Pre-allocate results to avoid resizing
+    for (int i = 0; i < NUM_CLASSES; i++) {
+        results[i].reserve(unclassifiedData[i].size());
+    }
+
+    // Process each class of unclassified data in parallel
+    #pragma omp parallel for schedule(dynamic)
+    for (int classIdx = 0; classIdx < NUM_CLASSES; classIdx++) {
+        // Thread-local results vector to avoid contention
+        std::vector<long> threadResults;
+        threadResults.reserve(unclassifiedData[classIdx].size());
+
+        for (size_t pointIdx = 0; pointIdx < unclassifiedData[classIdx].size(); pointIdx++) {
+            const auto& point = unclassifiedData[classIdx][pointIdx];
+            std::vector<float> bestImpurities(NUM_CLASSES, std::numeric_limits<float>::max());
+
+            // Check each class of blocks
+            for (int targetClass = 0; targetClass < NUM_CLASSES; targetClass++) {
+                if (blocksByClass[targetClass].empty()) continue;
+
+                // Find best block for this point and target class
+                for (size_t blockIdx : blocksByClass[targetClass]) {
+                    const auto& block = hyperBlocks[blockIdx];
+
+                    // If point is already inside the block, perfect score
+                    bool insideBlock = true;
+                    for (int attr = 0; attr < FIELD_LENGTH; attr++) {
+                        if (point[attr] < block.minimums[attr][0] - EPSILON || point[attr] > block.maximums[attr][0] + EPSILON) {
+                            insideBlock = false;
+                            break;
+                        }
+                    }
+
+                    if (insideBlock) {
+                        bestImpurities[targetClass] = 0.0f;
+                        break;
+                    }
+
+                    // Calculate expansion area efficiently
+                    std::vector<std::pair<float, float>> expansionRanges(FIELD_LENGTH, {0.0f, 0.0f});
+                    std::vector<bool> hasExpansion(FIELD_LENGTH, false);
+                    bool anyChanges = false;
+
+                    for (int attr = 0; attr < FIELD_LENGTH; attr++) {
+                        if (point[attr] < block.minimums[attr][0]) {
+                            expansionRanges[attr].first = point[attr];
+                            expansionRanges[attr].second = block.minimums[attr][0];
+                            hasExpansion[attr] = true;
+                            anyChanges = true;
+                        } else if (point[attr] > block.maximums[attr][0]) {
+                            expansionRanges[attr].first = block.maximums[attr][0];
+                            expansionRanges[attr].second = point[attr];
+                            hasExpansion[attr] = true;
+                            anyChanges = true;
+                        }
+                    }
+
+                    if (!anyChanges) continue;
+
+                    // Count points in expansion area
+                    int rightCls = 0;
+                    int wrongCls = 0;
+
+                    for (const auto& cp : allClassifiedPoints) {
+                        // Skip if point is already in the block
+                        bool insideBlock = true;
+                        for (int attr = 0; attr < FIELD_LENGTH; attr++) {
+                            if (cp.point[attr] < block.minimums[attr][0] - EPSILON || cp.point[attr] > block.maximums[attr][0] + EPSILON) {
+                                insideBlock = false;
+                                break;
+                            }
+                        }
+                        if (insideBlock) continue;
+
+                        // Check if point is in any expansion area
+                        bool inExpansion = false;
+                        for (int attr = 0; attr < FIELD_LENGTH; attr++) {
+                            if (hasExpansion[attr] &&
+                                cp.point[attr] >= expansionRanges[attr].first - EPSILON &&
+                                cp.point[attr] <= expansionRanges[attr].second + EPSILON) {
+                                inExpansion = true;
+                                break;
+                            }
+                        }
+
+                        if (inExpansion) {
+                            if (cp.classLabel == targetClass) {
+                                rightCls++;
+                            } else {
+                                wrongCls++;
+                            }
+                        }
+                    }
+
+                    // Calculate impurity
+                    float impurity = 1.0f; // Default to worst impurity
+                    if (rightCls + wrongCls > 0) {
+                        impurity = static_cast<float>(wrongCls) / (rightCls + wrongCls);
+                    } else if (anyChanges) {
+                        impurity = 0.5f; // Neutral score for empty expansion
+                    }
+
+                    bestImpurities[targetClass] = std::min(bestImpurities[targetClass], impurity);
+                }
+            }
+
+            // Normalize scores and find best class
+            std::vector<float> normalizedScores(NUM_CLASSES);
+            for (int c = 0; c < NUM_CLASSES; c++) {
+                float minImpurity = classImpurityRange[c].first;
+                float maxImpurity = classImpurityRange[c].second;
+
+                if (maxImpurity - minImpurity < EPSILON) {
+                    normalizedScores[c] = (bestImpurities[c] < minImpurity + EPSILON) ? 0.0f : 1.0f;
+                } else {
+                    normalizedScores[c] = (bestImpurities[c] - minImpurity) / (maxImpurity - minImpurity);
+                }
+            }
+
+            // Find class with best score
+            int bestClass = 0;
+            float bestScore = normalizedScores[0];
+            for (int c = 0; c < NUM_CLASSES; c++) {
+                if (normalizedScores[c] < bestScore) {
+                    bestScore = normalizedScores[c];
+                    bestClass = c;
+                }
+            }
+
+            threadResults.push_back(bestClass);
+            classifications[classIdx][pointIdx] = static_cast<float>(bestClass);
+        }
+
+        // Merge thread results into global results
+        #pragma omp critical
+        {
+            results[classIdx].insert(results[classIdx].end(), threadResults.begin(), threadResults.end());
+        }
+    }
+
+    return results;
+}
+
+
+
+bool Knn::isInside(const std::vector<float>& point, const std::vector<std::vector<float>>& fMins, const std::vector<std::vector<float>>& fMaxes){
+    for (int i = 0; i < point.size(); ++i) {
+        bool insideDim = false;
+
+        // Go through all possible disjunctives
+        for (int r = 0; r < fMins[i].size(); ++r) {
+            if ((point[i] + EPSILON >= fMins[i][r]) && (point[i] - EPSILON <= fMaxes[i][r])) {
+                insideDim = true;
+                break;
+            }
+        }
+
+        if (!insideDim) return false;
+    }
+
+    return true;
 }

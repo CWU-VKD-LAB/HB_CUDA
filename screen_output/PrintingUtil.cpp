@@ -32,14 +32,21 @@ void PrintingUtil::displayMainMenu() {
     std::cout << "2. Import testing data.\n";
     std::cout << "3. Save normalized training data.\n";
     std::cout << std::endl;
-    std::cout << "4. Import existing hyperblocks.\n";
-    std::cout << "5. Export existing hyperblocks.\n";
-    std::cout << "6. Generate new hyperblocks.\n";
-    std::cout << "7. Simplify hyperblocks.\n";
-    std::cout << "8. Test hyperblocks on dataset.\n";
-    std::cout << "9. K Fold Cross Validation.\n";
+    std::cout << "4. Import regular Hyperblocks.\n";
+    std::cout << "5. Export regular Hyperblocks.\n";
+    std::cout << "6. Generate Hyperblocks.\n";
+    std::cout << "7. Simplify Hyperblocks.\n";
+    std::cout << "8. Test Hyperblocks.\n";
+    std::cout << "9. Test 1-1 HyperBlocks.\n";
+    std::cout << "10. K Fold Cross Validation.\n";
     std::cout << std::endl;
-    std::cout << "10. Exit\n\n";
+    std::cout << "11. Generate 1-1 Hyperblocks.\n";
+    std::cout << "12. Import 1-1 Hyperblocks.\n";
+    std::cout << "13. Export 1-1 Hyperblocks.\n";
+    std::cout << "14. K-Fold 1-1\n";
+    std::cout << std::endl;
+    std::cout << "15. Quit\n\n";
+
 }
 
 float PrintingUtil::printConfusionMatrix(std::vector<std::vector<long>>& data, const int NUM_CLASSES, std::map<int, std::string>& CLASS_MAP_INT) {

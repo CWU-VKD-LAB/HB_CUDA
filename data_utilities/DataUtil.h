@@ -9,6 +9,7 @@
 #include <iostream>
 #include <sstream>
 #include <fstream>
+#include <set>
 #include <random>
 #include <algorithm>
 #ifndef DATAUTIL_H
@@ -32,6 +33,11 @@ class DataUtil {
         static void saveBasicHBsToCSV(const std::vector<HyperBlock>& hyperBlocks, const std::string& fileName, int FIELD_LENGTH);
         static void saveHyperBlocksToFile(const std::string& filepath, const std::vector<std::vector<std::vector<float>>>& hyperBlocks);
         static void saveNormalizedVersionToCsv(std::string fileName, std::vector<std::vector<std::vector<float>>>& data);
+
+        static void saveOneToOneHBsToCSV(const std::vector<std::vector<HyperBlock>>& oneToOneHBs, const std::string& fileName, int FIELD_LENGTH);
+        static std::vector<std::vector<HyperBlock>> DataUtil::loadOneToOneHBsFromCSV(const std::string& fileName,std::vector<std::pair<int, int>>& classPairsOut);
+
+
 };
 
 #endif //DATAUTIL_H

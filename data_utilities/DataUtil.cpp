@@ -202,11 +202,29 @@ void DataUtil::normalizeTestSet(std::vector<std::vector<std::vector<float>>>& te
                 if (maxValues[k] != minValues[k]) {
                     point[k] = (point[k] - minValues[k]) / (maxValues[k] - minValues[k]);
                 } else {
-                    point[k] = 0.5f;
+                    point[k] = 0.50000f;
                 }
             }
         }
     }
+
+    for(auto& class_data : testSet){
+      for (auto& point : class_data){
+        for (int k = 0; k < FIELD_LENGTH; k++){
+          if(point[k] > 1.0f){
+	         std::cout << "Out of range" << point[k] << std::endl;
+             point[k] = 1.000000f;
+		  }
+          if(point[k] < 0.0f){
+		  	point[k] = 0.000000f;
+          }
+        }
+      }
+    }
+
+
+
+
 }
 
 
@@ -225,7 +243,7 @@ void DataUtil::minMaxNormalization(std::vector<std::vector<std::vector<float>>>&
                     point[k] = (point[k] - minValues[k]) / (maxValues[k] - minValues[k]);
                 } else {
                     //cout << "Column found with useless values" << endl;
-                    point[k] = 0.5f;
+                    point[k] = 0.500000f;
                 }
             }
         }
@@ -303,6 +321,142 @@ void DataUtil::saveBasicHBsToCSV(const std::vector<HyperBlock>& hyperBlocks, con
 
     file.close();
 }
+
+
+void DataUtil::saveOneToOneHBsToCSV(const std::vector<std::vector<HyperBlock>>& oneToOneHBs, const std::string& fileName, int FIELD_LENGTH){
+    std::ofstream file(fileName);
+    if (!file.is_open()) {
+        std::cerr << "Error opening file: " << fileName << std::endl;
+        return;
+    }
+
+    for (const auto& blockSet : oneToOneHBs) {
+        if (blockSet.empty()) continue;
+
+        // --- FIXED HEADER SAVING --- //
+        std::set<int> classNums;
+        for (const auto& hb : blockSet) {
+            classNums.insert(hb.classNum);
+            if (classNums.size() == 2) break;
+        }
+
+        if (classNums.size() != 2) {
+            std::cerr << "Warning: Expected 2 classes in block set but found " << classNums.size() << std::endl;
+        }
+
+        auto it = classNums.begin();
+        file << "# " << *it << "," << *(++it) << "\n";
+        // --------------------------- //
+
+        for (const auto& hyperBlock : blockSet) {
+            for (const std::vector<float>& min : hyperBlock.minimums) {
+                file << min[0] << ",";
+            }
+
+            for (const std::vector<float>& max : hyperBlock.maximums) {
+                file << max[0] << ",";
+            }
+
+            file << hyperBlock.classNum << "\n";
+        }
+
+        file << "\n"; // Separate block sets
+    }
+
+    file.close();
+}
+
+
+/**
+* This will load the One-To-One HyperBlocks from their file.
+*/
+std::vector<std::vector<HyperBlock>> DataUtil::loadOneToOneHBsFromCSV(const std::string& fileName,std::vector<std::pair<int, int>>& classPairsOut) {
+    std::ifstream file(fileName);
+    std::vector<std::vector<HyperBlock>> allHyperBlocks;
+    std::vector<HyperBlock> currentSet;
+
+    if (!file.is_open()) {
+        std::cerr << "Error opening file: " << fileName << std::endl;
+        return allHyperBlocks;
+    }
+
+    std::string line;
+    int currentClassA = -1;
+    int currentClassB = -1;
+
+    while (getline(file, line)) {
+        // Trim whitespace
+        line.erase(0, line.find_first_not_of(" \t"));
+        line.erase(line.find_last_not_of(" \t") + 1);
+
+        if (line.empty()) {
+            // End of current set
+            if (!currentSet.empty()) {
+                allHyperBlocks.push_back(currentSet);
+                classPairsOut.emplace_back(currentClassA, currentClassB);
+                currentSet.clear();
+            }
+            continue;
+        }
+
+        if (line[0] == '#') {
+            // Metadata line, extract classes
+            std::stringstream ss(line.substr(1)); // Removes the # tag
+            std::string token;
+            if (getline(ss, token, ',')) {
+                currentClassA = stoi(token);
+            }
+            if (getline(ss, token, ',')) {
+                currentClassB = stoi(token);
+            }
+            continue;
+        }
+
+        // Normal block line
+        std::stringstream ss(line);
+        std::vector<std::vector<float>> minimums, maximums;
+        std::string value;
+        std::vector<float> temp_vals;
+
+        while (getline(ss, value, ',')) {
+            value.erase(0, value.find_first_not_of(" \t"));
+            value.erase(value.find_last_not_of(" \t") + 1);
+
+            if (!value.empty()) {
+                temp_vals.push_back(stof(value));
+            }
+        }
+
+        if (temp_vals.empty()) continue;
+
+        int num_attributes = (temp_vals.size() - 1) / 2;
+        int classNum = static_cast<int>(temp_vals.back());
+        temp_vals.pop_back(); // Remove classNum
+
+        for (int i = 0; i < num_attributes; ++i) {
+            minimums.push_back({ temp_vals[i] });
+            maximums.push_back({ temp_vals[i + num_attributes] });
+        }
+
+        // THIS MAKES THE HYPERBLOCKS - emplace_back calls the constructor and makes it in place in the set.
+        currentSet.emplace_back(maximums, minimums, classNum);
+    }
+
+    // Push last set if the file didn't end with a blank line
+    if (!currentSet.empty()) {
+        allHyperBlocks.push_back(currentSet);
+        classPairsOut.emplace_back(currentClassA, currentClassB);
+    }
+
+    file.close();
+    return allHyperBlocks;
+}
+
+
+
+
+
+
 
 /**
 * Find the min/max values in each column of data across the dataset.

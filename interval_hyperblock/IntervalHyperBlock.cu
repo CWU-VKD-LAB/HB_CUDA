@@ -863,10 +863,6 @@ void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allDat
 
     for (int classN = temp; classN < goToClass; classN++) {
 
-        // set our device based on class. this way even single threaded we use multiple GPUs
-        // MORE MULTI GPU BUSINESS
-        //cudaSetDevice(classN % deviceCount);
-
         int totalDataSetSizeFlat = numPoints * PADDED_LENGTH;
 
         // Compute grid size to cover all HBs. we already know our ideal block size from before.
@@ -880,7 +876,6 @@ void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allDat
         vector<int> deleteFlagsC(currentClassBlockLengthFlattened / PADDED_LENGTH);
 
         int nSize = allData[classN].size();
-        vector<float> pointsC(totalDataSetSizeFlat - (nSize * PADDED_LENGTH));
 
         // Fill hyperblock array
         for (int i = 0; i < inputBlocks[classN].size(); i++) {
@@ -895,31 +890,54 @@ void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allDat
             }
         }
 
-        // prepare other class points
-        int otherClassIndex = 0;
+        // prepare other class points (AoS)
+        int otherFloats = 0;
+        vector<float> pointsC(totalDataSetSizeFlat - (nSize * PADDED_LENGTH));
         for (int currentClass = 0; currentClass < allData.size(); currentClass++) {
             if (currentClass == classN) continue;
-
             for (const auto& point : allData[currentClass]) {
                 for (int attr = 0; attr < FIELD_LENGTH; attr++) {
-                    pointsC[otherClassIndex++] = point[attr];
+                    pointsC[otherFloats++] = point[attr];
                 }
                 for (int leftOverAtt = FIELD_LENGTH; leftOverAtt < PADDED_LENGTH; leftOverAtt++) {
-                    pointsC[otherClassIndex++] = -numeric_limits<float>::infinity();
+                    pointsC[otherFloats++] = -numeric_limits<float>::infinity();
                 }
             }
         }
 
+        // --- NEW: build a host‐side SoA float4 array ---
+        int numOtherPoints      = otherFloats / PADDED_LENGTH;
+        int numAttributesAsFours = PADDED_LENGTH / 4;
+        vector<float4> hostOpp4(numAttributesAsFours * numOtherPoints);
+        for (int p = 0; p < numOtherPoints; ++p) {
+            float* base = &pointsC[p * PADDED_LENGTH];
+            for (int i = 0; i < numAttributesAsFours; ++i) {
+                float4 v;
+                v.x = base[i*4 + 0];
+                v.y = base[i*4 + 1];
+                v.z = base[i*4 + 2];
+                v.w = base[i*4 + 3];
+                // SoA transpose: chunk i of point p at [ i * numOtherPoints + p ]
+                hostOpp4[i * numOtherPoints + p] = v;
+            }
+        }
+
+        // Allocate device memory for SoA float4 buffer
+        float4* d_points4 = nullptr;
+        cudaMalloc(&d_points4, hostOpp4.size() * sizeof(float4));
+        cudaMemcpy(d_points4,
+                   hostOpp4.data(),
+                   hostOpp4.size() * sizeof(float4),
+                   cudaMemcpyHostToDevice);
+
         // Allocate device memory
-        float *d_hyperBlockMins, *d_hyperBlockMaxes, *d_points;
+        float *d_hyperBlockMins, *d_hyperBlockMaxes;
         int *d_deleteFlags, *d_mergable, *d_seedQueue, *d_writeSeedQueue;
 
         cudaMalloc(&d_hyperBlockMins, currentClassBlockLengthFlattened * sizeof(float));
         cudaMalloc(&d_hyperBlockMaxes, currentClassBlockLengthFlattened * sizeof(float));
         cudaMalloc(&d_deleteFlags, (currentClassBlockLengthFlattened / PADDED_LENGTH) * sizeof(int));
         cudaMemset(d_deleteFlags, 0, (currentClassBlockLengthFlattened / PADDED_LENGTH) * sizeof(int));
-
-        cudaMalloc(&d_points, pointsC.size() * sizeof(float));
 
         int numBlocks = inputBlocks[classN].size();
         vector<int> seedQueue(numBlocks);
@@ -935,7 +953,6 @@ void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allDat
         // Copy data to device
         cudaMemcpy(d_hyperBlockMins, hyperBlockMinsC.data(), currentClassBlockLengthFlattened * sizeof(float), cudaMemcpyHostToDevice);
         cudaMemcpy(d_hyperBlockMaxes, hyperBlockMaxesC.data(), currentClassBlockLengthFlattened * sizeof(float), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_points, pointsC.data(), pointsC.size() * sizeof(float), cudaMemcpyHostToDevice);
         cudaMemcpy(d_seedQueue, seedQueue.data(), numBlocks * sizeof(int), cudaMemcpyHostToDevice);
 
         cout << "Launched a kernel for class: " << classN << endl;
@@ -952,7 +969,7 @@ void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allDat
                 numBlocks,  // number seed blocks
                 PADDED_LENGTH,	// num attributes
                 pointsC.size() / PADDED_LENGTH,	// num op class points
-                d_points,						// op class points
+                (float*)d_points4, // op class points
                 d_hyperBlockMins,				// mins
                 d_hyperBlockMaxes,				// maxes
                 d_deleteFlags,
@@ -961,6 +978,7 @@ void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allDat
                 blockSize,
                 sharedMemSize
             );
+
             cudaDeviceSynchronize();
 
             // Reorder the seedblock order
@@ -996,7 +1014,7 @@ void IntervalHyperBlock::merger_cuda(const vector<vector<vector<float>>>& allDat
         cudaFree(d_hyperBlockMins);
         cudaFree(d_hyperBlockMaxes);
         cudaFree(d_deleteFlags);
-        cudaFree(d_points);
+        cudaFree(d_points4);
         cudaFree(d_mergable);
         cudaFree(d_seedQueue);
         cudaFree(d_writeSeedQueue);

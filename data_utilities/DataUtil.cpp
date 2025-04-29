@@ -6,6 +6,43 @@
 extern int FIELD_LENGTH;
 extern int NUM_CLASSES;
 
+
+
+
+// In-place stratified split: modifies trainingData by moving points to validationData
+void DataUtil::createValidationSplit(std::vector<std::vector<std::vector<float>>>& trainingData, std::vector<std::vector<std::vector<float>>>& validationData, float validationFraction, unsigned int randomSeed) {
+    std::mt19937 rng(randomSeed);
+    validationData.clear();
+    validationData.resize(trainingData.size());
+
+    // Go through each class
+    for (int classIdx = 0; classIdx < trainingData.size(); ++classIdx) {
+        auto& pointsInClass = trainingData[classIdx];
+
+        std::vector<int> indices(pointsInClass.size());
+        for (int i = 0; i < pointsInClass.size(); ++i)
+            indices[i] = i;
+
+        std::shuffle(indices.begin(), indices.end(), rng);
+
+        int valCount = static_cast<int>(pointsInClass.size() * validationFraction);
+
+        // Move validation points
+        for (int i = 0; i < valCount; ++i) {
+            validationData[classIdx].push_back(std::move(pointsInClass[indices[i]]));
+        }
+
+        // Erase validation points from training set
+        // Important: sort indices in reverse so erase does not invalidate remaining indices
+        std::sort(indices.begin(), indices.begin() + valCount, std::greater<int>());
+        for (int i = 0; i < valCount; ++i) {
+            pointsInClass.erase(pointsInClass.begin() + indices[i]);
+        }
+    }
+}
+
+
+
 /*  Returns a class seperated version of the dataset
  *  Each class has an entry in the outer vector with a 2-d vector of its points
  */
@@ -289,6 +326,71 @@ std::vector<std::vector<std::vector<float>>> DataUtil::reorderTestingDataset(con
 }
 
 
+std::vector<HyperBlock> DataUtil::loadBasicHBsFromBinary(const std::string& fileName) {
+    std::ifstream file(fileName, std::ios::binary);
+    std::vector<HyperBlock> loadedBlocks;
+
+    if (!file.is_open()) {
+        std::cerr << "Error opening binary file: " << fileName << std::endl;
+        return loadedBlocks;
+    }
+
+    int numBlocks, fieldLength;
+    file.read(reinterpret_cast<char*>(&numBlocks), sizeof(int));
+    file.read(reinterpret_cast<char*>(&fieldLength), sizeof(int));
+
+    for (int b = 0; b < numBlocks; ++b) {
+        std::vector<std::vector<float>> mins(fieldLength, std::vector<float>(1));
+        std::vector<std::vector<float>> maxs(fieldLength, std::vector<float>(1));
+
+        for (int i = 0; i < fieldLength; ++i) {
+            file.read(reinterpret_cast<char*>(&mins[i][0]), sizeof(float));
+        }
+        for (int i = 0; i < fieldLength; ++i) {
+            file.read(reinterpret_cast<char*>(&maxs[i][0]), sizeof(float));
+        }
+
+        int classNum;
+        file.read(reinterpret_cast<char*>(&classNum), sizeof(int));
+
+        loadedBlocks.emplace_back(maxs, mins, classNum);
+    }
+
+    file.close();
+    return loadedBlocks;
+}
+
+void DataUtil::saveBasicHBsToBinary(const std::vector<HyperBlock>& hyperBlocks, const std::string& fileName, int FIELD_LENGTH) {
+    std::ofstream file(fileName, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Error opening binary file: " << fileName << std::endl;
+        return;
+    }
+
+    int numBlocks = static_cast<int>(hyperBlocks.size());
+    file.write(reinterpret_cast<const char*>(&numBlocks), sizeof(int));
+    file.write(reinterpret_cast<const char*>(&FIELD_LENGTH), sizeof(int)); // For sanity check during read
+
+    for (const auto& hyperBlock : hyperBlocks) {
+        // Write FIELD_LENGTH minimum values (only the first entry from each vector)
+        for (int i = 0; i < FIELD_LENGTH; ++i) {
+            float minVal = hyperBlock.minimums[i][0];
+            file.write(reinterpret_cast<const char*>(&minVal), sizeof(float));
+        }
+
+        // Write FIELD_LENGTH maximum values
+        for (int i = 0; i < FIELD_LENGTH; ++i) {
+            float maxVal = hyperBlock.maximums[i][0];
+            file.write(reinterpret_cast<const char*>(&maxVal), sizeof(float));
+        }
+
+        // Write class label
+        file.write(reinterpret_cast<const char*>(&hyperBlock.classNum), sizeof(int));
+    }
+
+    file.close();
+}
+
 /***
 * We want to go through the hyperBlocks that were generated and write them to a file.
 *
@@ -451,10 +553,6 @@ std::vector<std::vector<HyperBlock>> DataUtil::loadOneToOneHBsFromCSV(const std:
     file.close();
     return allHyperBlocks;
 }
-
-
-
-
 
 
 
@@ -624,6 +722,30 @@ std::vector<std::vector<float>> DataUtil::flatMinMaxNoEncode(std::vector<HyperBl
     // Return the five arrays in a vector (order matches the original Java return)
     return { flatMinsList, flatMaxesList, blockEdges, blockClasses, intervalCounts };
 }
+
+
+void DataUtil::splitTrainTestByPercent(std::vector<std::vector<std::vector<float>>>& trainingData, std::vector<std::vector<std::vector<float>>>& testingData, float percentTrain) {
+    std::mt19937 rng(42);
+    testingData.clear();
+    testingData.resize(trainingData.size());
+
+    for (size_t classIdx = 0; classIdx < trainingData.size(); classIdx++) {
+        auto& classPoints = trainingData[classIdx];
+
+        // Shuffle points for randomness
+        std::shuffle(classPoints.begin(), classPoints.end(), rng);
+
+        int originalSize = classPoints.size();
+        int newTrainCount = static_cast<int>(originalSize * percentTrain);
+
+        // Move points from trainingData to testingData
+        while (classPoints.size() > newTrainCount) {
+            testingData[classIdx].push_back(std::move(classPoints.back()));
+            classPoints.pop_back();
+        }
+    }
+}
+
 
 // Splits an already-normalized dataset into k folds with stratified sampling.
 // The input 'dataset' is expected to be organized as: [class][point][attribute].

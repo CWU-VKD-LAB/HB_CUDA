@@ -15,6 +15,8 @@
 #include <vector>
 #include <map>
 #include <cmath>
+#include <filesystem>
+
 #include "./cuda_util/CudaUtil.h"
 #include "./hyperblock_generation/MergerHyperBlock.cuh"
 #include "./hyperblock/HyperBlock.h"
@@ -307,61 +309,6 @@ for (int i = 0; i < NUM_CLASSES; i++) {
 }
 
 
-void runBruteForceOrdering(
-    std::vector<HyperBlock>& hyperBlocks,
-    std::vector<std::vector<std::vector<float>>>& testSet,
-    std::vector<std::vector<std::vector<float>>>& trainingSet
-) {
-    std::vector<int> order(NUM_CLASSES);
-    std::iota(order.begin(), order.end(), 0); // order = {0, 1, 2, ..., 9}
-
-    float bestAccuracy = 0.0f;
-    std::vector<int> bestOrder;
-
-    long long tested = 0;
-
-    do {
-        float accuracy = testAccuracyOfHyperBlocks(hyperBlocks, testSet, trainingSet, order);
-        tested++;
-
-        if (accuracy > bestAccuracy) {
-            bestAccuracy = accuracy;
-            bestOrder = order;
-
-            std::cout << "New best accuracy: " << bestAccuracy * 100.0f << "%\n";
-        }
-
-        if (accuracy > 0.96f) {
-            std::cout << "\n🎯 Accuracy over 96%! Order: ";
-            for (int v : order) std::cout << v << " ";
-            std::cout << "\n";
-        }
-
-        // Optional: Print progress every 100k
-        if (tested % 100000 == 0) {
-            std::cout << "Tested " << tested << " permutations...\n";
-        }
-
-    } while (std::next_permutation(order.begin(), order.end()));
-
-    std::cout << "\n\n✅ Brute-force complete. Best accuracy: " << bestAccuracy * 100.0f << "%\n";
-    std::cout << "Best ordering: ";
-    for (int v : bestOrder) std::cout << v << " ";
-    std::cout << "\nTotal permutations tested: " << tested << "\n";
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -522,78 +469,64 @@ void runKFold(vector<vector<vector<float>>> &dataset, bool oneToMany, std::vecto
 }
 
 
-/**
-* This should print out/return something
-* that will show the distribution of points in the dataset.
-* this will help us see how big our blocks typically are
-* along with this it will show us if we have too many small blocks.
-*/
-void blockSizeDistribution(const vector<HyperBlock>& hyperBlocks) {
-    if (hyperBlocks.empty()) {
-        cout << "No blocks to analyze.\n";
-        return;
+
+float evaluateOneToSomeHBs(const vector<vector<HyperBlock>>& oneToSomeBlocks, const vector<vector<vector<float>>> testData) {
+    vector<vector<int>> confusionMatrix(NUM_CLASSES, vector<int>(NUM_CLASSES, 0));
+    int totalPoints = 0;
+    for(const auto& c : testData) {
+        totalPoints += c.size();
     }
 
-    // Find the min and max block sizes
-    int minSize = hyperBlocks[0].size;
-    int maxSize = hyperBlocks[0].size;
+    int incorrect = 0;
+    int correct = 0;
+    int pointsTested = 0;
+    // Go through the classes
+    for(int i = 0; i < NUM_CLASSES; i++) {
+        for(int j = 0; j < testData[i].size(); j++) {
+            pointsTested++;
+            const auto& point = testData[i][j];
+            bool classified = false;
 
-    for (size_t i = 1; i < hyperBlocks.size(); ++i) {
-        minSize = min(minSize, hyperBlocks[i].size);
-        maxSize = max(maxSize, hyperBlocks[i].size);
-    }
+            for(int sieveLvl = 0; sieveLvl < NUM_CLASSES; sieveLvl++) {
+                for(const auto& hb : oneToSomeBlocks[sieveLvl]) {
+                    if(hb.inside_HB(point.size(), point.data())) {
+                        classified = true;
 
-    // Dynamically determine the number of bins
-    int totalBlocks = hyperBlocks.size();
-    int numBins = min(static_cast<int>(sqrt(totalBlocks)), 50); // Adjust bin count dynamically
-    numBins = max(numBins, 10); // Ensure at least 10 bins
+                        // If it is of the wrong class.
+                        if(hb.classNum != i) {
+                            incorrect++;
+                        }
+                        else {
+                            correct++;
+                        }
 
-    int binWidth = max(1, (maxSize - minSize + 1) / numBins); // Avoid division by zero
-
-    // Create bins
-    vector<pair<int, int>> bins;
-    for (int i = 0; i < numBins; ++i) {
-        int binStart = minSize + i * binWidth;
-        int binEnd = minSize + (i + 1) * binWidth - 1;
-        if (binEnd > maxSize) binEnd = maxSize;
-        bins.push_back(make_pair(binStart, binEnd));
-    }
-
-    map<string, int> binCounts; // Automatically keeps order
-
-    // Initialize bin counts
-    for (size_t i = 0; i < bins.size(); ++i) {
-        string label = to_string(bins[i].first) + "-" + to_string(bins[i].second);
-        binCounts[label] = 0;
-    }
-
-    // Categorize blocks into bins
-    for (size_t i = 0; i < hyperBlocks.size(); ++i) {
-        for (size_t j = 0; j < bins.size(); ++j) {
-            if (hyperBlocks[i].size >= bins[j].first && hyperBlocks[i].size <= bins[j].second) {
-                binCounts[to_string(bins[j].first) + "-" + to_string(bins[j].second)]++;
-                break;
+                        confusionMatrix[i][hb.classNum]++;
+                        break;
+                    }
+                }
+                if (classified) break; // do not keep checking once classified
             }
         }
     }
 
-    // Output distribution (Ordered because map keeps keys sorted)
-    cout << "Block Size Distribution:\n";
-    for (map<string, int>::iterator it = binCounts.begin(); it != binCounts.end(); ++it) {
-        double percentage = (it->second * 100.0) / totalBlocks;
-        cout << it->first << " size: " << fixed << setprecision(2) << percentage << "% - (" << it->second << " blocks)\n";
+    for(const auto& row : confusionMatrix) {
+        for(int i = 0; i < row.size(); i++) {
+            cout << row[i] << " ";
+        }
+        cout << endl;
     }
 
-     // Output in CSV format: bin_start,bin_end,count
-    cout << "bin_start,bin_end,count\n";
-    for (map<string, int>::iterator it = binCounts.begin(); it != binCounts.end(); ++it) {
-        string range = it->first;
-        size_t dashPos = range.find("-");
-        int binStart = stoi(range.substr(0, dashPos));
-        int binEnd = stoi(range.substr(dashPos + 1));
-        cout << binStart << "," << binEnd << "," << it->second << "\n";
-    }
+    // Calculate the coverage.
+    float coverage = static_cast<float>(incorrect + correct) / static_cast<float>(totalPoints);
+    float acc = static_cast<float>(correct) / static_cast<float>(correct + incorrect);
+
+    cout << "Coverage %: " << coverage * 100.0f << "%" << endl;
+    cout << "Coverage total: " << (incorrect + correct) << " out of " << totalPoints << endl;
+    cout << "Overall Accuracy: " << acc * 100.0f << "%" << endl;
+    cout << "Total number of points tested: " << pointsTested << endl;
+    return acc;
 }
+
 
 
 // -------------------------------------------------------------------------
@@ -672,73 +605,6 @@ int runAsync(int argc, char* argv[]) {
     string simplified = string("SimplifiedBlocks") + to_string(COMMAND_LINE_ARGS_CLASS);
     DataUtil::saveBasicHBsToCSV(hyperBlocks, simplified, FIELD_LENGTH);
     return 0;
-}
-
-
-#include <fstream>
-#include <omp.h>
-
-
-void try_expand_blocks_and_save(
-    std::vector<HyperBlock>& hyperBlocks,
-    const std::vector<std::vector<std::vector<float>>>& trainingData
-) {
-    constexpr float LOWER_THRESH = 0.1f;
-    constexpr float UPPER_THRESH = 0.9f;
-    constexpr float EPSILON = 1e-5f;
-    constexpr int FIELD_LENGTH = 784;
-
-    #pragma omp parallel for schedule(dynamic)
-    for (int b = 0; b < hyperBlocks.size(); ++b) {
-        HyperBlock& block = hyperBlocks[b];
-        int numAttributes = block.minimums.size();
-
-        for (int attr = 0; attr < numAttributes; ++attr) {
-            float minVal = block.minimums[attr][0];
-            float maxVal = block.maximums[attr][0];
-
-            if (minVal > LOWER_THRESH + EPSILON || maxVal < UPPER_THRESH - EPSILON)
-                continue;
-
-            // Try expanding to [0.0, 1.0]
-            float oldMin = minVal;
-            float oldMax = maxVal;
-            block.minimums[attr][0] = 0.0f;
-            block.maximums[attr][0] = 1.0f;
-
-            bool conflict = false;
-
-            for (int cls = 0; cls < trainingData.size(); ++cls) {
-                if (cls == block.classNum) continue;
-
-                for (const auto& point : trainingData[cls]) {
-                    bool inside = true;
-                    for (int j = 0; j < numAttributes; ++j) {
-                        float pval = point[j];
-                        if (pval < block.minimums[j][0] - EPSILON || pval > block.maximums[j][0] + EPSILON) {
-                            inside = false;
-                            break;
-                        }
-                    }
-                    if (inside) {
-                        conflict = true;
-                        break;
-                    }
-                }
-
-                if (conflict) break;
-            }
-
-            // Revert if unsafe
-            if (conflict) {
-                block.minimums[attr][0] = oldMin;
-                block.maximums[attr][0] = oldMax;
-            }
-        }
-    }
-
-    // Save updated hyperblocks
-    DataUtil::saveBasicHBsToCSV(hyperBlocks, "expandedBlocks.csv", FIELD_LENGTH);
 }
 
 
@@ -834,6 +700,91 @@ void evaluateOneToOneHyperBlocks(
     std::cout << "\nOverall Accuracy: " << (static_cast<float>(correctPoints) / totalPoints) * 100.0f << "%\n";
 }
 
+/**
+ *  We will attempt to find some "best" ordering of the classes by training normal HBs, then calling this function,
+ *  this function will return the order that we believe is best to be used by the one-to-some method.
+ *
+ *  This is similar to using the LDA accuracies to sort the classes as best -> worst accuracy, but
+ *  it is closer to what we should actually expect our blocks to do. The LDA is inherently different from
+ *  how our blocks classify, and thus this should hopefully give us a better order.
+ *
+ *  Order will be determined by seeing which classes HyperBlocks swallow the most points from the wrong classes.
+ *  (we also keep track of how many times a point of a class falls into wrong blocks)
+ *
+ * @param validationData The validation data set.
+ * @param hyperBlocks The HyperBlocks which were trained WITHOUT using the validation points.
+ * @return a vector<int> which is the recommended order to create one-to-some blocks in.
+ */
+vector<int> findOneToSomeOrder(vector<vector<vector<float>>>& validationData, vector<HyperBlock>& hyperBlocks) {
+    int numClasses = validationData.size();
+
+    // Keep track of how many times a block from each class picks up points from other classes.
+    vector<int> hbClassOverclaims(numClasses, 0);  // based on the hyperblock.class
+    // This one will keep track of how many times A POINT from a class falls into multiple blocks.
+    vector<vector<int>> sneakyPointCount(numClasses, vector<int>(numClasses, 0));
+
+    for(int i = 0; i < numClasses; ++i) {
+        for (int j = 0; j < validationData[i].size(); ++j) {
+            const auto& point = validationData[i][j];
+
+            for(const auto& block : hyperBlocks) {
+                if(block.inside_HB(point.size(), point.data())) {
+                    if(i != block.classNum) { // Incorrect classification.
+                        hbClassOverclaims[block.classNum]++;    // How many times HBs classify the WRONG point!
+                        sneakyPointCount[i][block.classNum]++;  ;  // How many times POINTS of a class fall into wrong class HBs
+                    }
+                }
+            }
+        }
+    }
+
+    // Now we should look at the numbers for hbClassOverclaims to analyze which ordering would be the best.
+    // Save raw counts (temps)
+    std::ofstream outFile("hbClassOverclaims.csv"); if (!outFile.is_open()) {std::cerr << "Error opening file for writing: " << "hbClassOverclaims.csv" << std::endl;}for (size_t i = 0; i < hbClassOverclaims.size(); ++i) {outFile << i << "," << hbClassOverclaims[i] << "\n";}
+    std::ofstream outFile2("sneakyPointCount.csv");if (!outFile2.is_open()) {std::cerr << "Error opening file for writing: " << "sneakyPointCount.csv" << std::endl;}for (size_t i = 0; i < sneakyPointCount.size(); ++i) {for (size_t j = 0; j < sneakyPointCount[i].size(); ++j) {outFile2 << sneakyPointCount[i][j];if (j + 1 != sneakyPointCount[i].size())outFile2 << ",";}outFile2 << "\n";}
+
+
+    // Build mistake counts
+    vector<std::pair<int, int>> pointMistakes;   // (count, class)
+    vector<std::pair<int, int>> blockMistakes;   // (count, class)
+    vector<std::pair<int, int>> combinedMistakes; // (count, class)
+
+    for (int c = 0; c < numClasses; ++c) {
+        int pointMistakeSum = 0;
+        for (int other = 0; other < numClasses; ++other) {
+            pointMistakeSum += sneakyPointCount[c][other];
+        }
+
+        int blockMistake = hbClassOverclaims[c];
+        int combined = pointMistakeSum + blockMistake;
+
+        pointMistakes.emplace_back(pointMistakeSum, c);
+        blockMistakes.emplace_back(blockMistake, c);
+        combinedMistakes.emplace_back(combined, c);
+    }
+
+    // Now sort each list
+    auto sorter = [](const std::pair<int, int>& a, const std::pair<int, int>& b) {
+        return a.first < b.first; // sort by mistake counts ascending
+    };
+
+    std::sort(pointMistakes.begin(), pointMistakes.end(), sorter);
+    std::sort(blockMistakes.begin(), blockMistakes.end(), sorter);
+    std::sort(combinedMistakes.begin(), combinedMistakes.end(), sorter);
+
+    // Extract orders
+    vector<int> pointOrder, blockOrder, combinedOrder;
+    for (auto& p : pointMistakes) pointOrder.push_back(p.second);
+    for (auto& p : blockMistakes) blockOrder.push_back(p.second);
+    for (auto& p : combinedMistakes) combinedOrder.push_back(p.second);
+
+    // Save the ordering. (temp)
+    std::ofstream orderFile("orderings.csv"); if (!orderFile.is_open()) { std::cerr << "Error opening file for writing orderings.csv" << std::endl; } else { orderFile << "pointOrder:"; for (size_t i = 0; i < pointOrder.size(); ++i) { orderFile << " " << pointOrder[i]; if (i + 1 != pointOrder.size()) orderFile << ","; } orderFile << "\n"; orderFile << "blockOrder:"; for (size_t i = 0; i < blockOrder.size(); ++i) { orderFile << " " << blockOrder[i]; if (i + 1 != blockOrder.size()) orderFile << ","; } orderFile << "\n"; orderFile << "combinedOrder:"; for (size_t i = 0; i < combinedOrder.size(); ++i) { orderFile << " " << combinedOrder[i]; if (i + 1 != combinedOrder.size()) orderFile << ","; } orderFile << "\n"; orderFile.close(); }
+
+    return blockOrder;
+}
+
+
 // -------------------------------------------------------------------------
 // Interactive mode: run when argc < 2
 void runInteractive() {
@@ -843,8 +794,10 @@ void runInteractive() {
     string trainingDataFileName;
     string testingDataFileName;
     string hyperBlocksExportFileName;
+
     vector<vector<vector<float>>> testData;
     vector<vector<vector<float>>> trainingData;
+    vector<vector<vector<float>>> validationData;
 
     vector<float> minValues;
     vector<float> maxValues;
@@ -876,7 +829,11 @@ void runInteractive() {
         switch (choice) {
             case 1: { // IMPORT TRAINING DATA
                 cout << "Enter training data filename: " << endl;
-                system("ls DATASETS");
+                #ifdef _WIN32
+                    system("dir DATASETS");
+                #else
+                    system("ls DATASETS");
+                #endif
                 getline(cin, trainingDataFileName);
 
                 string fullPath = "DATASETS" + string(PATH_SEPARATOR) + trainingDataFileName;
@@ -936,8 +893,6 @@ void runInteractive() {
                   hb.find_avg_and_size(trainingData);
                 }
 
-                blockSizeDistribution(hyperBlocks);
-
                 PrintingUtil::waitForEnter();
                 break;
             }
@@ -977,8 +932,7 @@ void runInteractive() {
             }
             case 8: { // TEST HYPERBLOCKS ON DATASET
                 std::cout << "Testing hyperblocks on testing dataset" << std::endl;
-                //testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData, order);
-                runBruteForceOrdering(hyperBlocks, testData, trainingData);
+                testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData, order);
                 PrintingUtil::waitForEnter();
                 break;
             }
@@ -1040,24 +994,56 @@ void runInteractive() {
                 break;
             }
             case 15: {
+
+                // Split out the validation data we will use to train the ordering.
+                float validationPercent = 0.10f;
+                int seed = 42;
+                //float percentTrainData = .0f;
+
+                //DataUtil::splitTrainTestByPercent(trainingData, testData, percentTrainData);
+                std::vector<std::vector<std::vector<float>>> fullTrainingData = trainingData;
+                DataUtil::createValidationSplit(trainingData, validationData, validationPercent, seed);
+
+                // Generate the "basic hyperblocks" that we will test against validation
+                hyperBlocks.clear();
+                IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
+
+                int numVal = 0;
+                for(int i = 0; i < validationData.size(); i++) { numVal += validationData[i].size(); }
+                cout << "Validation is " << numVal << " points" << endl;
+
+                // Now we want to test this based on the validation set to see which ordering to use.
+                order = findOneToSomeOrder(validationData, hyperBlocks );
+                oneToSomeBlocks.clear();
+
                 // Train the oneToSome Blocks
                 auto start = std::chrono::high_resolution_clock::now();
 
-                oneToSomeBlocks = oneToSomeHyper(order, trainingData, eachClassBestVectorIndex);
+                int numTrain = 0;
+                for(int i = 0; i < fullTrainingData.size(); i++) { numTrain += fullTrainingData[i].size(); }
+                oneToSomeBlocks = oneToSomeHyper(order, fullTrainingData, eachClassBestVectorIndex);
 
                 auto end = std::chrono::high_resolution_clock::now();
                 std::chrono::duration<double> diff = end - start;
 
                 for(int i = 0; i < oneToSomeBlocks.size(); i++) {
                     const auto& blockSet = oneToSomeBlocks[i];
-                    DataUtil::saveBasicHBsToCSV(blockSet, std::to_string(order[i]) + "mnist_oneToSome.csv", FIELD_LENGTH);
+                    DataUtil::saveBasicHBsToCSV(blockSet, std::to_string(order[i]) + "replaceable.csv", FIELD_LENGTH);
                 }
+
+                int numTest = 0;
+                for(int i = 0; i < testData.size(); i++) { numTest += testData[i].size(); }
+
+
+                cout << "Testing is " << numTest << " points" << endl;
+                cout << "Validation is " << numVal << " points" << endl;
+                cout << "Training is " << numTrain << " points" << endl;
+
+                evaluateOneToSomeHBs(oneToSomeBlocks, testData);
 
                 cout << "Finished Generating one to Some blocks." << endl;
                 std::cout << "Elapsed time: " << diff.count() << " seconds\n";
 
-                running = false;
-                break;
             }
             default: {
                 cout << "\nInvalid choice. Please try again." << endl;

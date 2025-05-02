@@ -356,9 +356,7 @@ void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &
     }
 
     // get our number of workers and set up our vector of intervals for them to populate.
-    int numWorkers = fmin(thread::hardware_concurrency(), (int)dataByAttribute.size());
-    numWorkers = 1;
-    cout << "Number of workers: " << numWorkers << endl;
+    int numWorkers = min((int)thread::hardware_concurrency(), (int)dataByAttribute.size());
     Interval initializer{-1, -1, -1, -1, -1};
     vector<Interval> bestIntervals(numWorkers, initializer);
 
@@ -413,9 +411,6 @@ void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &
                 bestInterval = interval;
             }
         }
-
-
-
 
         // fill that interval through all of bestIntervals
         for (int i = 0; i < numWorkers; i++) {
@@ -523,8 +518,6 @@ void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &
         HyperBlock h(maxes, mins, classNum);
         hyperBlocks.push_back(h);
     }
-
-    cout << "Made it to the end" << endl;
 }
 
 // use with the regular interval hyper below. Used with openMP or futures to launch a thread to get longest attribute, but it is inefficient because you make a kill so many threads.

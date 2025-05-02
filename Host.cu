@@ -47,7 +47,7 @@ map<int, string> CLASS_MAP_TESTING_INT;
 * We generate a confusion matrix, but allow for points to fall into multiple blocks at a time
 * that is why we go through blocks on outerloop and whole dataset on the inside.
 */
-float testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vector<std::vector<std::vector<float>>> &testSet, std::vector<std::vector<std::vector<float>>> &trainingSet, int k = 3, float threshold = 0.1){
+float testAccuracyOfHyperBlocks(vector<HyperBlock>& hyperBlocks, vector<vector<vector<float>>> &testSet, vector<vector<vector<float>>> &trainingSet, int k = 3, float threshold = 0.1){
 
   	// Keep track of which points were never inside of a block, when a point is classifed we increment the map internal vectors correct positon
     // there should be CLASS_NUM unordered_maps or just hashmaps, in each will hold a vector<point_index, vector<int> of len(class_num)>
@@ -155,15 +155,17 @@ float testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vecto
 	cout << "Any point was inside" << anyPointWasInside <<  endl;
 
 
-    std::cout << "\n\n\n\n" << std::endl;
-    std::cout << "============================ K-NN CONFUSION MATRIX ==================" << std::endl;
+    cout << "\n\n\n\n" << endl;
+    cout << "============================ K-NN CONFUSION MATRIX ==================" << endl;
 
-    // std::vector<std::vector<long>> secondConfusionMatrix = Knn::closeToInkNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
-    // std::vector<std::vector<long>> secondConfusionMatrix = Knn::closestBlock(unclassifiedPointVec, hyperBlocks, NUM_CLASSES);
-    // std::vector<std::vector<long>> secondConfusionMatrix = Knn::kNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
-    // std::vector<std::vector<long>> secondConfusionMatrix = Knn::mergableKNN(unclassifiedPointVec, trainingSet, hyperBlocks, NUM_CLASSES);
-    // std::vector<std::vector<long>> secondConfusionMatrix = Knn::pureKnn(unclassifiedPointVec, trainingSet, NUM_CLASSES, k);
-    std::vector<std::vector<long>> secondConfusionMatrix = Knn::thresholdKNN(unclassifiedPointVec, trainingSet, NUM_CLASSES, k, threshold);
+
+    // this is where we have lots of options. this graveyard is all the different "unclassified classifiers" we have tried.
+    // vector<vector<long>> secondConfusionMatrix = Knn::closeToInkNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
+    // vector<vector<long>> secondConfusionMatrix = Knn::closestBlock(unclassifiedPointVec, hyperBlocks, NUM_CLASSES);
+    // vector<vector<long>> secondConfusionMatrix = Knn::kNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
+    // vector<vector<long>> secondConfusionMatrix = Knn::mergableKNN(unclassifiedPointVec, trainingSet, hyperBlocks, NUM_CLASSES);
+    // vector<vector<long>> secondConfusionMatrix = Knn::pureKnn(unclassifiedPointVec, trainingSet, NUM_CLASSES, k);
+    vector<vector<long>> secondConfusionMatrix = Knn::thresholdKNN(unclassifiedPointVec, trainingSet, NUM_CLASSES, k, threshold);
     PrintingUtil::printConfusionMatrix(secondConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
     cout << "============================ END K-NN MATRIX ======================" << endl;
 
@@ -221,7 +223,7 @@ void computeLDAOrdering(const vector<vector<vector<float>>>& trainingData, vecto
     }
 }
 
-vector<float> runKFold(vector<vector<vector<float>>> &dataset,  bool takeUserInput = false, int removalCount = 3, int nearestNeighborK = 5, float similarityThreshold = 0.6f) {
+vector<float> runKFold(vector<vector<vector<float>>> &dataset,  bool takeUserInput = false, int removalCount = 3, int nearestNeighborK = 5, float similarityThreshold = 0.6f, bool hidePrinting) {
 
     if (dataset.empty()) {
         cout << "Please enter a training dataset before using K Fold validation" << endl;
@@ -248,6 +250,14 @@ vector<float> runKFold(vector<vector<vector<float>>> &dataset,  bool takeUserInp
     // if we're not using user input, we are testing for best accuracy and we can use 10.
     else
         k = 10;
+
+
+    // used to hide the printing of the regular kFold testing stuff. so that when we are finding best parameters we don't have all that printing
+    streambuf* oldBuf = nullptr;
+    ostringstream nullSink;          // collects nothing, never flushed
+    if (hidePrinting) {
+        oldBuf = cout.rdbuf(nullSink.rdbuf());   // silence everything
+    }
 
     vector<vector<vector<vector<float>>>> kFolds = DataUtil::splitDataset(dataset, k);
     // stats trackers for cross folds.
@@ -293,10 +303,16 @@ vector<float> runKFold(vector<vector<vector<float>>> &dataset,  bool takeUserInp
         // GENERATING BLOCKS BUSINESS AS USUAL
         vector<HyperBlock> hyperBlocks;
 
+        // make our blocks
         IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
+
+        // simplify them, with the simplification count we have specifed as a parameter. usually 0, but playing with this value can get us better results because we are removing more blocks
         Simplifications::REMOVAL_COUNT = removalCount;
+
+        // the vector of int is the total times it simplified, then the clause count.
         vector<int> result = Simplifications::runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
 
+        // clause count computed here because sometimes we don't simplify
         int totalPoints = 0;
         for (const auto &c : trainingData)
             totalPoints += c.size();
@@ -318,6 +334,10 @@ vector<float> runKFold(vector<vector<vector<float>>> &dataset,  bool takeUserInp
     float blockAvg = float(blockCount) / float(k);
     float clauseAvg = float(cCount) / float(k);
 
+    if (hidePrinting) {
+        cout.rdbuf(oldBuf);           // back to console
+    }
+    
     cout << "OVERALL ACCURACY " << avgAcc << endl;
     cout << "Average block count " << blockAvg << endl;
     cout << "Average clause count " << clauseAvg << endl;
@@ -336,15 +356,15 @@ void findBestParameters(vector<vector<vector<float>>> &dataset, int maxRemovalCo
     vector<float> bestResults = {-1, -1, -1};
     vector<int> bestParameters = {-1, -1, -1};
     for (int removalCount = 0; removalCount < maxRemovalCount; removalCount++) {
-        cout << "TESTING WITH REMOVAL COUNT: " << removalCount << "------------------------------" << endl;
         for (int k = 1; k <= maxK; k += 2) {
             for (int threshold = 1; threshold < 11; threshold++){
                 float t = 0.1f * (float)threshold;
-                vector<float> results = runKFold(dataset, false, removalCount, k, t);
+                vector<float> results = runKFold(dataset, false, removalCount, k, t, false);
                 if (results[0] > bestResults[0]) {
                     bestResults = results;
                     bestParameters = {removalCount, k, threshold};
                 }
+                cout << "Removal Count: " << removalCount << " K: " << k << " Threshold: " << t <<endl;
             }
         }
     }
@@ -638,7 +658,7 @@ void runInteractive() {
                 break;
             }
             case 8: { // TEST HYPERBLOCKS ON DATASET
-                std::cout << "Testing hyperblocks on testing dataset" << std::endl;
+                cout << "Testing hyperblocks on testing dataset" << endl;
                 testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData);
 
                 PrintingUtil::waitForEnter();

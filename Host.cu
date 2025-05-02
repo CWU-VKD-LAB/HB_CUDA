@@ -223,7 +223,7 @@ void computeLDAOrdering(const vector<vector<vector<float>>>& trainingData, vecto
     }
 }
 
-vector<float> runKFold(vector<vector<vector<float>>> &dataset,  bool takeUserInput = false, int removalCount = 3, int nearestNeighborK = 5, float similarityThreshold = 0.6f, bool hidePrinting) {
+vector<float> runKFold(vector<vector<vector<float>>> &dataset,  bool takeUserInput = false, int removalCount = 3, int nearestNeighborK = 5, float similarityThreshold = 0.6f, bool hidePrinting = false) {
 
     if (dataset.empty()) {
         cout << "Please enter a training dataset before using K Fold validation" << endl;
@@ -359,7 +359,7 @@ void findBestParameters(vector<vector<vector<float>>> &dataset, int maxRemovalCo
         for (int k = 1; k <= maxK; k += 2) {
             for (int threshold = 1; threshold < 11; threshold++){
                 float t = 0.1f * (float)threshold;
-                vector<float> results = runKFold(dataset, false, removalCount, k, t, false);
+                vector<float> results = runKFold(dataset, false, removalCount, k, t, true);
                 if (results[0] > bestResults[0]) {
                     bestResults = results;
                     bestParameters = {removalCount, k, threshold};

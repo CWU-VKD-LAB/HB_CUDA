@@ -47,7 +47,7 @@ map<int, string> CLASS_MAP_TESTING_INT;
 * We generate a confusion matrix, but allow for points to fall into multiple blocks at a time
 * that is why we go through blocks on outerloop and whole dataset on the inside.
 */
-float testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vector<std::vector<std::vector<float>>> &testSet, std::vector<std::vector<std::vector<float>>> &trainingSet, int k = 3){
+float testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vector<std::vector<std::vector<float>>> &testSet, std::vector<std::vector<std::vector<float>>> &trainingSet, int k = 3, float threshold = 0.1){
 
   	// Keep track of which points were never inside of a block, when a point is classifed we increment the map internal vectors correct positon
     // there should be CLASS_NUM unordered_maps or just hashmaps, in each will hold a vector<point_index, vector<int> of len(class_num)>
@@ -162,7 +162,8 @@ float testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vecto
     // std::vector<std::vector<long>> secondConfusionMatrix = Knn::closestBlock(unclassifiedPointVec, hyperBlocks, NUM_CLASSES);
     // std::vector<std::vector<long>> secondConfusionMatrix = Knn::kNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
     // std::vector<std::vector<long>> secondConfusionMatrix = Knn::mergableKNN(unclassifiedPointVec, trainingSet, hyperBlocks, NUM_CLASSES);
-    std::vector<std::vector<long>> secondConfusionMatrix = Knn::pureKnn(unclassifiedPointVec, trainingSet, NUM_CLASSES, k);
+    // std::vector<std::vector<long>> secondConfusionMatrix = Knn::pureKnn(unclassifiedPointVec, trainingSet, NUM_CLASSES, k);
+    std::vector<std::vector<long>> secondConfusionMatrix = Knn::thresholdKNN(unclassifiedPointVec, trainingSet, NUM_CLASSES, k, threshold);
     PrintingUtil::printConfusionMatrix(secondConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
     cout << "============================ END K-NN MATRIX ======================" << endl;
 
@@ -220,7 +221,7 @@ void computeLDAOrdering(const vector<vector<vector<float>>>& trainingData, vecto
     }
 }
 
-vector<float> runKFold(vector<vector<vector<float>>> &dataset,  bool takeUserInput = false, int removalCount = 0, int nearestNeighborK = 3) {
+vector<float> runKFold(vector<vector<vector<float>>> &dataset,  bool takeUserInput = false, int removalCount = 3, int nearestNeighborK = 5, float similarityThreshold = 0.6f) {
 
     if (dataset.empty()) {
         cout << "Please enter a training dataset before using K Fold validation" << endl;
@@ -293,16 +294,12 @@ vector<float> runKFold(vector<vector<vector<float>>> &dataset,  bool takeUserInp
         vector<HyperBlock> hyperBlocks;
 
         IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
-        //cout << "HYPERBLOCK GENERATION FINISHED!" << endl;
-        //cout << "GENERATED WITH " << hyperBlocks.size() << " BLOCKS" << endl;
+        Simplifications::REMOVAL_COUNT = removalCount;
         vector<int> result = Simplifications::runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
 
         int totalPoints = 0;
         for (const auto &c : trainingData)
             totalPoints += c.size();
-
-        //cout << "WE FOUND " << hyperBlocks.size() << " HYPERBLOCKS AFTER REMOVING USELESS BLOCKS!" << endl;
-        //cout << "After removing useless blocks we have: " << result[1] << " clauses\n";
 
         int clauseCount = 0;
         for (const auto &hb : hyperBlocks) {
@@ -312,7 +309,7 @@ vector<float> runKFold(vector<vector<vector<float>>> &dataset,  bool takeUserInp
             }
         }
 
-        acc += testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData);
+        acc += testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData, nearestNeighborK, similarityThreshold);
         blockCount += hyperBlocks.size();
         cCount += clauseCount;
     } // end of one train/test loop
@@ -337,17 +334,22 @@ void findBestParameters(vector<vector<vector<float>>> &dataset, int maxRemovalCo
     }
 
     vector<float> bestResults = {-1, -1, -1};
+    vector<int> bestParameters = {-1, -1, -1};
     for (int removalCount = 0; removalCount < maxRemovalCount; removalCount++) {
         cout << "TESTING WITH REMOVAL COUNT: " << removalCount << "------------------------------" << endl;
-
-        Simplifications::REMOVAL_COUNT = removalCount;
-        for (int k = 0; k < maxK; k++) {
-            vector<float> results = runKFold(dataset, false, removalCount, k);
-            if (results[0] > bestResults[0])
-                bestResults = results;
+        for (int k = 1; k <= maxK; k += 2) {
+            for (int threshold = 1; threshold < 11; threshold++){
+                float t = 0.1f * (float)threshold;
+                vector<float> results = runKFold(dataset, false, removalCount, k, t);
+                if (results[0] > bestResults[0]) {
+                    bestResults = results;
+                    bestParameters = {removalCount, k, threshold};
+                }
+            }
         }
     }
     cout << "Best accuracy: " << bestResults[0] << "\nBlock Count Average w/best results: " << bestResults[1] << "\nClause Count Average: " << bestResults[2] << endl;
+    cout << "BEST PARAMETERS: REMOVAL COUNT: " << bestParameters[0] << " K: " << bestParameters[1] << " Threshold: " << bestParameters[2] << endl;
 }
 
 /**
@@ -643,7 +645,7 @@ void runInteractive() {
                 break;
             }
             case 9: {
-                runKFold(trainingData, true);
+                runKFold(trainingData, true, 3, 5, 0.5f);
                 PrintingUtil::waitForEnter();
                 break;
             }

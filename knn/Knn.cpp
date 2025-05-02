@@ -15,7 +15,7 @@
 // Lets make a K-nn that goes through the unclassified points and sees how close they are to being
 // inside of each of the blocks. If the value for a attribute is within the bounds of the block we wont add any
 // distance to the sum. If the value is outside the bounds we will add the distance to the sum.
-std::vector<std::vector<long>> Knn::closeToInkNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES){
+std::vector<std::vector<long>> Knn::closeToInkNN(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<HyperBlock>& hyperBlocks, int k, int NUM_CLASSES) {
     // Basically we will do the same thing, we will just need to change our distancce thingy around.
     int FIELD_LENGTH = hyperBlocks[0].maximums.size();
     if (k > hyperBlocks.size()) k = (int)sqrt(hyperBlocks.size());
@@ -251,7 +251,7 @@ std::vector<std::vector<long>> Knn::blockPointkNN(std::vector<std::vector<std::v
     return regularConfusionMatrix;
 }
 
-std::vector<std::vector<long>> Knn::pureKnn(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<std::vector<std::vector<float>>> classifiedData, int NUM_CLASSES, int k = Knn::K) {
+std::vector<std::vector<long>> Knn::pureKnn(std::vector<std::vector<std::vector<float>>> unclassifiedData, std::vector<std::vector<std::vector<float>>> classifiedData, int NUM_CLASSES, int k) {
 
     int FIELD_LENGTH = classifiedData[0][0].size();
 
@@ -619,4 +619,135 @@ float Knn::mergeCheck(std::vector<int> &insertIdx, HyperBlock &hb, std::vector<s
 
     // 4.  Accuracy if we accept the point (+1 correct) and wrong extras.
     return float(hb.size + 1) / float(hb.size + 1 + wrong);
+}
+
+// returns the distance between two points, by attribute. This is helpful when we are not able to compare the distances by aggregating in any way. Useful for heterogenous data.
+std::vector<float> Knn::losslessDistance(std::vector<float> &seedPoint, std::vector<float> &trainPoint) {
+    std::vector<float> distances(seedPoint.size(), 0);
+    for (int attribute = 0; attribute < seedPoint.size(); attribute++)
+        distances[attribute] = std::fabs(seedPoint[attribute] - trainPoint[attribute]);
+
+    return distances;
+}
+
+std::vector<float> Knn::computeStdDeviations(const std::vector<std::vector<std::vector<float>>>& trainData) {
+    // total number of points
+    int numPoints = 0;
+    for (const auto& classPoints : trainData)
+        numPoints += static_cast<int>(classPoints.size());
+    if (numPoints == 0) return {};
+
+    int FIELD_LENGTH = static_cast<int>(trainData[0][0].size());
+
+    // compute means
+    std::vector<float> means(FIELD_LENGTH, 0.0f);
+    for (const auto& classPoints : trainData) {
+        for (const auto& point : classPoints) {
+            for (int j = 0; j < FIELD_LENGTH; ++j) {
+                means[j] += point[j];
+            }
+        }
+    }
+    for (int j = 0; j < FIELD_LENGTH; ++j) {
+        means[j] /= numPoints;
+    }
+
+    // compute sum of squared deviations
+    std::vector<float> sqDiffs(FIELD_LENGTH, 0.0f);
+    for (const auto& classPoints : trainData) {
+        for (const auto& point : classPoints) {
+            for (int j = 0; j < FIELD_LENGTH; ++j) {
+                float d = point[j] - means[j];
+                sqDiffs[j] += d * d;
+            }
+        }
+    }
+
+    // finalize to standard deviations
+    std::vector<float> stddevs(FIELD_LENGTH);
+    for (int j = 0; j < FIELD_LENGTH; ++j) {
+        stddevs[j] = std::sqrt(sqDiffs[j] / numPoints);
+
+        // if you want sample std-dev instead, use:
+        // stddevs[j] = std::sqrt(sqDiffs[j] / (numPoints - 1));
+    }
+    return stddevs;
+}
+
+std::vector<std::vector<long>> Knn::thresholdKNN(std::vector<std::vector<std::vector<float>>> &unclassifiedData, std::vector<std::vector<std::vector<float>>> &classifiedData, int NUM_CLASSES, int k, float threshold) {
+
+    int FIELD_LENGTH = classifiedData[0][0].size();
+
+    // This will hold the predicted class for each unclassified point
+    std::vector<std::vector<int>> classifications(NUM_CLASSES); // [trueClass][pointIndex]
+    for (int i = 0; i < NUM_CLASSES; i++) {
+        classifications[i] = std::vector<int>(unclassifiedData[i].size(), -1);
+    }
+
+    // our vector of standard deviations
+    std::vector<float> deviations = computeStdDeviations(classifiedData);
+
+    int totalTrainingPoints = 0;
+    for (auto& classPoints : classifiedData) {
+        totalTrainingPoints += classPoints.size();
+    }
+
+    // For each unclassified point
+    for (int trueClass = 0; trueClass < NUM_CLASSES; ++trueClass) {
+
+        for (int point = 0; point < unclassifiedData[trueClass].size(); ++point) {
+            auto &unclassifiedPoint = unclassifiedData[trueClass][point];
+
+            // Instead of a priority_queue, do this:
+            std::vector<std::pair<int,int>> sims;
+            sims.reserve(totalTrainingPoints);
+
+            for (int trainClass = 0; trainClass < NUM_CLASSES; ++trainClass) {
+                for (auto &p : classifiedData[trainClass]) {
+                    int sim = 0;
+                    std::vector<float> differences = Knn::losslessDistance(unclassifiedPoint, p);
+                    for (int att = 0; att < FIELD_LENGTH; ++att)
+                        if (differences[att] < deviations[att] * threshold)
+                            ++sim;
+                    sims.emplace_back(sim, trainClass);
+                }
+            }
+
+            // 2) sort descending
+            std::sort(sims.begin(), sims.end(),
+                      [](std::pair<int,int> &a, std::pair<int,int> &b){ return a.first > b.first; });
+
+            // 3) find cutoff similarity
+            int cutoffIdx = std::min((int)sims.size()-1, k-1);
+            int cutoffSim = sims[cutoffIdx].first;
+
+            // 4) vote on *all* sims ≥ cutoffSim
+            std::vector<int> votes(NUM_CLASSES, 0);
+            for (auto &pr : sims) {
+                if (pr.first < cutoffSim) break;
+                votes[pr.second]++;
+            }
+
+            // Determine majority vote
+            int majorityClass = -1;
+            int maxVotes = -1;
+            for (int c = 0; c < NUM_CLASSES; ++c) {
+                if (votes[c] > maxVotes) {
+                    maxVotes = votes[c];
+                    majorityClass = c;
+                }
+            }
+            classifications[trueClass][point] = majorityClass;
+        }
+    }
+
+    // Build confusion matrix
+    std::vector<std::vector<long>> confusionMatrix(NUM_CLASSES, std::vector<long>(NUM_CLASSES, 0));
+    for (int trueClass = 0; trueClass < NUM_CLASSES; ++trueClass) {
+        for (int p = 0; p < classifications[trueClass].size(); ++p) {
+            int predictedClass = classifications[trueClass][p];
+            confusionMatrix[trueClass][predictedClass]++;
+        }
+    }
+    return confusionMatrix;
 }

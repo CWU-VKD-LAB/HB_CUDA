@@ -5,6 +5,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cuda_runtime.h>
+#include "./data_utilities/StatStructs.h"
 #include <limits>
 #include <future>
 #include "./lda/LDA.cpp"
@@ -230,144 +231,75 @@ vector<vector<HyperBlock>> oneToOneHyper(const vector<vector<vector<float>>>& tr
 * We generate a confusion matrix, but allow for points to fall into multiple blocks at a time
 * that is why we go through blocks on outerloop and whole dataset on the inside.
 */
-float testAccuracyOfHyperBlocks(std::vector<HyperBlock>& hyperBlocks, std::vector<std::vector<std::vector<float>>> &testSet, std::vector<std::vector<std::vector<float>>> &trainingSet, std::vector<int> order){
+float testAccuracyOfHyperBlocks(
+    std::vector<HyperBlock>& hyperBlocks,
+    std::vector<std::vector<std::vector<float>>>& testSet,
+    std::vector<std::vector<std::vector<float>>>& trainingSet,
+    std::vector<int> order,
+    std::map<std::pair<int, int>, PointSummary>& pointSummaries // OUTPUT
+) {
+    std::vector<std::unordered_map<int, std::vector<int>>> pointsNotClassified(CLASS_MAP.size());
 
-  	// Keep track of which points were never inside of a block, when a point is classifed we increment the map internal vectors correct positon
-    // there should be CLASS_NUM unordered_maps or just hashmaps, in each will hold a vector<point_index, vector<int> of len(class_num)>
-    vector<unordered_map<int, vector<int>>> pointsNotClassified(CLASS_MAP.size());
-
-    // Go through each class
-    for(int cls = 0; cls < NUM_CLASSES; cls++){
-        // Put the index of each point in each class into a set, this is how we will track which points were never classified.
-        for(int j = 0; j < testSet[cls].size(); j++){
-            pointsNotClassified[cls][j] = vector<int>(NUM_CLASSES);
+    for (int cls = 0; cls < NUM_CLASSES; cls++) {
+        for (int j = 0; j < testSet[cls].size(); j++) {
+            pointsNotClassified[cls][j] = std::vector<int>(NUM_CLASSES);
         }
     }
 
-	// Make a n x n matrix for the confusion matrix
-	vector<vector<long>> ultraConfusionMatrix(NUM_CLASSES, vector<long>(NUM_CLASSES, 0));
-    vector<vector<long>> regularConfusionMatrix(NUM_CLASSES, vector<long>(NUM_CLASSES, 0));
-
-    bool anyPointWasInside = false;
-
-    // Go through all the blocks
-	for(int hb = 0; hb < hyperBlocks.size(); hb++){
+    for (int hb = 0; hb < hyperBlocks.size(); hb++) {
         HyperBlock& currBlock = hyperBlocks[hb];
-        // Go through all the classes in the testSet
-		for(int cls = 0; cls < NUM_CLASSES; cls++){
-            // go through all the points in a clases
-        	for(int pnt = 0; pnt < testSet[cls].size(); pnt++){
-           		const vector<float>& point = testSet[cls][pnt];
-
-                if(currBlock.inside_HB(point.size(), point.data())){
-
-					ultraConfusionMatrix[cls][currBlock.classNum]++;
-
-                    // Go to the actual class, to the right points entry, and increment the "predicted" class (the hb it was in).
+        for (int cls = 0; cls < NUM_CLASSES; cls++) {
+            for (int pnt = 0; pnt < testSet[cls].size(); pnt++) {
+                const std::vector<float>& point = testSet[cls][pnt];
+                if (currBlock.inside_HB(point.size(), point.data())) {
                     pointsNotClassified[cls][pnt][currBlock.classNum]++;
+
+                    // Make the point summary entry for this point, might want to double check this thing.
+                    PointSummary& summary = pointSummaries[std::make_pair(cls, pnt)];
+                    summary.classIdx = cls;
+                    summary.pointIdx = pnt;
+
+                    // make the blockinfo
+                    BlockInfo info;
+                    info.blockClass = currBlock.classNum;
+                    info.blockIdx = hb;
+                    info.blockSize = currBlock.size;
+                    info.blockDensity = -1;
+
+                    summary.blockHits.push_back(info);
                 }
-        	}
-     	}
-    }
-
-    // Lets count how many points fell into blocks of multiple classes
-    for(int i = 0; i < NUM_CLASSES; i++){
-       int numPointsInMultipleClasses = 0;
-       int numPointsInNoBlocks = 0;
-
-       // Go through all the points in a class.
-       for(int pnt = 0; pnt < testSet[i].size(); pnt++){
-           char in = 0;
-
-           // Go through the classification vector for the point
-           for(int cls = 0; cls < NUM_CLASSES; cls++){
-               if(pointsNotClassified[i][pnt][cls] > 0){
-                  in++;
-               }
-
-               // Means it fell into multiple of the same.
-               if(in > 1){
-                   break;
-               }
-           }
-
-           if(in > 1) {
-               numPointsInMultipleClasses++;
-           }
-
-           if(in == 0) numPointsInNoBlocks++;
-       }
-
-       cout << "CLASS: " << CLASS_MAP_INT[i] << "NUM POINTS IN MULTIPLE CLASSES BLOCKS: " << numPointsInMultipleClasses << endl;
-       cout << "CLASS: " << CLASS_MAP_INT[i] << "NUM POINTS IN NO BLOCKS: " << numPointsInNoBlocks << endl;
-    }
-
-    vector<vector<vector<float>>> unclassifiedPointVec(NUM_CLASSES, vector<vector<float>>()); // [class][pointIdx][attr]
-
-    // Lets count how many points fell into blocks of multiple classes
-for (int i = 0; i < NUM_CLASSES; i++) {
-    for (int pnt = 0; pnt < testSet[i].size(); pnt++) {
-        int assignedClass = -1;
-
-        // Use classOrder to prioritize better-separated classes
-        for (int rank = 0; rank < NUM_CLASSES; rank++) {
-            int candidateClass = order[rank];
-
-            // If this point falls into a block of candidateClass
-            if (pointsNotClassified[i][pnt][candidateClass] > 0) {
-                assignedClass = candidateClass;
-                break; // Assign to the highest-ranked class it overlaps
             }
         }
+    }
 
-        if (assignedClass != -1) {
-            regularConfusionMatrix[i][assignedClass]++;
-        } else {
-            // Still unclassified → add to kNN fallback
-            unclassifiedPointVec[i].push_back(testSet[i][pnt]);
+    // Assign predicted class
+    std::map<std::pair<int, int>, PointSummary>::iterator it;
+    for (it = pointSummaries.begin(); it != pointSummaries.end(); ++it) {
+        PointSummary& summary = it->second;
+        std::map<int, int> classVotes;
+        for (size_t i = 0; i < summary.blockHits.size(); ++i) {
+            classVotes[summary.blockHits[i].blockClass]++;
         }
-    }
-}
-
-
-    cout << "\n\n\n\n" << endl;
-    cout << "============================ REGULAR CONFUSION MATRIX ==================" << endl;
-    PrintingUtil::printConfusionMatrix(regularConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
-    cout << "============================ END CONFUSION MATRIX ======================" << endl;
-
-	cout << "Any point was inside" << anyPointWasInside <<  endl;
-
-
-    std::cout << "\n\n\n\n" << std::endl;
-    std::cout << "============================ K-NN CONFUSION MATRIX ==================" << std::endl;
-
-    // Find the closest actual cases to the edge of each block.
-    for(HyperBlock& hb: hyperBlocks){
-        hb.tameBounds(trainingSet);
-    }
-
-    int k = 3;
-    //std::vector<std::vector<long>> secondConfusionMatrix = Knn::closeToInkNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
-    // std::vector<std::vector<long>> secondConfusionMatrix = Knn::closestBlock(unclassifiedPointVec, hyperBlocks, NUM_CLASSES);
-    std::vector<std::vector<long>> secondConfusionMatrix = Knn::pureKnn(unclassifiedPointVec, trainingSet,  k, NUM_CLASSES);
-    //std::vector<std::vector<long>> secondConfusionMatrix = Knn::bruteMergable(unclassifiedPointVec, trainingSet, hyperBlocks, 5, NUM_CLASSES);
-
-    PrintingUtil::printConfusionMatrix(secondConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
-    cout << "============================ END K-NN MATRIX ======================" << endl;
-
-    for (int i = 0; i < NUM_CLASSES; i++) {
-        for (int j = 0; j < NUM_CLASSES; j++) {
-            regularConfusionMatrix[i][j] = regularConfusionMatrix[i][j] + secondConfusionMatrix[i][j];
+        int maxVotes = -1;
+        int predictedClass = -1;
+        std::map<int, int>::iterator voteIt;
+        for (voteIt = classVotes.begin(); voteIt != classVotes.end(); ++voteIt) {
+            if (voteIt->second > maxVotes) {
+                maxVotes = voteIt->second;
+                predictedClass = voteIt->first;
+            }
         }
+        summary.predictedIdx = predictedClass;
     }
 
-    cout << "\n\n\n\n" << endl;
-    cout << "============================ DISTINCT POINT CONFUSION MATRIX ==================" << endl;
-    float accuracy = PrintingUtil::printConfusionMatrix(regularConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
-    cout << "============================ END DISTINCT POINT MATRIX ======================" << endl;
-    cout << "\n\n\n\n" << endl;
+    //TODO: PUT IN THE KNN HERE,
+    //TODO  add to PointSummary with info from KNN fallback pls
 
-    return accuracy;
+
+
+
+
+    return 0.0f; // placeholder
 }
 
 

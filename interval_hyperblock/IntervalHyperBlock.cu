@@ -357,6 +357,7 @@ void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &
 
     // get our number of workers and set up our vector of intervals for them to populate.
     int numWorkers = min((int)thread::hardware_concurrency(), (int)dataByAttribute.size());
+
     Interval initializer{-1, -1, -1, -1, -1};
     vector<Interval> bestIntervals(numWorkers, initializer);
 
@@ -406,7 +407,6 @@ void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &
         Interval bestInterval(initializer);
         for (auto interval : bestIntervals) {
             // if this one is better just copy it
-            cout << "Best size supervisor: " << interval.size << endl;
             if (interval.size > bestInterval.size && interval.size > 1) {
                 bestInterval = interval;
             }

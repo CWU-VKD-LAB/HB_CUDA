@@ -15,6 +15,10 @@ public:
     int classNum;
     int size;
 
+    std::vector<float> tamedMin;
+    std::vector<float> tamedMax;
+
+
     // This will hold the indices of which points are in the block [classIdx][pointIdx]
     std::vector<std::vector<int>> pointIndices;
 
@@ -29,8 +33,10 @@ public:
     float distance_to_HB_Edge(int numAttributes, const float* point) const;
     float distance_to_HB_Avg(int numAttributes, const float* point) const;
     float distance_to_HB_Combo(int numAttributes, const float* point) const;
+    void tameBounds(const std::vector<std::vector<std::vector<float>>>& trainingData);
 
-    bool inside_HB(int numAttributes, const float* point);
+
+    bool inside_HB(int numAttributes, const float* point) const;
     void find_avg_and_size(const std::vector<std::vector<std::vector<float>>>& data);
     int inside_N_Bounds(int numAttributes, const float* point);
 

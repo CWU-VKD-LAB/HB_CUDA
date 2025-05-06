@@ -30,7 +30,7 @@ HyperBlock::HyperBlock(std::vector<std::vector<std::vector<float>>>& hb_data, in
 }
 
 
-bool HyperBlock::inside_HB(int numAttributes, const float* point) {
+bool HyperBlock::inside_HB(int numAttributes, const float* point) const {
     constexpr float EPSILON = 1e-6f;  // Small tolerance value
     
     for (int i = 0; i < numAttributes; i++) {
@@ -190,4 +190,66 @@ void HyperBlock::find_avg_and_size(const std::vector<std::vector<std::vector<flo
 
     this->size = totalSize;
     this->avgPoint = sumPoint;
+}
+
+void HyperBlock::tameBounds(const std::vector<std::vector<std::vector<float>>>& trainingData) {
+    // Ensure we are working with non-disjunctive bounds
+    int numDims = minimums.size();
+    int numPoints = pointIndices[classNum].size();
+
+    if (numPoints == 0) return;
+
+    // Gather points in the block
+    std::vector<std::vector<float>> inBlockPoints(numPoints);
+    for (int i = 0; i < numPoints; i++) {
+        int pointIdx = pointIndices[classNum][i];
+        inBlockPoints[i] = trainingData[classNum][pointIdx];
+    }
+
+    // Compute dominance count for min (dominated by others)
+    std::vector<int> minDominanceCounts(numPoints, 0);
+    // Compute dominance count for max (dominates others)
+    std::vector<int> maxDominanceCounts(numPoints, 0);
+
+    for (int i = 0; i < numPoints; i++) {
+        for (int j = 0; j < numPoints; j++) {
+            if (i == j) continue;
+
+            bool jAboveI = true;
+            bool jBelowI = true;
+
+            for (int d = 0; d < numDims; d++) {
+                if (inBlockPoints[j][d] < inBlockPoints[i][d]) {
+                    jAboveI = false;
+                }
+                if (inBlockPoints[j][d] > inBlockPoints[i][d]) {
+                    jBelowI = false;
+                }
+            }
+
+            if (jAboveI) minDominanceCounts[i]++;
+            if (jBelowI) maxDominanceCounts[i]++;
+        }
+    }
+
+    // Find the best min and max index
+    int bestMinIdx = 0;
+    int bestMaxIdx = 0;
+    int maxDomBy = -1;
+    int maxDomOver = -1;
+
+    for (int i = 0; i < numPoints; i++) {
+        if (minDominanceCounts[i] > maxDomBy) {
+            maxDomBy = minDominanceCounts[i];
+            bestMinIdx = i;
+        }
+        if (maxDominanceCounts[i] > maxDomOver) {
+            maxDomOver = maxDominanceCounts[i];
+            bestMaxIdx = i;
+        }
+    }
+
+    // Save tamed min and max to class fields
+    tamedMin = inBlockPoints[bestMinIdx];
+    tamedMax = inBlockPoints[bestMaxIdx];
 }

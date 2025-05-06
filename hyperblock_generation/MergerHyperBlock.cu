@@ -6,13 +6,11 @@
 // REFACTORED MERGER HYPER BLOCKS KERNEL FUNCTION. DOESN'T NEED THE COOPERATIVE GROUPS.
 // WRAP IN A LOOP. launch mergerHyperBlocks with i up to N - 1 as seed index, each time then rearrange, then reset.
 // ------------------------------------------------------------------------------------------------
-
 // Define a macro to compare float4's for equality.
 #define COMPARE_FLOAT4(a, b) ( (((a).x == (b).x) && ((a).y == (b).y) && ((a).z == (b).z) && ((a).w == (b).w)) ? 0 : 1 )
 // Define simple min/max macros for scalar floats.
 #define min_f(a, b) ((a) > (b) ? (b) : (a))
 #define max_f(a, b) ((a) > (b) ? (a) : (b))
-
 // Hybrid kernel that uses block-level cooperation but vectorizes with float4's.
 __global__ void mergerHyperBlocks(
     const int seedIndex, 
@@ -57,6 +55,9 @@ __global__ void mergerHyperBlocks(
     // ...and the second half for the maxes.
     float4 *localCombinedMaxes = (float4*) (sharedMem + numAttributes);
 
+    // Reinterpret opposingPoints as a SoA float4 array for coalesced loads.
+    const float4* opp4 = reinterpret_cast<const float4*>(opposingPoints);
+
     __syncthreads();
 
     // Each CUDA block will iterate over candidate Hyperblocks (with a stride of gridDim.x).
@@ -73,8 +74,7 @@ __global__ void mergerHyperBlocks(
         }
         __syncthreads();
 
-        // For each chunk (float4) of attributes, load the seed and candidate bounds,
-        // compute the combined bounds, and store them in shared memory.
+        // (a) build combined bounds into shared memory
         for (int i = localID; i < numAttributesAsFours; i += blockDim.x) {
             // Load seed block's bounds.
             float4 seedMin = *((float4*)&hyperBlockMins[seedBlock * numAttributes] + i);
@@ -83,60 +83,46 @@ __global__ void mergerHyperBlocks(
             float4 candMin = *((float4*)&hyperBlockMins[candidate * numAttributes] + i);
             float4 candMax = *((float4*)&hyperBlockMaxes[candidate * numAttributes] + i);
 
-            // Compute the combined bounds (min and max) using our simple scalar functions.
-            float4 combinedMin;
-            combinedMin.x = min_f(seedMin.x, candMin.x);
-            combinedMin.y = min_f(seedMin.y, candMin.y);
-            combinedMin.z = min_f(seedMin.z, candMin.z);
-            combinedMin.w = min_f(seedMin.w, candMin.w);
+            // Compute the combined bounds (min and max).
+            float4 combinedMin = {
+                min_f(seedMin.x, candMin.x),
+                min_f(seedMin.y, candMin.y),
+                min_f(seedMin.z, candMin.z),
+                min_f(seedMin.w, candMin.w)
+            };
+            float4 combinedMax = {
+                max_f(seedMax.x, candMax.x),
+                max_f(seedMax.y, candMax.y),
+                max_f(seedMax.z, candMax.z),
+                max_f(seedMax.w, candMax.w)
+            };
 
-            float4 combinedMax;
-            combinedMax.x = max_f(seedMax.x, candMax.x);
-            combinedMax.y = max_f(seedMax.y, candMax.y);
-            combinedMax.z = max_f(seedMax.z, candMax.z);
-            combinedMax.w = max_f(seedMax.w, candMax.w);
-
-            // Write the combined bounds to shared memory.
+            // Store in shared memory.
             localCombinedMins[i] = combinedMin;
             localCombinedMaxes[i] = combinedMax;
 
-            // Early-out check: if the combined bound differs from the seed block's bounds,
-            // mark that candidate’s values were used.
-            if ((combinedMin.x != seedMin.x) || (combinedMin.y != seedMin.y) ||
-                (combinedMin.z != seedMin.z) || (combinedMin.w != seedMin.w) ||
-                (combinedMax.x != seedMax.x) || (combinedMax.y != seedMax.y) ||
-                (combinedMax.z != seedMax.z) || (combinedMax.w != seedMax.w)) {
+            // Did we actually use any seed values?
+            if (COMPARE_FLOAT4(combinedMin, seedMin) || COMPARE_FLOAT4(combinedMax, seedMax)) {
                 atomicOr(&usedSeedBlock, 1);
             }
-            // Similarly, check against the candidate block's original bounds.
-            if ((combinedMin.x != candMin.x) || (combinedMin.y != candMin.y) ||
-                (combinedMin.z != candMin.z) || (combinedMin.w != candMin.w) ||
-                (combinedMax.x != candMax.x) || (combinedMax.y != candMax.y) ||
-                (combinedMax.z != candMax.z) || (combinedMax.w != candMax.w)) {
+            // Did we actually use any candidate values?
+            if (COMPARE_FLOAT4(combinedMin, candMin) || COMPARE_FLOAT4(combinedMax, candMax)) {
                 atomicOr(&usedCandidateBlock, 1);
             }
         }
         __syncthreads();
 
         // Determine whether we really need to scan the dataset.
-        // If one block's bounds were taken entirely as-is, then we can skip checking opposing points.
         int needDatasetCheck = (usedSeedBlock && usedCandidateBlock);
 
-        // Now, check opposing points to see if any fall completely inside the new combined bounds.
-        // The opposing points are split among threads.
+        // (b) scan every point for containment
         for (int pointIndex = localID; pointIndex < numPoints && blockMergable && needDatasetCheck; pointIndex += blockDim.x) {
-            
-            bool pointOutside = false; // assume point is out-of-bounds until proven inside
-            
-            // Loop over each float4 segment of the point's attributes.
+            bool pointOutside = false;
             for (int i = 0; i < numAttributesAsFours; i++) {
-            
-                // Load four attributes for this point.
-                float4 pointVal = *((float4*)&opposingPoints[pointIndex * numAttributes] + i);
-                float4 combMin = localCombinedMins[i];
-                float4 combMax = localCombinedMaxes[i];
-
-                // If any attribute is outside the combined bounds, mark the point as valid.
+                // coalesced SoA load:
+                float4 pointVal = opp4[ i * numPoints + pointIndex ];
+                float4 combMin  = localCombinedMins[i];
+                float4 combMax  = localCombinedMaxes[i];
                 if (pointVal.x < combMin.x || pointVal.x > combMax.x ||
                     pointVal.y < combMin.y || pointVal.y > combMax.y ||
                     pointVal.z < combMin.z || pointVal.z > combMax.z ||
@@ -145,7 +131,6 @@ __global__ void mergerHyperBlocks(
                     break;
                 }
             }
-            // If the entire point lies within the combined bounds, then merging fails.
             if (!pointOutside) {
                 blockMergable = 0;
                 break;
@@ -153,23 +138,21 @@ __global__ void mergerHyperBlocks(
         }
         __syncthreads();
 
-        // If the candidate block passes the check, update its global bounds.
+        // (c) write back result for this candidate
         if (blockMergable) {
+            // if the block was mergeable, we are just going to save it's new combined bounds
             for (int i = localID; i < numAttributesAsFours; i += blockDim.x) {
                 *((float4*)&hyperBlockMins[candidate * numAttributes] + i) = localCombinedMins[i];
                 *((float4*)&hyperBlockMaxes[candidate * numAttributes] + i) = localCombinedMaxes[i];
             }
+
+            // now thread 0 can mark the seedblock as deleteable, and we are merged.
             if (localID == 0) {
-                // Mark the seed block as merged (or “deleted”).
                 atomicMax(&deleteFlags[seedBlock], -1);
-                // Indicate that the candidate block did merge.
                 mergable[candidate] = 1;
             }
-        } else {
-            if (localID == 0) {
-                // Merging failed for this candidate.
-                mergable[candidate] = 0;
-            }
+        } else if (localID == 0) {
+            mergable[candidate] = 0;
         }
         __syncthreads();
     }

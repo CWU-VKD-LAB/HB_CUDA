@@ -1,9 +1,9 @@
 #pragma once
 #include <cuda_runtime.h>
+#include "../hyperblock/HyperBlock.h"
 
 #ifndef HyperBlockCuda_CUH
 #define HyperBlockCuda_CUH
-
 // === KERNELS: ===
 __global__ void mergerHyperBlocks(
     const int seedIndex, int *readSeedQueue, const int numBlocks,

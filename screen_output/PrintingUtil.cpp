@@ -45,7 +45,9 @@ void PrintingUtil::displayMainMenu() {
     std::cout << "13. Export 1-1 Hyperblocks.\n";
     std::cout << "14. K-Fold 1-1\n";
     std::cout << std::endl;
-    std::cout << "15. Quit\n\n";
+    std::cout << "15. Find Best Parameters\n\n";
+    std::cout << "16. Quit\n\n";
+
 
 }
 

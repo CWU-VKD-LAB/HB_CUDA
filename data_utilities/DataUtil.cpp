@@ -391,6 +391,33 @@ void DataUtil::saveBasicHBsToBinary(const std::vector<HyperBlock>& hyperBlocks, 
     file.close();
 }
 
+std::vector<std::vector<HyperBlock>> DataUtil::loadOneToSomeBlocksFromBinary(const std::string& fileName) {
+    std::vector<HyperBlock> allBlocks = DataUtil::loadBasicHBsFromCSV(fileName);
+    std::vector<std::vector<HyperBlock>> splitBlocks;
+
+    if (allBlocks.empty()) return splitBlocks;
+
+    std::vector<HyperBlock> currentGroup;
+    int currentClass = allBlocks[0].classNum;
+
+    for (const auto& block : allBlocks) {
+        if (block.classNum != currentClass) {
+            // Class label changed. finalize current group
+            splitBlocks.push_back(currentGroup);
+            currentGroup.clear();
+            currentClass = block.classNum;
+        }
+        currentGroup.push_back(block);
+    }
+
+    // Push the last group
+    if (!currentGroup.empty()) {
+        splitBlocks.push_back(currentGroup);
+    }
+
+    return splitBlocks;
+}
+
 /***
 * We want to go through the hyperBlocks that were generated and write them to a file.
 *
@@ -466,6 +493,89 @@ void DataUtil::saveOneToOneHBsToCSV(const std::vector<std::vector<HyperBlock>>& 
     }
 
     file.close();
+}
+
+/**
+ * Binary format for saving and loading One-to-One HyperBlock sets.
+ *
+ * PURPOSE:
+ * This format is used to serialize multiple sets of binary classification HyperBlocks,
+ * where each set corresponds to a unique class-pair (e.g., class 0 vs class 1).
+ * Each HyperBlock consists of a set of minimum and maximum bounds per attribute,
+ * and a target class label indicating which class it covers.
+ *
+ * FILE STRUCTURE (all integers are stored as 4-byte `int`, floats as 4-byte `float`):
+ *
+ * [int]   numBlockSets                      // Total number of class-pair HyperBlock sets
+ *
+ * For each block set:
+ *     [int] classA                          // First class in the binary pair
+ *     [int] classB                          // Second class in the binary pair
+ *     [int] numBlocks                       // Number of HyperBlocks in this class-pair set
+ *
+ *     For each HyperBlock:
+ *         [int] attrCount                  // Number of attributes in the block
+ *         [float] min_0                    // First attribute minimum bound
+ *         ...
+ *         [float] min_(attrCount-1)
+ *         [float] max_0                    // First attribute maximum bound
+ *         ...
+ *         [float] max_(attrCount-1)
+ *         [int] classNum                   // Class this block belongs to (same as classA or classB)
+ *
+ * NOTES:
+ * - Each `minimums` and `maximums` vector is assumed to contain one float per attribute.
+ * - The file format does NOT currently support disjunctive/merged bounds per attribute.
+ * - HyperBlock is assumed to be constructible from (maximums, minimums, classNum).
+ *
+ */
+void DataUtil::saveOneToOneHBsToBinary(const std::vector<std::vector<HyperBlock>>& oneToOneHBs, const std::string& fileName) {
+    std::ofstream out(fileName, std::ios::binary);
+    if (!out.is_open()) {
+        std::cerr << "Error opening binary file for write: " << fileName << std::endl;
+        return;
+    }
+
+    int numBlockSets = static_cast<int>(oneToOneHBs.size());
+    out.write(reinterpret_cast<char*>(&numBlockSets), sizeof(int));
+
+    for (const auto& blockSet : oneToOneHBs) {
+        // Save class pair
+        std::set<int> classNums;
+        for (const auto& hb : blockSet) {
+            classNums.insert(hb.classNum);
+            if (classNums.size() == 2) break;
+        }
+
+        int classA = *classNums.begin();
+        int classB = *(++classNums.begin());
+        out.write(reinterpret_cast<char*>(&classA), sizeof(int));
+        out.write(reinterpret_cast<char*>(&classB), sizeof(int));
+
+        int numBlocks = static_cast<int>(blockSet.size());
+        out.write(reinterpret_cast<char*>(&numBlocks), sizeof(int));
+
+        for (const auto& hb : blockSet) {
+            int attrCount = static_cast<int>(hb.minimums.size());
+            out.write(reinterpret_cast<char*>(&attrCount), sizeof(int));
+
+            // Write mins
+            for (const auto& vec : hb.minimums) {
+                float val = vec[0];
+                out.write(reinterpret_cast<char*>(&val), sizeof(float));
+            }
+
+            // Write maxs
+            for (const auto& vec : hb.maximums) {
+                float val = vec[0];
+                out.write(reinterpret_cast<char*>(&val), sizeof(float));
+            }
+
+            out.write(reinterpret_cast<const char*>(&hb.classNum), sizeof(int));
+        }
+    }
+
+    out.close();
 }
 
 
@@ -554,6 +664,61 @@ std::vector<std::vector<HyperBlock>> DataUtil::loadOneToOneHBsFromCSV(const std:
     return allHyperBlocks;
 }
 
+
+std::vector<std::vector<HyperBlock>> DataUtil::loadOneToOneHBsFromBinary(const std::string& fileName, std::vector<std::pair<int, int>>& classPairsOut) {
+    std::ifstream in(fileName, std::ios::binary);
+    std::vector<std::vector<HyperBlock>> allHyperBlocks;
+
+    if (!in.is_open()) {
+        std::cerr << "Error opening binary file for read: " << fileName << std::endl;
+        return allHyperBlocks;
+    }
+
+    int numBlockSets;
+    in.read(reinterpret_cast<char*>(&numBlockSets), sizeof(int));
+
+    for (int setIdx = 0; setIdx < numBlockSets; ++setIdx) {
+        int classA, classB;
+        in.read(reinterpret_cast<char*>(&classA), sizeof(int));
+        in.read(reinterpret_cast<char*>(&classB), sizeof(int));
+        classPairsOut.emplace_back(classA, classB);
+
+        int numBlocks;
+        in.read(reinterpret_cast<char*>(&numBlocks), sizeof(int));
+
+        std::vector<HyperBlock> currentSet;
+
+        for (int b = 0; b < numBlocks; ++b) {
+            int attrCount;
+            in.read(reinterpret_cast<char*>(&attrCount), sizeof(int));
+
+            std::vector<std::vector<float>> mins(attrCount);
+            std::vector<std::vector<float>> maxs(attrCount);
+
+            for (int i = 0; i < attrCount; ++i) {
+                float val;
+                in.read(reinterpret_cast<char*>(&val), sizeof(float));
+                mins[i].push_back(val);
+            }
+
+            for (int i = 0; i < attrCount; ++i) {
+                float val;
+                in.read(reinterpret_cast<char*>(&val), sizeof(float));
+                maxs[i].push_back(val);
+            }
+
+            int classNum;
+            in.read(reinterpret_cast<char*>(&classNum), sizeof(int));
+
+            currentSet.emplace_back(maxs, mins, classNum);
+        }
+
+        allHyperBlocks.push_back(currentSet);
+    }
+
+    in.close();
+    return allHyperBlocks;
+}
 
 
 /**

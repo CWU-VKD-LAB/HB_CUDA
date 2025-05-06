@@ -45,9 +45,10 @@ class DataUtil {
         // SAVES BASIC HBS (WITHOUT DISJUNCTIONS) TO THE FILE INPUT AS CSV.
         static void saveBasicHBsToCSV(const std::vector<HyperBlock>& hyperBlocks, const std::string& fileName, int FIELD_LENGTH);
         static std::vector<HyperBlock> loadBasicHBsFromCSV(const std::string& fileName);
+        static std::vector<std::vector<HyperBlock>> DataUtil::loadOneToSomeBlocksFromBinary(const std::string& fileName);
 
-
-
+        static void saveOneToOneHBsToBinary(const std::vector<std::vector<HyperBlock>>& oneToOneHBs, const std::string& fileName);
+        static std::vector<std::vector<HyperBlock>> loadOneToOneHBsFromBinary(const std::string& fileName, std::vector<std::pair<int, int>>& classPairsOut);
 };
 
 #endif //DATAUTIL_H

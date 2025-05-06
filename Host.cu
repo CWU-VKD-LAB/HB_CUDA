@@ -236,9 +236,11 @@ float testAccuracyOfHyperBlocks(
     std::vector<std::vector<std::vector<float>>>& testSet,
     std::vector<std::vector<std::vector<float>>>& trainingSet,
     std::vector<int> order,
-    std::map<std::pair<int, int>, PointSummary>& pointSummaries // OUTPUT
+    std::map<std::pair<int, int>, PointSummary>& pointSummaries, // OUTPUT
+    int k = 3, float threshold = 0.1
 ) {
     std::vector<std::unordered_map<int, std::vector<int>>> pointsNotClassified(CLASS_MAP.size());
+
 
     for (int cls = 0; cls < NUM_CLASSES; cls++) {
         for (int j = 0; j < testSet[cls].size(); j++) {
@@ -295,8 +297,31 @@ float testAccuracyOfHyperBlocks(
     //TODO: PUT IN THE KNN HERE,
     //TODO  add to PointSummary with info from KNN fallback pls
 
+    
+  /*
+    // Find the closest actual cases to the edge of each block.
+    //for(HyperBlock& hb: hyperBlocks){
+        //hb.tameBounds(trainingSet);
+    //}
 
+    // this is where we have lots of options. this graveyard is all the different "unclassified classifiers" we have tried.
+    //std::vector<std::vector<long>> secondConfusionMatrix = Knn::closeToInkNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
+    // std::vector<std::vector<long>> secondConfusionMatrix = Knn::closestBlock(unclassifiedPointVec, hyperBlocks, NUM_CLASSES);
+    //std::vector<std::vector<long>> secondConfusionMatrix = Knn::pureKnn(unclassifiedPointVec, trainingSet,  k, NUM_CLASSES);
+    //std::vector<std::vector<long>> secondConfusionMatrix = Knn::bruteMergable(unclassifiedPointVec, trainingSet, hyperBlocks, 5, NUM_CLASSES);
+    // vector<vector<long>> secondConfusionMatrix = Knn::closeToInkNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
+    // vector<vector<long>> secondConfusionMatrix = Knn::kNN(unclassifiedPointVec, hyperBlocks, k, NUM_CLASSES);
+    // vector<vector<long>> secondConfusionMatrix = Knn::mergableKNN(unclassifiedPointVec, trainingSet, hyperBlocks, NUM_CLASSES);
+    vector<vector<long>> secondConfusionMatrix = Knn::thresholdKNN(unclassifiedPointVec, trainingSet, NUM_CLASSES, k, threshold);
+    PrintingUtil::printConfusionMatrix(secondConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
+    cout << "============================ END K-NN MATRIX ======================" << endl;
 
+    for (int i = 0; i < NUM_CLASSES; i++) {
+        for (int j = 0; j < NUM_CLASSES; j++) {
+            regularConfusionMatrix[i][j] = regularConfusionMatrix[i][j] + secondConfusionMatrix[i][j];
+        }
+    }
+    */
 
 
     return 0.0f; // placeholder
@@ -354,29 +379,44 @@ std::vector<int> computeLDAOrdering(const vector<vector<vector<float>>>& trainin
     return classOrder;
 }
 
-void runKFold(vector<vector<vector<float>>> &dataset, bool oneToMany, std::vector<std::pair<int,int>>& classPairs) {
+
+vector<float> runKFold(vector<vector<vector<float>>> &dataset, std::vector<std::pair<int,int>>& classPairs, bool onToMany = true, bool takeUserInput = false, int removalCount = 3, int nearestNeighborK = 5, float similarityThreshold = 0.6f, bool hidePrinting = false) {
+
     if (dataset.empty()) {
         cout << "Please enter a training dataset before using K Fold validation" << endl;
-        return;
+        return {-1, -1, -1};
     }
 
-    cout << "Please Enter a K value:\t";
     int k;
-    cin >> k;
+    // if we're taking input run it like normal. using this variable lets us just do it this way.
+    if (takeUserInput) {
+        cout << "Please Enter a K value:\t";
+        cin >> k;
 
-    // Clear the newline from the input buffer.
-    cin.ignore(numeric_limits<streamsize>::max(), '\n');
-
-    if (cin.fail() || k < 2) {
-        cout << "Error: Invalid input. Please enter a valid integer greater than 1." << endl;
-        // Clear the error state and ignore any remaining input.
-        cin.clear();
+        // Clear the newline from the input buffer.
         cin.ignore(numeric_limits<streamsize>::max(), '\n');
-        return;
+
+        if (cin.fail() || k < 2) {
+            cout << "Error: Invalid input. Please enter a valid integer greater than 1." << endl;
+            // Clear the error state and ignore any remaining input.
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            return {-1, -1, -1};
+        }
+    }
+    // if we're not using user input, we are testing for best accuracy and we can use 10.
+    else
+        k = 10;
+
+
+    // used to hide the printing of the regular kFold testing stuff. so that when we are finding best parameters we don't have all that printing
+    streambuf* oldBuf = nullptr;
+    ostringstream nullSink;          // collects nothing, never flushed
+    if (hidePrinting) {
+        oldBuf = cout.rdbuf(nullSink.rdbuf());   // silence everything
     }
 
     vector<vector<vector<vector<float>>>> kFolds = DataUtil::splitDataset(dataset, k);
-
     // stats trackers for cross folds.
     float acc = 0.0f;
     int blockCount = 0;
@@ -425,43 +465,81 @@ void runKFold(vector<vector<vector<float>>> &dataset, bool oneToMany, std::vecto
             //cout << "GENERATED WITH " << hyperBlocks.size() << " BLOCKS" << endl;
             vector<int> result = Simplifications::runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
 
-            int totalPoints = 0;
-            for (const auto &c : trainingData)
-                totalPoints += c.size();
 
-            //cout << "WE FOUND " << hyperBlocks.size() << " HYPERBLOCKS AFTER REMOVING USELESS BLOCKS!" << endl;
-            //cout << "After removing useless blocks we have: " << result[1] << " clauses\n";
+        // make our blocks
+        IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
 
-            int clauseCount = 0;
-            for (const auto &hb : hyperBlocks) {
-                for (int a = 0; a < FIELD_LENGTH; a++) {
-                    if (hb.minimums[a][0] == 0.0f && hb.maximums[a][0] == 1.0f)
-                        continue;
+        // simplify them, with the simplification count we have specifed as a parameter. usually 0, but playing with this value can get us better results because we are removing more blocks
+        Simplifications::REMOVAL_COUNT = removalCount;
 
+        // the vector of int is the total times it simplified, then the clause count.
+        vector<int> result = Simplifications::runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
+
+        // clause count computed here because sometimes we don't simplify
+        int totalPoints = 0;
+        for (const auto &c : trainingData)
+            totalPoints += c.size();
+
+        int clauseCount = 0;
+        for (const auto &hb : hyperBlocks) {
+            for (int a = 0; a < FIELD_LENGTH; a++) {
+                if (hb.minimums[a][0] != 0.0f || hb.maximums[a][0] != 1.0f)
                     clauseCount++;
                 }
             }
-
-
-            //       acc += testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData);
-            blockCount += hyperBlocks.size();
-            cCount += clauseCount;
 
         } // end of one train/test loop
         else {
             vector<vector<HyperBlock>> oneToOneBlocks = oneToOneHyper(trainingData, eachClassBestVectorIndex, classPairs);
             evaluateOneToOneHyperBlocks(oneToOneBlocks, testData, classPairs, NUM_CLASSES);
-            //IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
         }
 
-
     }
-    cout << "OVERALL ACCURACY " << float(acc) / float(k) << endl;
-    cout << "Average block count " << float(blockCount) / float (k) << endl;
-    cout << "Average clause count " << float(cCount) / float (k) << endl;
-    
+
+        acc += testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData, nearestNeighborK, similarityThreshold);
+        blockCount += hyperBlocks.size();
+        cCount += clauseCount;
+    } // end of one train/test loop
+
+    float avgAcc = float (acc) / float(k);
+    float blockAvg = float(blockCount) / float(k);
+    float clauseAvg = float(cCount) / float(k);
+
+    if (hidePrinting) cout.rdbuf(oldBuf);           // back to console
+        
+    cout << "OVERALL ACCURACY " << avgAcc << endl;
+    cout << "Average block count " << blockAvg << endl;
+    cout << "Average clause count " << clauseAvg << endl;
+
+    return {avgAcc, blockAvg, clauseAvg};
 }
 
+// function which is going to test brute force with different removing useless blocks thresholds and k values for KNN to determine best accuracy we can find across k fold validation with 10 folds.
+void findBestParameters(vector<vector<vector<float>>> &dataset, int maxRemovalCount, int maxK) {
+
+    if (dataset.empty()) {
+        cout << "Please enter a training dataset before testing parameters" << endl;
+        return;
+    }
+
+    vector<float> bestResults = {-1, -1, -1};
+    vector<int> bestParameters = {-1, -1, -1};
+    for (int removalCount = 0; removalCount < maxRemovalCount; removalCount++) {
+        for (int k = 1; k <= maxK; k += 2) {
+            for (int threshold = 1; threshold < 11; threshold++){
+                float t = 0.1f * (float)threshold;
+                vector<float> results = runKFold(dataset, false, removalCount, k, t, true);
+                if (results[0] > bestResults[0]) {
+                    bestResults = results;
+                    bestParameters = {removalCount, k, threshold};
+                }
+                cout << "Removal Count: " << removalCount << " K: " << k << " Threshold: " << t <<endl;
+            }
+        }
+    }
+    cout << "Best accuracy: " << bestResults[0] << "\nBlock Count Average w/best results: " << bestResults[1] << "\nClause Count Average: " << bestResults[2] << endl;
+    cout << "BEST PARAMETERS: REMOVAL COUNT: " << bestParameters[0] << " K: " << bestParameters[1] << " Threshold: " << bestParameters[2] << endl;
+}
 
 
 float evaluateOneToSomeHBs(const vector<vector<HyperBlock>>& oneToSomeBlocks, const vector<vector<vector<float>>>& testData) {
@@ -951,12 +1029,12 @@ void runInteractive() {
             case 8: { // TEST HYPERBLOCKS ON DATASET
                 std::cout << "Testing hyperblocks on testing dataset" << std::endl;
                 testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData, order);
+
                 PrintingUtil::waitForEnter();
                 break;
             }
             case 9: {
                 evaluateOneToOneHyperBlocks(oneToOneBlocks, testData, classPairsOut, NUM_CLASSES);
-
                 PrintingUtil::waitForEnter();
                 break;
             }
@@ -984,7 +1062,7 @@ void runInteractive() {
                 // Import 1-1 Hyperblocks
                 cout << "Enter 1-1 Hyperblocks file name: " << endl;
                 getline(cin, hyperBlocksImportFileName);
-                oneToOneBlocks = DataUtil::loadOneToOneHBsFromCSV(hyperBlocksImportFileName, classPairsOut);
+                oneToOneBlocks = DataUtil::loadOneToOneHBsFromBinary(hyperBlocksImportFileName, classPairsOut);
                 cout << "HyperBlocks imported from file " << hyperBlocksImportFileName << " successfully" << endl;
 
                 /* Might still want this but has to be wrapped in loop through each pair.
@@ -1002,7 +1080,7 @@ void runInteractive() {
                 // Export 1-1 Hyperblocks
                 cout << "Enter the file to save HyperBlocks to: " << endl;
                 getline(cin, hyperBlocksExportFileName);
-                DataUtil::saveOneToOneHBsToCSV(oneToOneBlocks, hyperBlocksExportFileName, FIELD_LENGTH);
+                DataUtil::saveOneToOneHBsToBinary(oneToOneBlocks, hyperBlocksExportFileName, FIELD_LENGTH);
                 break;
             }
             case 14: {
@@ -1030,6 +1108,41 @@ void runInteractive() {
                 DataUtil::saveBasicHBsToBinary(allRestBlocks, "digitBlocksRest.csv", FIELD_LENGTH);
                 cout << "Finished Generating one to Some blocks." << endl;
                 std::cout << "Elapsed time: " << diff.count() << " seconds\n";
+            }
+            case 16: { 
+              
+                int maxRemoval;
+                int maxK;
+
+                cout << "Please enter a max threshold size to test our blocks with " << endl;
+                cin >> maxRemoval;
+                // Clear the newline from the input buffer.
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
+                if (cin.fail() || maxRemoval < 0) {
+                    cout << "Error: Invalid input. Please enter a valid integer greater than 1." << endl;
+                    // Clear the error state and ignore any remaining input.
+                    cin.clear();
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                    return;
+                }
+
+                cout << "Please enter a max K value to test our KNN with " << endl;
+                cin >> maxK;
+                // Clear the newline from the input buffer.
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
+                if (cin.fail() || maxK < 0) {
+                    cout << "Error: Invalid input. Please enter a valid integer greater than 1." << endl;
+                    // Clear the error state and ignore any remaining input.
+                    cin.clear();
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                    return;
+                }
+
+                findBestParameters(trainingData, maxRemoval, maxK);
+                PrintingUtil::waitForEnter();
+                break;
             }
             default: {
                 cout << "\nInvalid choice. Please try again." << endl;

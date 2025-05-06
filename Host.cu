@@ -49,6 +49,68 @@ map<int, string> CLASS_MAP_TESTING_INT;
 
 void evaluateOneToOneHyperBlocks(const std::vector<std::vector<HyperBlock>>& oneToOneHBs,const std::vector<std::vector<std::vector<float>>>& testSet,const std::vector<std::pair<int, int>>& classPairs, int numClasses);
 
+
+/**
+ * For each class of data that we have:
+ * Generate "class" and "not class" HBs
+ *
+ * We will train each class on the opposing points from ALL other classes.
+ * For example: Generate HBS for class 0 using the counter points from classes 1,2,3
+ *              then generate HBS for (1,2,3) together against counter points from class 0.
+ *
+ */
+vector<vector<HyperBlock>> oneToRestHyper(const vector<vector<vector<float>>>& trainSet, vector<int> ecBestVecIdx) {
+    vector<vector<HyperBlock>> oneToRestBlocks;
+    vector<HyperBlock> tempHBs;
+
+    const int numClasses = trainSet.size();
+
+    for(int i = 0; i < numClasses; i++) {
+        cout << "Training Class (REAL LABEL): " << CLASS_MAP_INT[i] << endl;
+        tempHBs.clear();
+
+        // Train with this class as first class, and ALL others as the second class.
+        vector<vector<vector<float>>> trainingData(2);
+        trainingData[0] = trainSet[i];
+
+        // Add all other class data as the "second class"
+        for(int j = 0; j < numClasses; j++) {
+            if(j == i) continue;
+            for(const auto& point : trainSet[j]) trainingData[1].push_back(point);
+        }
+
+        vector<int> bestVecs(2);
+        bestVecs[0] = ecBestVecIdx[i];
+        bestVecs[1] = ecBestVecIdx[i];
+
+        // Now we generate "HBs for class i" and "HBs for not-class i"
+        IntervalHyperBlock::generateHBs(trainingData, tempHBs, bestVecs, FIELD_LENGTH, -1);
+        oneToRestBlocks.push_back(tempHBs);
+
+        // Set the HBs generated to have the correct class number.
+        for(auto& hb : oneToRestBlocks[i]) {
+            if(hb.classNum == 0) {
+                hb.classNum = i;                    // Set it to be the correct class index i
+                continue;
+            }
+
+            hb.classNum = numClasses + i;   // Doing this to be safe in case doing -i for the class would cause indexing issues anywhere.
+        }
+    }
+
+
+    return oneToRestBlocks;
+}
+
+
+
+
+
+
+
+
+
+
 /**
  * This is the OneToSome based method of HyperBlocks.
  *
@@ -470,8 +532,8 @@ void runKFold(vector<vector<vector<float>>> &dataset, bool oneToMany, std::vecto
 
 
 
-float evaluateOneToSomeHBs(const vector<vector<HyperBlock>>& oneToSomeBlocks, const vector<vector<vector<float>>> testData) {
-    vector<vector<int>> confusionMatrix(NUM_CLASSES, vector<int>(NUM_CLASSES, 0));
+float evaluateOneToSomeHBs(const vector<vector<HyperBlock>>& oneToSomeBlocks, const vector<vector<vector<float>>>& testData) {
+    vector<vector<long>> confusionMatrix(NUM_CLASSES, vector<long>(NUM_CLASSES, 0));
     int totalPoints = 0;
     for(const auto& c : testData) {
         totalPoints += c.size();
@@ -487,7 +549,7 @@ float evaluateOneToSomeHBs(const vector<vector<HyperBlock>>& oneToSomeBlocks, co
             const auto& point = testData[i][j];
             bool classified = false;
 
-            for(int sieveLvl = 0; sieveLvl < NUM_CLASSES; sieveLvl++) {
+            for(int sieveLvl = 0; sieveLvl < oneToSomeBlocks.size(); sieveLvl++) {
                 for(const auto& hb : oneToSomeBlocks[sieveLvl]) {
                     if(hb.inside_HB(point.size(), point.data())) {
                         classified = true;
@@ -509,12 +571,14 @@ float evaluateOneToSomeHBs(const vector<vector<HyperBlock>>& oneToSomeBlocks, co
         }
     }
 
-    for(const auto& row : confusionMatrix) {
-        for(int i = 0; i < row.size(); i++) {
-            cout << row[i] << " ";
+    for (const auto& row : confusionMatrix) {
+        for (int i = 0; i < row.size(); i++) {
+            std::cout << std::setw(5) << row[i] << " ";
         }
-        cout << endl;
+        std::cout << std::endl;
     }
+
+    PrintingUtil::printConfusionMatrix(confusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
 
     // Calculate the coverage.
     float coverage = static_cast<float>(incorrect + correct) / static_cast<float>(totalPoints);
@@ -645,22 +709,14 @@ void evaluateOneToOneHyperBlocks(
 
                     const auto& pairHBs = oneToOneHBs[findPairIndex];
 
-                    bool inClassI = false, inClassJ = false;
 
                     for (const auto& block : pairHBs) {
                         if (block.classNum == i && block.inside_HB(point.size(), point.data())) {
-                            inClassI = true;
+                            votes[i]++;
                         }
                         if (block.classNum == j && block.inside_HB(point.size(), point.data())) {
-                            inClassJ = true;
+                            votes[j++];
                         }
-                    }
-
-                    if (inClassI && !inClassJ) votes[i]++;
-                    else if (!inClassI && inClassJ) votes[j]++;
-                    else if (inClassI && inClassJ) {
-                        votes[i]++;
-                        votes[j]++;
                     }
                 }
             }
@@ -815,8 +871,9 @@ void runInteractive() {
     vector<vector<HyperBlock>> oneToOneBlocks;
     std::vector<std::pair<int, int>> classPairsOut;
 
-    vector<vector<HyperBlock>> oneToSomeBlocks;
+    vector<vector<HyperBlock>> oneToRestBlocks;
 
+    int normChoice;
 
     bool running = true;
     int choice;
@@ -835,21 +892,41 @@ void runInteractive() {
                     system("ls DATASETS");
                 #endif
                 getline(cin, trainingDataFileName);
-
                 string fullPath = "DATASETS" + string(PATH_SEPARATOR) + trainingDataFileName;
-
                 CLASS_MAP.clear();
                 CLASS_MAP_INT.clear();
-
                 trainingData = DataUtil::dataSetup(fullPath.c_str(), CLASS_MAP, CLASS_MAP_INT);
 
-                // Resize normalization vectors based on FIELD_LENGTH
-                minValues.assign(FIELD_LENGTH, numeric_limits<float>::infinity());
-                maxValues.assign(FIELD_LENGTH, -numeric_limits<float>::infinity());
-                DataUtil::findMinMaxValuesInDataset(trainingData, minValues, maxValues, FIELD_LENGTH);
-                DataUtil::minMaxNormalization(trainingData, minValues, maxValues, FIELD_LENGTH);
+                cout << "Choose normalization method:\n";
+                cout << "  1. Min-Max normalize using dataset bounds\n";
+                cout << "  2. Normalize by fixed max value (e.g., 255)\n";
+                cout << "  3. No normalization\n";
+                cout << "Enter choice (1-3): ";
+                cin >> normChoice;
+                cin.ignore();  // flush newline
 
-                order = computeLDAOrdering(trainingData, bestVectors, bestVectorsIndexes, eachClassBestVectorIndex);
+
+                if (normChoice == 1) {
+                    minValues.assign(FIELD_LENGTH, std::numeric_limits<float>::infinity());
+                    maxValues.assign(FIELD_LENGTH, -std::numeric_limits<float>::infinity());
+                    DataUtil::findMinMaxValuesInDataset(trainingData, minValues, maxValues, FIELD_LENGTH);
+                    DataUtil::minMaxNormalization(trainingData, minValues, maxValues, FIELD_LENGTH);
+
+                    order = computeLDAOrdering(trainingData, bestVectors, bestVectorsIndexes, eachClassBestVectorIndex);
+                } else if (normChoice == 2) {
+                    float fixedMax;
+                    cout << "Enter fixed max value (e.g., 255): ";
+                    cin >> fixedMax;
+                    cin.ignore();  // flush newline
+
+                    minValues.assign(FIELD_LENGTH, 0.0f);
+                    maxValues.assign(FIELD_LENGTH, fixedMax);
+
+                    DataUtil::minMaxNormalization(trainingData, minValues, maxValues, FIELD_LENGTH);
+                    order = computeLDAOrdering(trainingData, bestVectors, bestVectorsIndexes, eachClassBestVectorIndex);
+                } else {
+                    cout << "Skipping normalization.\n";
+                }
 
 
                 PrintingUtil::waitForEnter();
@@ -867,9 +944,18 @@ void runInteractive() {
 
                 testData = DataUtil::dataSetup(fullPath, CLASS_MAP_TESTING, CLASS_MAP_TESTING_INT);
 
+                if (normChoice == 1 || normChoice == 2) {
+                    DataUtil::normalizeTestSet(testData, minValues, maxValues, FIELD_LENGTH);
+                } else {
+                    cout << "Skipping normalization.\n";
+                }
+
                 // Normalize and reorder testing data as needed.
-                DataUtil::normalizeTestSet(testData, minValues, maxValues, FIELD_LENGTH);
                 testData = DataUtil::reorderTestingDataset(testData, CLASS_MAP, CLASS_MAP_TESTING);
+
+                for(const auto& cls: testData) {
+                    cout << cls.size() << endl;
+                }
                 PrintingUtil::waitForEnter();
                 break;
             }
@@ -884,7 +970,7 @@ void runInteractive() {
             case 4: { // IMPORT EXISTING HYPERBLOCKS
                 cout << "Enter existing hyperblocks file name: " << endl;
                 getline(cin, hyperBlocksImportFileName);
-                hyperBlocks = DataUtil::loadBasicHBsFromCSV(hyperBlocksImportFileName);
+                hyperBlocks = DataUtil::loadBasicHBsFromBinary(hyperBlocksImportFileName);
                 cout << "HyperBlocks imported from file " << hyperBlocksImportFileName << " successfully" << endl;
 
 				//try_expand_blocks_and_save(hyperBlocks, trainingData);
@@ -995,55 +1081,23 @@ void runInteractive() {
             }
             case 15: {
 
-                // Split out the validation data we will use to train the ordering.
-                float validationPercent = 0.10f;
-                int seed = 42;
-                //float percentTrainData = .0f;
-
-                //DataUtil::splitTrainTestByPercent(trainingData, testData, percentTrainData);
-                std::vector<std::vector<std::vector<float>>> fullTrainingData = trainingData;
-                DataUtil::createValidationSplit(trainingData, validationData, validationPercent, seed);
-
-                // Generate the "basic hyperblocks" that we will test against validation
-                hyperBlocks.clear();
-                IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
-
-                int numVal = 0;
-                for(int i = 0; i < validationData.size(); i++) { numVal += validationData[i].size(); }
-                cout << "Validation is " << numVal << " points" << endl;
-
-                // Now we want to test this based on the validation set to see which ordering to use.
-                order = findOneToSomeOrder(validationData, hyperBlocks );
-                oneToSomeBlocks.clear();
-
+                // POINT BASED ORDER
+                oneToRestBlocks.clear();
                 // Train the oneToSome Blocks
                 auto start = std::chrono::high_resolution_clock::now();
-
-                int numTrain = 0;
-                for(int i = 0; i < fullTrainingData.size(); i++) { numTrain += fullTrainingData[i].size(); }
-                oneToSomeBlocks = oneToSomeHyper(order, fullTrainingData, eachClassBestVectorIndex);
-
+                oneToRestBlocks = oneToRestHyper(trainingData, eachClassBestVectorIndex);
                 auto end = std::chrono::high_resolution_clock::now();
                 std::chrono::duration<double> diff = end - start;
 
-                for(int i = 0; i < oneToSomeBlocks.size(); i++) {
-                    const auto& blockSet = oneToSomeBlocks[i];
-                    DataUtil::saveBasicHBsToCSV(blockSet, std::to_string(order[i]) + "replaceable.csv", FIELD_LENGTH);
+                // Flatten the set of HBs by moving them.
+                vector<HyperBlock> allRestBlocks;
+                for (auto& blockSet : oneToRestBlocks) {
+                    allRestBlocks.insert(allRestBlocks.end(),std::make_move_iterator(blockSet.begin()),std::make_move_iterator(blockSet.end()));
                 }
 
-                int numTest = 0;
-                for(int i = 0; i < testData.size(); i++) { numTest += testData[i].size(); }
-
-
-                cout << "Testing is " << numTest << " points" << endl;
-                cout << "Validation is " << numVal << " points" << endl;
-                cout << "Training is " << numTrain << " points" << endl;
-
-                evaluateOneToSomeHBs(oneToSomeBlocks, testData);
-
+                DataUtil::saveBasicHBsToBinary(allRestBlocks, "digitBlocksRest.csv", FIELD_LENGTH);
                 cout << "Finished Generating one to Some blocks." << endl;
                 std::cout << "Elapsed time: " << diff.count() << " seconds\n";
-
             }
             default: {
                 cout << "\nInvalid choice. Please try again." << endl;

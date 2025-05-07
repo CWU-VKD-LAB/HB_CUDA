@@ -54,7 +54,7 @@ class IntervalHyperBlock {
 
     static void intervalHyper(std::vector<std::vector<std::vector<float>>> &realData, std::vector<std::vector<DataATTR>> &remainingData, std::vector<HyperBlock> &hyperBlocks);
 
-    static std::vector<std::vector<DataATTR>> separateByAttribute(std::vector<std::vector<std::vector<float>>>& data, int FIELD_LENGTH);
+    static std::vector<std::vector<DataATTR>> separateByAttribute(const std::vector<std::vector<std::vector<float>>>& data, int FIELD_LENGTH);
 
     static void sortByColumn(std::vector<std::vector<float>>& classData, int colIndex);
 

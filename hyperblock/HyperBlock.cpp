@@ -1,7 +1,9 @@
 #include "HyperBlock.h"
 
 // Constructor definition
-HyperBlock::HyperBlock(const std::vector<std::vector<float>>& maxs, const std::vector<std::vector<float>>& mins, int cls) : maximums(maxs), minimums(mins), classNum(cls) {}
+HyperBlock::HyperBlock(const std::vector<std::vector<float>>& maxs, const std::vector<std::vector<float>>& mins, int cls) : maximums(maxs), minimums(mins), classNum(cls) {
+    topBottomPairs.resize(maxs.size());
+}
 
 HyperBlock::HyperBlock(std::vector<std::vector<std::vector<float>>>& hb_data, int cls){
     int attr_count = hb_data[0][0].size(); // Number of attributes
@@ -27,6 +29,7 @@ HyperBlock::HyperBlock(std::vector<std::vector<std::vector<float>>>& hb_data, in
     maximums = maxes;
     minimums = mins;
     classNum = cls;
+    topBottomPairs.resize(attr_count);
 }
 
 

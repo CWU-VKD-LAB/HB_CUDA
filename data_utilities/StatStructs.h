@@ -13,7 +13,7 @@
 struct BlockInfo {
     int blockClass;
     int blockIdx;
-    float blockSize;
+    int blockSize;
     float blockDensity;
 };
 

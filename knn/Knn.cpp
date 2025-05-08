@@ -681,5 +681,5 @@ int Knn::thresholdKNN(const std::vector<float> &point, const std::vector<std::ve
     }
 
     // Return the index of the class with the most votes
-    std::distance(votes.begin(),std::max_element(votes.begin(), votes.end()));
+    return std::distance(votes.begin(),std::max_element(votes.begin(), votes.end()));
 }

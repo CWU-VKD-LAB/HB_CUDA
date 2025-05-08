@@ -341,8 +341,8 @@ vector<float> runKFold(vector<vector<vector<float>>> &dataset, vector<pair<int,i
                 // Append all points from kFolds[fold][cls] to trainingData[cls]
                 trainingData[cls].insert(trainingData[cls].end(), kFolds[fold][cls].begin(), kFolds[fold][cls].end());
             }
-
         }
+        Knn::deviationsComputed = false;
 
         // The test dataset for this iteration is simply fold i.
         vector<vector<vector<float>>> testData = kFolds[i];

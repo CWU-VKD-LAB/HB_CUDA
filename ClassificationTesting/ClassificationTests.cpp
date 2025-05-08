@@ -14,6 +14,14 @@ vector<vector<long>> ClassificationTests::buildConfusionMatrix(vector<HyperBlock
 
     vector<vector<long>> confusionMatrix(NUM_CLASSES, vector<long>(NUM_CLASSES, 0));
 
+    int totalPointsToDo = 0;
+    for (const auto &classPoints : pointsToClassify) {
+        totalPointsToDo += classPoints.size();
+    }
+
+    if (totalPointsToDo == 0)
+        return confusionMatrix;
+
     // go through all classes
     for(int cls = 0; cls < NUM_CLASSES; cls++) {
 
@@ -100,8 +108,35 @@ pair<int, vector<BlockInfo>> ClassificationTests::predictWithHBs(const vector<Hy
         }
     }
 
-    // return the class which had most votes, and all the block info from the blocks that we hit.
-    return {std::distance(votes.begin(),std::max_element(votes.begin(), votes.end())), blockHits};
+
+    // Find the highest vote count
+    int maxVote = *std::max_element(votes.begin(), votes.end());
+
+    // no votes at all, return -1
+    if (maxVote == 0) {
+        return {-1, blockHits};
+    }
+
+    // Case 2: check for ties
+    int winner = -1;
+    int countMax = 0;
+    for (int cls = 0; cls < NUM_CLASSES; ++cls) {
+        if (votes[cls] == maxVote) {
+            ++countMax;
+            winner = cls;  // last one seen; we only care that there's >1
+        }
+    }
+
+    // if more than one class had that same amount of votes we return -1.
+    if (countMax > 1) {
+        // Tie between multiple classes
+        return {-1, blockHits};
+    }
+
+    // if we had a real winner we can return it.
+    return {winner, blockHits};
+
+
 }
 
 

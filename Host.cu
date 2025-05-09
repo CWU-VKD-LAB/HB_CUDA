@@ -15,6 +15,11 @@
 #include <vector>
 #include <map>
 #include <cmath>
+#include <tuple>
+#include <tuple>
+#include <tuple>
+#include <tuple>
+#include <tuple>
 
 #include "./cuda_util/CudaUtil.h"
 #include "./hyperblock_generation/MergerHyperBlock.cuh"
@@ -234,7 +239,6 @@ float testAccuracyOfHyperBlocks(vector<HyperBlock> &hyperBlocks, vector<vector<v
     return finalAccuracy;
 }
 
-
 /* This function computes the LDA ordering for a given training dataset.
  * It sets up the bestVectors, bestVectorsIndexes, and eachClassBestVectorIndex.
  * best vectors is the weights of each coefficient from the LDF function
@@ -283,6 +287,85 @@ vector<int> computeLDAOrdering(const vector<vector<vector<float>>>& trainingData
     return classOrder;
 }
 
+
+/******************************************************************
+ * 10‑fold sweep over (k, threshold) pairs
+ * ‑ kVals   : list of neighbour counts to test
+ * ‑ tVals   : list of similarity‑threshold multipliers to test
+ * Returns {bestK, bestT, bestAcc}
+ ******************************************************************/
+tuple<int,float,float> findBestParameters(vector<vector<vector<float>>> &dataset, vector<int> kVals = vector<int>{3, 5, 7, 9}, vector<float> tVals = vector<float>{0.15f, 0.20f, 0.25f, 0.30f}, int removalCount = 5, bool hidePrinting = false) {
+    if (dataset.empty()) { cerr<<"Empty dataset\n"; return make_tuple(-1,-1.f,-1.f); }
+
+    /* -------- silence console if requested -------- */
+    streambuf *oldBuf=nullptr; ostringstream sink;
+    if (hidePrinting) oldBuf = cout.rdbuf(sink.rdbuf());
+
+    const int FOLDS = 10;
+    auto folds = DataUtil::splitDataset(dataset,FOLDS);
+
+    /* accuracy accumulator indexed by [kIdx][tIdx] */
+    vector<vector<float>> acc(kVals.size(),
+                                        vector<float>(tVals.size(),0.f));
+
+    for (int i=0;i<FOLDS;++i)
+    {
+        /* -------- build train / test split -------- */
+        vector<vector<vector<float>>> train(NUM_CLASSES),
+                                                     test  = folds[i];
+
+        for (int f=0;f<FOLDS;++f)
+            if (f!=i)
+                for (int c=0;c<NUM_CLASSES;++c)
+                    train[c].insert(train[c].end(),
+                                    folds[f][c].begin(),folds[f][c].end());
+
+        /* -------- generate & simplify blocks -------- */
+        vector<HyperBlock> hbs;
+        vector<vector<float>> bestVecs;
+        vector<vector<int>>   bestIdx(NUM_CLASSES,vector<int>(FIELD_LENGTH));
+        vector<int>                eachBest(NUM_CLASSES);
+        computeLDAOrdering(train,bestVecs,bestIdx,eachBest);
+
+        IntervalHyperBlock::generateHBs(train,hbs,eachBest,FIELD_LENGTH,
+                                        COMMAND_LINE_ARGS_CLASS);
+        Simplifications::REMOVAL_COUNT = removalCount;
+        Simplifications::runSimplifications(hbs,train,bestIdx);
+
+        /* -------- evaluate every (k,threshold) combo -------- */
+        for (size_t kI=0;kI<kVals.size();++kI)
+            for (size_t tI=0;tI<tVals.size();++tI)
+            {
+                Knn::deviationsComputed = false;            // reset per fold
+                map<pair<int,int>,PointSummary> summaries;
+                float foldAcc = testAccuracyOfHyperBlocks(
+                                   hbs, test, train, summaries,
+                                   kVals[kI], tVals[tI]);
+                acc[kI][tI] += foldAcc;
+            }
+    }
+
+    /* -------- compute averages & find best -------- */
+    int    bestK  = -1;
+    float  bestT  = -1.f;
+    float  bestAcc= -1.f;
+
+    for (size_t kI=0;kI<kVals.size();++kI)
+        for (size_t tI=0;tI<tVals.size();++tI)
+        {
+            float avg = acc[kI][tI] / static_cast<float>(FOLDS);
+            if (avg > bestAcc)
+            { bestAcc = avg; bestK = kVals[kI]; bestT = tVals[tI]; }
+            cout<<"K="<<kVals[kI]<<"  T="<<tVals[tI]
+                     <<"  avgAcc="<<avg<<"\n";
+        }
+
+    if (hidePrinting) cout.rdbuf(oldBuf);
+
+    cout<<"BEST -> K="<<bestK<<"  T="<<bestT
+             <<"  accuracy="<<bestAcc<<"\n";
+    return std::make_tuple(bestK,bestT,bestAcc);
+}
 
 vector<float> runKFold(vector<vector<vector<float>>> &dataset, vector<pair<int,int>>& classPairs, bool oneToMany = true, bool takeUserInput = false, int removalCount = 5, int nearestNeighborK = 5, float similarityThreshold = 0.25f, bool hidePrinting = false) {
 
@@ -401,7 +484,7 @@ vector<float> runKFold(vector<vector<vector<float>>> &dataset, vector<pair<int,i
 
     if (hidePrinting)
         cout.rdbuf(oldBuf);           // back to console
-        
+
     cout << "OVERALL ACCURACY " << avgAcc << endl;
     cout << "Average block count " << blockAvg << endl;
     cout << "Average clause count " << clauseAvg << endl;
@@ -717,7 +800,6 @@ vector<int> findOneToSomeOrder(vector<vector<vector<float>>>& validationData, ve
     return blockOrder;
 }
 
-
 // -------------------------------------------------------------------------
 // Interactive mode: run when argc < 2
 void runInteractive() {
@@ -985,8 +1067,8 @@ void runInteractive() {
                 cout << "Finished Generating one to Some blocks." << endl;
                 cout << "Elapsed time: " << diff.count() << " seconds\n";
             }
-            case 16: { 
-              
+            case 16: {
+
                 int maxRemoval;
                 int maxK;
 
@@ -1017,6 +1099,7 @@ void runInteractive() {
                 }
 
                 // findBestParameters(trainingData, maxRemoval, maxK);
+                findBestParameters(trainingData);
                 PrintingUtil::waitForEnter();
                 break;
             }

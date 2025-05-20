@@ -295,7 +295,11 @@ vector<int> computeLDAOrdering(const vector<vector<vector<float>>>& trainingData
  * Returns {bestK, bestT, bestAcc}
  ******************************************************************/
 tuple<int,float,float> findBestParameters(vector<vector<vector<float>>> &dataset, vector<int> kVals = vector<int>{3, 5, 7, 9}, vector<float> tVals = vector<float>{0.15f, 0.20f, 0.25f, 0.30f}, int removalCount = 5, bool hidePrinting = false) {
-    if (dataset.empty()) { cerr<<"Empty dataset\n"; return make_tuple(-1,-1.f,-1.f); }
+
+    if (dataset.empty()) {
+        cerr<<"Empty dataset\n";
+        return make_tuple(-1,-1.f,-1.f);
+    }
 
     /* -------- silence console if requested -------- */
     streambuf *oldBuf=nullptr; ostringstream sink;
@@ -311,36 +315,30 @@ tuple<int,float,float> findBestParameters(vector<vector<vector<float>>> &dataset
     for (int i=0;i<FOLDS;++i)
     {
         /* -------- build train / test split -------- */
-        vector<vector<vector<float>>> train(NUM_CLASSES),
-                                                     test  = folds[i];
+        vector<vector<vector<float>>> train(NUM_CLASSES), test  = folds[i];
 
         for (int f=0;f<FOLDS;++f)
             if (f!=i)
                 for (int c=0;c<NUM_CLASSES;++c)
-                    train[c].insert(train[c].end(),
-                                    folds[f][c].begin(),folds[f][c].end());
+                    train[c].insert(train[c].end(),folds[f][c].begin(),folds[f][c].end());
 
         /* -------- generate & simplify blocks -------- */
         vector<HyperBlock> hbs;
         vector<vector<float>> bestVecs;
-        vector<vector<int>>   bestIdx(NUM_CLASSES,vector<int>(FIELD_LENGTH));
-        vector<int>                eachBest(NUM_CLASSES);
+        vector<vector<int>> bestIdx(NUM_CLASSES,vector<int>(FIELD_LENGTH));
+        vector<int> eachBest(NUM_CLASSES);
         computeLDAOrdering(train,bestVecs,bestIdx,eachBest);
 
-        IntervalHyperBlock::generateHBs(train,hbs,eachBest,FIELD_LENGTH,
-                                        COMMAND_LINE_ARGS_CLASS);
+        IntervalHyperBlock::generateHBs(train,hbs,eachBest, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
         Simplifications::REMOVAL_COUNT = removalCount;
         Simplifications::runSimplifications(hbs,train,bestIdx);
 
         /* -------- evaluate every (k,threshold) combo -------- */
         for (size_t kI=0;kI<kVals.size();++kI)
-            for (size_t tI=0;tI<tVals.size();++tI)
-            {
+            for (size_t tI=0;tI<tVals.size();++tI) {
                 Knn::deviationsComputed = false;            // reset per fold
                 map<pair<int,int>,PointSummary> summaries;
-                float foldAcc = testAccuracyOfHyperBlocks(
-                                   hbs, test, train, summaries,
-                                   kVals[kI], tVals[tI]);
+                float foldAcc = testAccuracyOfHyperBlocks(hbs, test, train, summaries, kVals[kI], tVals[tI]);
                 acc[kI][tI] += foldAcc;
             }
     }
@@ -362,8 +360,7 @@ tuple<int,float,float> findBestParameters(vector<vector<vector<float>>> &dataset
 
     if (hidePrinting) cout.rdbuf(oldBuf);
 
-    cout<<"BEST -> K="<<bestK<<"  T="<<bestT
-             <<"  accuracy="<<bestAcc<<"\n";
+    cout<<"BEST -> K = "<<bestK<<"\tThreshold = "<< bestT <<"\taccuracy = " << bestAcc <<"\n";
     return std::make_tuple(bestK,bestT,bestAcc);
 }
 

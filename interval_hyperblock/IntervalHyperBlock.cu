@@ -807,7 +807,7 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
         merger_cuda(data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
 
         // not in cuda is a more efficient algorithm, but is slower because its not on GPU.
-        // if we run into more time challenges, our lives may be simpler if we revisit the merger cuda function.
+        // if we run into more time challenges, our lives may be simpler if we revisit the merger cuda function and make it use this kind of set based logic instead.
         // dataByAttribute = separateByAttribute(data, FIELD_LENGTH);
         // mergerNotInCuda(data, hyperBlocks, dataByAttribute);
     } catch (exception e){

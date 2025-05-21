@@ -47,8 +47,10 @@ void PrintingUtil::displayMainMenu() {
     std::cout << "15. Generate One To Rest Blocks and Save.\n";
     std::cout << std::endl;
 
-    std::cout << "16. Find Best Parameters\n\n";
-    std::cout << "17. Quit\n\n";
+    std::cout << "16. Find Best Parameters (Grid Search).\n";
+    std::cout << "17. Generate Next Level HBs.\n";
+    std::cout << "18. K fold validation with Level N HBs.\n\n" << std::endl;
+    std::cout << "19. Quit\n\n";
 
 
 }

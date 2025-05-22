@@ -1383,5 +1383,59 @@ vector<vector<vector<float>>> IntervalHyperBlock::generateNextLevelHBs(vector<ve
     // generate our new HBs with the new dataset and store them into our new HB vector
     generateHBs(newDataset, nextLevelBlocks, bestAttributes, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
 
+    // now we find those points which are in our training set which we don't cover with level 2 blocks. we take those points, make them into HBs, and send them to the merging with these level 2 blocks. so that we get full coverage.
+    // each thread in openMP makes their own copies, and then we just aggregate these
+    for (int cls = 0; cls < static_cast<int>(trainingData.size()); ++cls) {
+
+        // ─────────── parallel region ───────────
+        #pragma omp parallel
+        {
+            // thread-local containers (no races here)
+            vector<vector<vector<float>>> localDataThread(trainingData.size());
+            vector<HyperBlock>            localBlocksThread;
+
+            #pragma omp for schedule(static)
+            for (int p = 0; p < static_cast<int>(trainingData[cls].size()); ++p) {
+
+                // get the point, determine if it's in any HBs.
+                const auto &point = trainingData[cls][p];
+                bool inABlock = false;
+
+                // if it's in an HB, we are good, if not we make an HB out of it, and put it into the list. then we re run the merging with this point in it later.
+                for (const auto &h : nextLevelBlocks) {
+                    if (h.inside_HB(FIELD_LENGTH, point.data())) {
+                        inABlock = true;
+                        break;
+                    }
+                }
+
+                vector<vector<float>> mins(FIELD_LENGTH);
+                vector<vector<float>> maxes(FIELD_LENGTH);
+                for (int att = 0; att < FIELD_LENGTH; ++att) {
+                    mins[att].push_back(point[att]);
+                    maxes[att].push_back(point[att]);
+                }
+
+                if (!inABlock) {
+                    localBlocksThread.emplace_back(maxes, mins, cls);
+                    localDataThread[cls].emplace_back(point);
+                }
+            } // end for-p loop
+
+            // aggregate each thread’s contribution exactly once
+            #pragma omp critical
+            {
+                nextLevelBlocks.insert(end(nextLevelBlocks),make_move_iterator(begin(localBlocksThread)),make_move_iterator(end(localBlocksThread)));
+                for (size_t i = 0; i < localDataThread.size(); ++i) {
+                    newDataset[i].insert(end(newDataset[i]),   make_move_iterator(begin(localDataThread[i])),    make_move_iterator(end(localDataThread[i])));
+                }
+            }
+        } // end parallel region
+    }
+
+
+    // run the merging one more time, adding in the cases which we didn't cover. this means each level increase runs two merges. but the second one should be fast.
+    merger_cuda(newDataset, nextLevelBlocks, COMMAND_LINE_ARGS_CLASS);
+
     return newDataset;
 }

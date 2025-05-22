@@ -576,9 +576,8 @@ vector<float> runKFoldWithLevelNBlocks(vector<vector<vector<float>>> &dataset, b
             vector<HyperBlock> thisLevelBlocks;
 
             // make our new set of blocks, and save this set of envelope cases. now we can reduce the training set iteratively.
-            vector<vector<vector<float>>> thisLevelData = IntervalHyperBlock::generateNextLevelHBs(trainingData, hyperBlocks, thisLevelBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
+            trainingData = move(IntervalHyperBlock::generateNextLevelHBs(trainingData, hyperBlocks, thisLevelBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS));
             hyperBlocks  = move(thisLevelBlocks);   // advance to new level
-            trainingData = move(thisLevelData);
         }
 
         // simplify them, with the simplification count we have specifed as a parameter. usually 0, but playing with this value can get us better results because we are removing more blocks
@@ -1234,8 +1233,9 @@ void runInteractive() {
                     cout << "\nError: Please import training data first." << endl;
                     PrintingUtil::waitForEnter();
                 } else {
-                    hyperBlocks.clear();
-                    IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
+                    vector<HyperBlock> newBlocks;
+                    trainingData = move(IntervalHyperBlock::generateNextLevelHBs(trainingData, hyperBlocks, newBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS));
+                    hyperBlocks = move(newBlocks);
                 }
                 static int levelN = 1;
                 cout << "Finished Generating level " << ++levelN << " level HyperBlocks" << endl;
@@ -1244,7 +1244,7 @@ void runInteractive() {
             }
             case 18: {
                 // run our level N k fold function
-                runKFoldWithLevelNBlocks(trainingData, false, 0);
+                runKFoldWithLevelNBlocks(trainingData, false, 1);
                 PrintingUtil::waitForEnter();
                 break;
             }

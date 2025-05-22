@@ -293,7 +293,7 @@ vector<int> computeLDAOrdering(const vector<vector<vector<float>>>& trainingData
  * ‑ tVals   : list of similarity‑threshold multipliers to test
  * Returns {bestK, bestT, bestAcc}
  ******************************************************************/
-tuple<int,float,float> findBestParameters(vector<vector<vector<float>>> &dataset, vector<int> kVals = vector<int>{3, 5, 7, 9}, vector<float> tVals = vector<float>{0.15f, 0.20f, 0.25f, 0.30f}, int removalCount = 5, bool hidePrinting = false) {
+tuple<int,float,float> findBestParameters(vector<vector<vector<float>>> &dataset, vector<int> kVals = vector<int>{3, 5, 7, 9}, vector<float> tVals = vector<float>{0.15f, 0.20f, 0.25f, 0.30f}, int removalCount = 5, bool hidePrinting = false, int blockLevel = 1) {
 
     if (dataset.empty()) {
         cerr<<"Empty dataset\n";
@@ -308,8 +308,7 @@ tuple<int,float,float> findBestParameters(vector<vector<vector<float>>> &dataset
     auto folds = DataUtil::splitDataset(dataset,FOLDS);
 
     /* accuracy accumulator indexed by [kIdx][tIdx] */
-    vector<vector<float>> acc(kVals.size(),
-                                        vector<float>(tVals.size(),0.f));
+    vector<vector<float>> acc(kVals.size(),vector<float>(tVals.size(),0.f));
 
     for (int i=0;i<FOLDS;++i)
     {
@@ -330,6 +329,14 @@ tuple<int,float,float> findBestParameters(vector<vector<vector<float>>> &dataset
 
         IntervalHyperBlock::generateHBs(train,hbs,eachBest, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
         Simplifications::REMOVAL_COUNT = removalCount;
+
+        // increase our block level until we hit the level we want.
+        for (int level = 1; level < blockLevel; level++) {
+            vector<HyperBlock> newBlocks;
+            train = move(IntervalHyperBlock::generateNextLevelHBs(train, hbs, newBlocks, eachBest, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS));
+            hbs = move(newBlocks);
+        }
+
         Simplifications::runSimplifications(hbs,train,bestIdx);
 
         /* -------- evaluate every (k,threshold) combo -------- */
@@ -1215,6 +1222,11 @@ void runInteractive() {
                 // Clear the newline from the input buffer.
                 cin.ignore(numeric_limits<streamsize>::max(), '\n');
 
+                count << "What level HBs are we testing?" << endl;
+                int blockLevel;
+                cin >> blockLevel;
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
                 if (cin.fail() || maxK < 0) {
                     cout << "Error: Invalid input. Please enter a valid integer greater than 1." << endl;
                     // Clear the error state and ignore any remaining input.
@@ -1223,8 +1235,20 @@ void runInteractive() {
                     return;
                 }
 
+                vector<int> removalCounts;
+                for (int i = 0; i <= maxRemoval; i++) {
+                    removalCounts.push_back(i);
+                }
+
+                vector<int> kVals;
+                for (int i = 1; i <= maxK; i += 2) {
+                    kVals.push_back(i);
+                }
+
+                vector<float> thresholds{0.15, 0.2, 0.25, 0.3};
+
                 // findBestParameters(trainingData, maxRemoval, maxK);
-                findBestParameters(trainingData);
+                findBestParameters(trainingData, kVals, thresholds, maxRemoval, false, blockLevel);
                 PrintingUtil::waitForEnter();
                 break;
             }

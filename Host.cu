@@ -330,10 +330,18 @@ tuple<int,float,float> findBestParameters(vector<vector<vector<float>>> &dataset
         IntervalHyperBlock::generateHBs(train,hbs,eachBest, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
         Simplifications::REMOVAL_COUNT = removalCount;
 
+        // make a copy of our input data so that we don't break it for the KNN.
+        vector<vector<vector<float>>> levelNTrain = train;
+
         // increase our block level until we hit the level we want.
         for (int level = 1; level < blockLevel; level++) {
             vector<HyperBlock> newBlocks;
-            train = move(IntervalHyperBlock::generateNextLevelHBs(train, hbs, newBlocks, eachBest, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS));
+
+            levelNTrain = move(IntervalHyperBlock::generateNextLevelHBs(levelNTrain, hbs, newBlocks, eachBest, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS));
+
+            // knn actually does better when we are removing the extra points sometimes, so we use the original data and shrink the set does better KNN
+            // train = move(IntervalHyperBlock::generateNextLevelHBs(train, hbs, newBlocks, eachBest, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS));
+
             hbs = move(newBlocks);
         }
 
@@ -579,11 +587,16 @@ vector<float> runKFoldWithLevelNBlocks(vector<vector<vector<float>>> &dataset, b
         IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
 
         // now we iteratively increase the level of the blocks to whatever level
+        vector<vector<vector<float>>> levelNData = trainingData;
+
         for (int level = 1; level < HB_LEVEL; level++) {
             vector<HyperBlock> thisLevelBlocks;
-
             // make our new set of blocks, and save this set of envelope cases. now we can reduce the training set iteratively.
-            trainingData = move(IntervalHyperBlock::generateNextLevelHBs(trainingData, hyperBlocks, thisLevelBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS));
+            levelNData = move(IntervalHyperBlock::generateNextLevelHBs(levelNData, hyperBlocks, thisLevelBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS));
+
+            // updating the train data itself actually allows us to perform better. we shrink the training set, and the KNN does better in this way.
+            // trainingData = move(IntervalHyperBlock::generateNextLevelHBs(trainingData, hyperBlocks, thisLevelBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS));
+
             hyperBlocks  = move(thisLevelBlocks);   // advance to new level
         }
 
@@ -1222,7 +1235,7 @@ void runInteractive() {
                 // Clear the newline from the input buffer.
                 cin.ignore(numeric_limits<streamsize>::max(), '\n');
 
-                count << "What level HBs are we testing?" << endl;
+                cout << "What level HBs are we testing?" << endl;
                 int blockLevel;
                 cin >> blockLevel;
                 cin.ignore(numeric_limits<streamsize>::max(), '\n');
@@ -1268,7 +1281,7 @@ void runInteractive() {
             }
             case 18: {
                 // run our level N k fold function
-                runKFoldWithLevelNBlocks(trainingData, false, 1);
+                runKFoldWithLevelNBlocks(trainingData, false, 1, 1, .25f);
                 PrintingUtil::waitForEnter();
                 break;
             }

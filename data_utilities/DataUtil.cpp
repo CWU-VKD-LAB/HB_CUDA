@@ -10,6 +10,7 @@ extern int NUM_CLASSES;
 
 
 // In-place stratified split: modifies trainingData by moving points to validationData
+// this allows us to use validation data, without actually using the test data, which would be cheating.
 void DataUtil::createValidationSplit(std::vector<std::vector<std::vector<float>>>& trainingData, std::vector<std::vector<std::vector<float>>>& validationData, float validationFraction, unsigned int randomSeed) {
     std::mt19937 rng(randomSeed);
     validationData.clear();
@@ -179,6 +180,7 @@ void DataUtil::saveNormalizedVersionToCsv(std::string fileName, std::vector<std:
     outFile.close();
 }
 
+// just loads a vector of HBs back from a file when we have exported.
 std::vector<HyperBlock> DataUtil::loadBasicHBsFromCSV(const std::string& fileName) {
     std::ifstream file(fileName);
     std::vector<HyperBlock> hyperBlocks;
@@ -264,7 +266,7 @@ void DataUtil::normalizeTestSet(std::vector<std::vector<std::vector<float>>>& te
 
 }
 
-
+// normalizes the training data using just the min and max value in each attribute
 void DataUtil::minMaxNormalization(std::vector<std::vector<std::vector<float>>>& dataset, const std::vector<float>& minValues, const std::vector<float>& maxValues, int FIELD_LENGTH) {
     std::cout << "Normalizing the dataset" << std::endl;
     if (dataset.empty()) return;
@@ -391,6 +393,7 @@ void DataUtil::saveBasicHBsToBinary(const std::vector<HyperBlock>& hyperBlocks, 
     file.close();
 }
 
+// same as regular load from binary. returns a list of HBs, but this case, it is the one to some blocks, where we have several lists of HBs since we generated many sets.
 std::vector<std::vector<HyperBlock>> DataUtil::loadOneToSomeBlocksFromBinary(const std::string& fileName) {
     std::vector<HyperBlock> allBlocks = DataUtil::loadBasicHBsFromCSV(fileName);
     std::vector<std::vector<HyperBlock>> splitBlocks;
@@ -739,7 +742,7 @@ void DataUtil::findMinMaxValuesInDataset(const std::vector<std::vector<std::vect
 }
 
 
-
+// just used to mark if a column has all same value
 std::vector<bool> DataUtil::markUniformColumns(const std::vector<std::vector<std::vector<float>>>& data) {
     // std::cout << "Starting mark uniform columns\n" << std::endl;
 
@@ -773,7 +776,13 @@ std::vector<bool> DataUtil::markUniformColumns(const std::vector<std::vector<std
     return removed;
 }
 
-
+// special flattening function. This one flattens the min and max vounds of an HB. but in a goofy way.
+// since we have to account for disjunctions, we always have a count of how many of each attribute are in each interval.
+// for example a regular Hb which has no disjunction would still look like mins[1.0, 0.2, 1.0, 0.4, 1.0, 0.65, 1.0, 0.2].
+// all the 1.0's just show that each attribute had one value for min. in a disjunction it would be [2.0, 0.4, 0.75, 1.0, 0.6] and so on.
+// also has a bit of a crazy return. we return the flattened mins and maxes of our list of HBs, but then also two more arrays.one for the block edges.
+// block edges array tells us where each HB starts and ends. for example block 0 is at index 0 obviously. But then block 1 may be at 4, and then block 2 could be at index 9 if we had a disjunction somewhere.
+// block classes is just the int value of each one, casted as a float. each block's class is in this vector.
 std::vector<std::vector<float>> DataUtil::flattenMinsMaxesForRUB(std::vector<HyperBlock>& hyper_blocks, int FIELD_LENGTH){
     // Declare std::vectors
     std::vector<float> flatMinsList;
@@ -816,7 +825,8 @@ std::vector<std::vector<float>> DataUtil::flattenMinsMaxesForRUB(std::vector<Hyp
     return result;
 }
 
-
+// just flattens all our data into a vector<vector<float>>. we have to keep a tracker of where each class started and ended.
+// that is the point of the class border. so say class 1's start will be index 600 of the flattened set, classBorder[1] == 600.
 std::vector<std::vector<float>> DataUtil::flattenDataset(std::vector<std::vector<std::vector<float>>>& data) {
     std::vector<float> dataset;
     std::vector<float> classBorder(data.size() + 1);
@@ -844,6 +854,7 @@ std::vector<std::vector<float>> DataUtil::flattenDataset(std::vector<std::vector
 
 
 // our function to flatten our list of HBs without encoding lengths in. this is what we use for removing attirbutes
+// this flattens the HBs very nicely. it doesn't encode the count of each attribute, because we use it BEFORE we could ever have a disjunction.
 std::vector<std::vector<float>> DataUtil::flatMinMaxNoEncode(std::vector<HyperBlock> hyper_blocks, int FIELD_LENGTH) {
 
     int size = hyper_blocks.size();

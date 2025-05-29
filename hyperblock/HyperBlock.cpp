@@ -2,9 +2,11 @@
 
 // Constructor definition
 HyperBlock::HyperBlock(const std::vector<std::vector<float>>& maxs, const std::vector<std::vector<float>>& mins, int cls) : maximums(maxs), minimums(mins), classNum(cls) {
+    // make sure to do this. the top bottom pairs are not always used. it is used when we are using indexed based merging stuff instead of regular cuda.
     topBottomPairs.resize(maxs.size());
 }
 
+// make a block out of a set of data instead of a min and max bound list. used in the interval Hyper function sometimes.
 HyperBlock::HyperBlock(std::vector<std::vector<std::vector<float>>>& hb_data, int cls){
     int attr_count = hb_data[0][0].size(); // Number of attributes
     //std::cout << "print the vector\n" << std::endl;
@@ -32,13 +34,14 @@ HyperBlock::HyperBlock(std::vector<std::vector<std::vector<float>>>& hb_data, in
     topBottomPairs.resize(attr_count);
 }
 
-
+// a point is inside a hyperblock if it is inside ALL attributes. it is outside if even one attribute is outside the bounds.
 bool HyperBlock::inside_HB(int numAttributes, const float* point) const {
     constexpr float EPSILON = 1e-6f;  // Small tolerance value
-    
+
     for (int i = 0; i < numAttributes; i++) {
         bool inAnInterval = false;
 
+        // inner loop here is in case of a disjunction. in 99% of cases, we can pretend there is no loop here.
         for (int j = 0; j < maximums[i].size(); j++) {
             // Adjust comparisons with EPSILON to prevent floating-point issues
             if ((point[i] + EPSILON >= minimums[i][j]) && (point[i] - EPSILON <= maximums[i][j])) {
@@ -69,6 +72,7 @@ int HyperBlock::inside_N_Bounds(int numAttributes, const float* point) {
     return numIn;
 }
 
+// returns the euclidean distance between the closer HB edge for each attribute it is outside of.
 float HyperBlock::distance_to_HB_Edge(int numAttributes, const float* point) const {
     constexpr float EPSILON = 1e-6f;
     float totalDistanceSquared = 0.0f;
@@ -90,6 +94,7 @@ float HyperBlock::distance_to_HB_Edge(int numAttributes, const float* point) con
     return std::sqrt(totalDistanceSquared);
 }
 
+// returns euclidean distance to the average point of an HB.
 float HyperBlock::distance_to_HB_Avg(int numAttributes, const float* point) const{
     constexpr float EPSILON = 1e-6f;
     float totalDistanceSquared = 0.0f;
@@ -107,7 +112,6 @@ float HyperBlock::distance_to_HB_Avg(int numAttributes, const float* point) cons
     }
     return std::sqrt(totalDistanceSquared);
 }
-
 
 float HyperBlock::distance_to_HB_Combo(int numAttributes, const float* point) const {
     constexpr float EPSILON = 1e-6f;

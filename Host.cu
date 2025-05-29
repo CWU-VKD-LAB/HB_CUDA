@@ -997,7 +997,6 @@ void runInteractive() {
                 #endif
                 getline(cin, trainingDataFileName);
                 string fullPath = "DATASETS" + string(PATH_SEPARATOR) + trainingDataFileName;
-                CLASS_MAP.clear();
                 CLASS_MAP_INT.clear();
                 trainingData = DataUtil::dataSetup(fullPath.c_str(), CLASS_MAP, CLASS_MAP_INT);
 

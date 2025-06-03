@@ -15,6 +15,11 @@
 #include <vector>
 #include <map>
 #include <cmath>
+#include <tuple>
+#include <tuple>
+#include <tuple>
+#include <tuple>
+#include <tuple>
 
 #include "./cuda_util/CudaUtil.h"
 #include "./hyperblock_generation/MergerHyperBlock.cuh"
@@ -279,7 +284,6 @@ float testAccuracyOfHyperBlocks(vector<HyperBlock> &hyperBlocks, vector<vector<v
     return finalAccuracy;
 }
 
-
 /* This function computes the LDA ordering for a given training dataset.
  * It sets up the bestVectors, bestVectorsIndexes, and eachClassBestVectorIndex.
  * best vectors is the weights of each coefficient from the LDF function
@@ -328,6 +332,96 @@ vector<int> computeLDAOrdering(const vector<vector<vector<float>>>& trainingData
     return classOrder;
 }
 
+/******************************************************************
+ * 10‑fold sweep over (k, threshold) pairs
+ * ‑ kVals   : list of neighbour counts to test
+ * ‑ tVals   : list of similarity‑threshold multipliers to test
+ * Returns {bestK, bestT, bestAcc}
+ ******************************************************************/
+tuple<int,float,float> findBestParameters(vector<vector<vector<float>>> &dataset, vector<int> kVals = vector<int>{3, 5, 7, 9}, vector<float> tVals = vector<float>{0.15f, 0.20f, 0.25f, 0.30f}, int removalCount = 5, bool hidePrinting = false, int blockLevel = 1) {
+
+    if (dataset.empty()) {
+        cerr<<"Empty dataset\n";
+        return make_tuple(-1,-1.f,-1.f);
+    }
+
+    /* -------- silence console if requested -------- */
+    streambuf *oldBuf=nullptr; ostringstream sink;
+    if (hidePrinting) oldBuf = cout.rdbuf(sink.rdbuf());
+
+    const int FOLDS = 10;
+    auto folds = DataUtil::splitDataset(dataset,FOLDS);
+
+    /* accuracy accumulator indexed by [kIdx][tIdx] */
+    vector<vector<float>> acc(kVals.size(),vector<float>(tVals.size(),0.f));
+
+    for (int i=0;i<FOLDS;++i)
+    {
+        /* -------- build train / test split -------- */
+        vector<vector<vector<float>>> train(NUM_CLASSES), test  = folds[i];
+
+        for (int f=0;f<FOLDS;++f)
+            if (f!=i)
+                for (int c=0;c<NUM_CLASSES;++c)
+                    train[c].insert(train[c].end(),folds[f][c].begin(),folds[f][c].end());
+
+        /* -------- generate & simplify blocks -------- */
+        vector<HyperBlock> hbs;
+        vector<vector<float>> bestVecs;
+        vector<vector<int>> bestIdx(NUM_CLASSES,vector<int>(FIELD_LENGTH));
+        vector<int> eachBest(NUM_CLASSES);
+        computeLDAOrdering(train,bestVecs,bestIdx,eachBest);
+
+        IntervalHyperBlock::generateHBs(train,hbs,eachBest, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
+        Simplifications::REMOVAL_COUNT = removalCount;
+
+        // make a copy of our input data so that we don't break it for the KNN.
+        vector<vector<vector<float>>> levelNTrain = train;
+
+        // increase our block level until we hit the level we want.
+        for (int level = 1; level < blockLevel; level++) {
+            vector<HyperBlock> newBlocks;
+
+            levelNTrain = move(IntervalHyperBlock::generateNextLevelHBs(levelNTrain, hbs, newBlocks, eachBest, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS));
+
+            // knn actually does better when we are removing the extra points sometimes, so we use the original data and shrink the set does better KNN
+            // train = move(IntervalHyperBlock::generateNextLevelHBs(train, hbs, newBlocks, eachBest, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS));
+
+            hbs = move(newBlocks);
+        }
+
+        Simplifications::runSimplifications(hbs,train,bestIdx);
+
+        /* -------- evaluate every (k,threshold) combo -------- */
+        for (size_t kI=0;kI<kVals.size();++kI)
+            for (size_t tI=0;tI<tVals.size();++tI) {
+                Knn::deviationsComputed = false;            // reset per fold
+                map<pair<int,int>,PointSummary> summaries;
+                float foldAcc = testAccuracyOfHyperBlocks(hbs, test, train, summaries, kVals[kI], tVals[tI]);
+                acc[kI][tI] += foldAcc;
+            }
+    }
+
+    /* -------- compute averages & find best -------- */
+    int    bestK  = -1;
+    float  bestT  = -1.f;
+    float  bestAcc= -1.f;
+
+    for (size_t kI=0;kI<kVals.size();++kI)
+        for (size_t tI=0;tI<tVals.size();++tI)
+        {
+            float avg = acc[kI][tI] / static_cast<float>(FOLDS);
+            if (avg > bestAcc)
+            { bestAcc = avg; bestK = kVals[kI]; bestT = tVals[tI]; }
+            cout<<"K="<<kVals[kI]<<"  T="<<tVals[tI]
+                     <<"  avgAcc="<<avg<<"\n";
+        }
+
+    if (hidePrinting) cout.rdbuf(oldBuf);
+
+    cout<<"BEST -> K = "<<bestK<<"\tThreshold = "<< bestT <<"\taccuracy = " << bestAcc <<"\n";
+    return make_tuple(bestK,bestT,bestAcc);
+}
 
 vector<float> runKFold(vector<vector<vector<float>>> &dataset, vector<pair<int,int>>& classPairs, bool oneToMany = true, bool takeUserInput = false, int removalCount = 5, int nearestNeighborK = 5, float similarityThreshold = 0.25f, bool hidePrinting = false) {
 
@@ -387,6 +481,8 @@ vector<float> runKFold(vector<vector<vector<float>>> &dataset, vector<pair<int,i
                 trainingData[cls].insert(trainingData[cls].end(), kFolds[fold][cls].begin(), kFolds[fold][cls].end());
             }
         }
+
+        // little thing. causes issues if we don't reset when we make a new training set
         Knn::deviationsComputed = false;
 
         // The test dataset for this iteration is simply fold i.
@@ -427,6 +523,7 @@ vector<float> runKFold(vector<vector<vector<float>>> &dataset, vector<pair<int,i
                 }
             }
 
+            // get our accuracy now for this fold.
             map<pair<int, int>, PointSummary> pointSummaries;
             acc += testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData,pointSummaries, nearestNeighborK, similarityThreshold);
             blockCount += hyperBlocks.size();
@@ -448,12 +545,145 @@ vector<float> runKFold(vector<vector<vector<float>>> &dataset, vector<pair<int,i
 
     if (hidePrinting)
         cout.rdbuf(oldBuf);           // back to console
-        
+
     cout << "OVERALL ACCURACY " << avgAcc << endl;
     cout << "Average block count " << blockAvg << endl;
     cout << "Average clause count " << clauseAvg << endl;
 
     return {avgAcc, blockAvg, clauseAvg};
+}
+
+vector<float> runKFoldWithLevelNBlocks(vector<vector<vector<float>>> &dataset, bool takeUserInput = false, int removalCount = 0, int nearestNeighborK = 5, float similarityThreshold = 0.25f, bool hidePrinting = false, const int HB_LEVEL = 2) {
+
+    if (dataset.empty()) {
+        cout << "Please enter a training dataset before using K Fold validation" << endl;
+        return {-1, -1, -1};
+    }
+
+    int k;
+    // if we're taking input run it like normal. using this variable lets us just do it this way.
+    if (takeUserInput) {
+        cout << "Please Enter a K value:\t";
+        cin >> k;
+
+        // Clear the newline from the input buffer.
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
+        if (cin.fail() || k < 2) {
+            cout << "Error: Invalid input. Please enter a valid integer greater than 1." << endl;
+            // Clear the error state and ignore any remaining input.
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            return {-1, -1, -1};
+        }
+    }
+    // if we're not using user input, we are testing for best accuracy and we can use 10.
+    else
+        k = 10;
+
+
+    // used to hide the printing of the regular kFold testing stuff. so that when we are finding best parameters we don't have all that printing
+    streambuf* oldBuf = nullptr;
+    if (hidePrinting) {
+        ostringstream nullSink;
+        oldBuf = cout.rdbuf(nullSink.rdbuf());   // silence everything
+    }
+
+    vector<vector<vector<vector<float>>>> kFolds = DataUtil::splitDataset(dataset, k);
+    // stats trackers for cross folds.
+    float acc = 0.0f;
+    int blockCount = 0;
+    int cCount = 0;
+
+    // generate blocks with a training set which is all folds except i. using i as the test dataset.
+    for (int i = 0; i < k; i++) {
+
+        // trainingData will store all folds except the i-th as training data.
+        vector<vector<vector<float>>> trainingData(NUM_CLASSES);
+
+        // Loop through all folds except i and accumulate points by class.
+        for (int fold = 0; fold < k; fold++) {
+            if (fold == i) continue; // skip test fold
+
+            // build our training data
+            for (int cls = 0; cls < NUM_CLASSES; cls++) {
+                // Append all points from kFolds[fold][cls] to trainingData[cls]
+                trainingData[cls].insert(trainingData[cls].end(), kFolds[fold][cls].begin(), kFolds[fold][cls].end());
+            }
+        }
+
+        // little thing. causes issues if we don't reset when we make a new training set
+        Knn::deviationsComputed = false;
+
+        // The test dataset for this iteration is simply fold i.
+        vector<vector<vector<float>>> testData = kFolds[i];
+
+        // now that our data is set up with training and testing, we simply do business as usual. we are going to do our LDA on the train data, then just do our block generation and simplification
+        // Run LDA on the training data.
+        vector<vector<float>>bestVectors;
+        // Initialize indexes for each class.
+        vector<vector<int>> bestVectorsIndexes = vector<vector<int> >(NUM_CLASSES, vector<int>(FIELD_LENGTH, 0));
+        vector<int> eachClassBestVectorIndex = vector<int>(NUM_CLASSES);
+        computeLDAOrdering(trainingData, bestVectors, bestVectorsIndexes, eachClassBestVectorIndex);
+
+        cout << "----------------------------FOLD " << (i + 1) << " RESULTS----------------------------------" << endl;
+        vector<HyperBlock> hyperBlocks;
+
+        // ------------------------------------------
+        // GENERATING BLOCKS BUSINESS AS USUAL
+        IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
+
+        // now we iteratively increase the level of the blocks to whatever level
+        vector<vector<vector<float>>> levelNData = trainingData;
+
+        for (int level = 1; level < HB_LEVEL; level++) {
+            vector<HyperBlock> thisLevelBlocks;
+            // make our new set of blocks, and save this set of envelope cases. now we can reduce the training set iteratively.
+            levelNData = move(IntervalHyperBlock::generateNextLevelHBs(levelNData, hyperBlocks, thisLevelBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS));
+
+            // updating the train data itself actually allows us to perform better. we shrink the training set, and the KNN does better in this way.
+            // trainingData = move(IntervalHyperBlock::generateNextLevelHBs(trainingData, hyperBlocks, thisLevelBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS));
+
+            hyperBlocks  = move(thisLevelBlocks);   // advance to new level
+        }
+
+        // simplify them, with the simplification count we have specifed as a parameter. usually 0, but playing with this value can get us better results because we are removing more blocks
+        Simplifications::REMOVAL_COUNT = removalCount;
+        Simplifications::runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
+
+        int totalPoints = 0;
+        for (const auto &c : trainingData)
+            totalPoints += c.size();
+
+        // clause count computed here because sometimes we don't simplify
+        int clauseCount = 0;
+        for (const auto &hb : hyperBlocks) {
+            for (int a = 0; a < FIELD_LENGTH; a++) {
+                if (hb.minimums[a][0] != 0.0f || hb.maximums[a][0] != 1.0f)
+                    clauseCount++;
+            }
+        }
+
+        // get our accuracy now for this fold.
+        map<pair<int, int>, PointSummary> pointSummaries;
+        acc += testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData,pointSummaries, nearestNeighborK, similarityThreshold);
+        blockCount += hyperBlocks.size();
+        cCount += clauseCount;
+    } // end of one train/test loop
+
+    float avgAcc = float (acc) / float(k);
+    float blockAvg = float(blockCount) / float(k);
+    float clauseAvg = float(cCount) / float(k);
+
+    if (hidePrinting)
+        cout.rdbuf(oldBuf);           // back to console if we had printing disabled.
+
+    cout << "OVERALL ACCURACY " << avgAcc << endl;
+    cout << "Average block count " << blockAvg << endl;
+    cout << "Average clause count " << clauseAvg << endl;
+
+    return {avgAcc, blockAvg, clauseAvg};
+
 }
 
 float evaluateOneToSomeHBs(const vector<vector<HyperBlock>>& oneToSomeBlocks, const vector<vector<vector<float>>>& testData) {
@@ -514,8 +744,6 @@ float evaluateOneToSomeHBs(const vector<vector<HyperBlock>>& oneToSomeBlocks, co
     cout << "Total number of points tested: " << pointsTested << endl;
     return acc;
 }
-
-
 
 // -------------------------------------------------------------------------
 // Asynchronous mode: run when argc >= 2
@@ -997,35 +1225,6 @@ vector<float> precisionKFold(vector<vector<vector<float>>> &dataset, int nearest
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // -------------------------------------------------------------------------
 // Interactive mode: run when argc < 2
 void runInteractive() {
@@ -1078,7 +1277,6 @@ void runInteractive() {
                 #endif
                 getline(cin, trainingDataFileName);
                 string fullPath = "DATASETS" + string(PATH_SEPARATOR) + trainingDataFileName;
-                CLASS_MAP.clear();
                 CLASS_MAP_INT.clear();
                 trainingData = DataUtil::dataSetup(fullPath.c_str(), CLASS_MAP, CLASS_MAP_INT);
 
@@ -1304,6 +1502,11 @@ void runInteractive() {
                 // Clear the newline from the input buffer.
                 cin.ignore(numeric_limits<streamsize>::max(), '\n');
 
+                cout << "What level HBs are we testing?" << endl;
+                int blockLevel;
+                cin >> blockLevel;
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
                 if (cin.fail() || maxK < 0) {
                     cout << "Error: Invalid input. Please enter a valid integer greater than 1." << endl;
                     // Clear the error state and ignore any remaining input.
@@ -1312,15 +1515,50 @@ void runInteractive() {
                     return;
                 }
 
+                vector<int> removalCounts;
+                for (int i = 0; i <= maxRemoval; i++) {
+                    removalCounts.push_back(i);
+                }
+
+                vector<int> kVals;
+                for (int i = 1; i <= maxK; i += 2) {
+                    kVals.push_back(i);
+                }
+
+                vector<float> thresholds{0.15, 0.2, 0.25, 0.3};
+
                 // findBestParameters(trainingData, maxRemoval, maxK);
+                findBestParameters(trainingData, kVals, thresholds, maxRemoval, false, blockLevel);
                 PrintingUtil::waitForEnter();
                 break;
             }
             case 17: {
-                // This needs to be updated on the menu
-                getValidationInfo(trainingData, eachClassBestVectorIndex, hyperBlocks , testData, bestVectorsIndexes);
-                PrintingUtil::waitForEnter();
 
+                // MERGE FIX: This was going to be in 17, but level N hbs displaces it
+                //getValidationInfo(trainingData, eachClassBestVectorIndex, hyperBlocks , testData, bestVectorsIndexes);
+                //
+                
+                if (trainingData.empty()) {
+                    cout << "\nError: Please import training data first." << endl;
+                    PrintingUtil::waitForEnter();
+                } else {
+                    vector<HyperBlock> newBlocks;
+                    trainingData = move(IntervalHyperBlock::generateNextLevelHBs(trainingData, hyperBlocks, newBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS));
+                    hyperBlocks = move(newBlocks);
+                }
+                static int levelN = 1;
+                cout << "Finished Generating level " << ++levelN << " level HyperBlocks" << endl;
+                PrintingUtil::waitForEnter();
+                break;
+            }
+            case 18: {
+                // run our level N k fold function
+                runKFoldWithLevelNBlocks(trainingData, false, 1, 1, .25f);
+                PrintingUtil::waitForEnter();
+                break;
+            }
+            case 19: {
+                running = false;
                 break;
             }
             default: {

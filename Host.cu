@@ -1158,32 +1158,12 @@ void runInteractive() {
                 cout << "Enter existing hyperblocks file name: " << endl;
                 getline(cin, hyperBlocksImportFileName);
                 hyperBlocks = DataUtil::loadBasicHBsFromCSV(hyperBlocksImportFileName);
+
                 cout << "HyperBlocks imported from file " << hyperBlocksImportFileName << " successfully" << endl;
-
-				//try_expand_blocks_and_save(hyperBlocks, trainingData);
-                cout << "NUMBLOKSC: " << hyperBlocks.size() << endl;
-
-                /*
-                int cCount = 0;
-                for(const auto& hb : hyperBlocks) {
-                    for(int i = 0; i < FIELD_LENGTH; i++) {
-                        if(hb.minimums[i][0] <= 0.0f - 1e-6 && hb.maximums[i][0] >= 1.0f + 1e-6) {
-
-                        }
-                        else {
-                            cCount++;
-                        }
-                    }
-                }
-                */
 
                 for(HyperBlock& hb: hyperBlocks){
                   hb.find_avg_and_size(trainingData);
                 }
-
-                // Write something here that tries to minimize the difference in number of blocks between classes.
-                // Like x class has 1000 hbs but y has 1 good one.
-
 
                 PrintingUtil::waitForEnter();
                 break;
@@ -1215,8 +1195,6 @@ void runInteractive() {
 
                 for (const auto &c : trainingData) totalPoints += c.size();
 
-                //for(HyperBlock& hb: hyperBlocks) hb.findSize(trainingData);
-
                 cout << "After removing useless blocks we have: " << result[1] << " clauses\n";
                 cout << "We got a final total of: " << hyperBlocks.size() << " blocks." << endl;
                 cout << "We had: " << totalPoints << " points of training data\n";
@@ -1240,8 +1218,7 @@ void runInteractive() {
                 vector<pair<int,int>> classPairs{};
 
                 // run the k fold, taking the user input for number of k. using default values for removal count, k and whatnot
-                //runKFold(trainingData, classPairs, true, true);
-                precisionKFold(trainingData);
+                runKFold(trainingData, classPairs, true, true);  //precisionKFold(trainingData);
                 PrintingUtil::waitForEnter();
                 break;
             }
@@ -1259,21 +1236,11 @@ void runInteractive() {
                 break;
             }
             case 12: {
-                //      oneToOneBlocks = oneToOneHyper(trainingData, eachClassBestVectorIndex);
-
                 // Import 1-1 Hyperblocks
                 cout << "Enter 1-1 Hyperblocks file name: " << endl;
                 getline(cin, hyperBlocksImportFileName);
                 oneToOneBlocks = DataUtil::loadOneToOneHBsFromBinary(hyperBlocksImportFileName, classPairsOut);
                 cout << "HyperBlocks imported from file " << hyperBlocksImportFileName << " successfully" << endl;
-
-                /* Might still want this but has to be wrapped in loop through each pair.
-                for(HyperBlock& hb: hyperBlocks){
-                    hb.find_avg_and_size(trainingData);
-                }
-
-                blockSizeDistribution(hyperBlocks);
-                */
 
                 PrintingUtil::waitForEnter();
                 break;
@@ -1350,7 +1317,7 @@ void runInteractive() {
                 break;
             }
             case 17: {
-
+                // This needs to be updated on the menu
                 getValidationInfo(trainingData, eachClassBestVectorIndex, hyperBlocks , testData, bestVectorsIndexes);
                 PrintingUtil::waitForEnter();
 

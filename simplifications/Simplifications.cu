@@ -243,7 +243,7 @@ std::vector<int> Simplifications::runSimplifications(std::vector<HyperBlock> &hy
         runCount++; // counter so we can show how many iterations this took.
 
         // simplification functions
-        Simplifications::removeUselessAttr(hyperBlocks, trainData, bestAttributeOrderings);
+        //Simplifications::removeUselessAttr(hyperBlocks, trainData, bestAttributeOrderings);
         Simplifications::removeUselessBlocks(trainData, hyperBlocks);
 
         // count how many we have after simplifications.

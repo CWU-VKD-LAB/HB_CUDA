@@ -1,5 +1,7 @@
 #include "HyperBlock.h"
 
+#include "../data_utilities/StatStructs.h"
+
 // Constructor definition
 HyperBlock::HyperBlock(const std::vector<std::vector<float>>& maxs, const std::vector<std::vector<float>>& mins, int cls) : maximums(maxs), minimums(mins), classNum(cls) {
     topBottomPairs.resize(maxs.size());
@@ -89,6 +91,76 @@ float HyperBlock::distance_to_HB_Edge(int numAttributes, const float* point) con
 
     return std::sqrt(totalDistanceSquared);
 }
+
+
+/**
+ * Calculate precision metrics for this specific HyperBlock based on validation data
+ * Sets this->blockPrecision and populates this->precisionLostByClass
+ * @param summaries Point summaries from validation run (blockId -> PointSummary mapping)
+ * @param NUM_CLASSES Total number of classes in the problem
+ * @param blockIdx The unique index id of this HyperBlock
+ * @param useVotedResult If this is true, the algorithm should use the final prediction to not penalize blocks that were wrong but didn't result in bad classificatrion.
+ * @return The precision of this HyperBlock (TP / (TP + FP))
+ */
+void HyperBlock::setHBPrecisions(std::map<std::pair<int, int>, PointSummary> summaries, int NUM_CLASSES, bool useVotedResult) {
+    // Initialize the precisionLostByClass vector
+    this->precisionLostByClass.assign(NUM_CLASSES, 0.0f);
+
+    int TP = 0;  // True positives: points of this block's class that fell into this block
+    int FP = 0;  // False positives: points of other classes that fell into this block
+    std::vector<int> FP_by_class(NUM_CLASSES, 0);  // Track FP by each class
+
+    // Go through all point summaries to find points that fell into this block
+    for (const auto& entry : summaries) {
+        const auto& key = entry.first;
+        const auto& pointSummary = entry.second;
+
+        int actualClass = key.first;
+
+        // Check if this point fell into our block
+        bool pointInThisBlock = false;
+        for (const auto& blockInfo : pointSummary.blockHits) {
+            if (blockInfo.blockIdx == this->blockId) {
+                pointInThisBlock = true;
+                break;
+            }
+        }
+
+        if (pointInThisBlock) {
+            if (actualClass == this->classNum) {
+                TP++;
+            } else {
+                FP++;
+                FP_by_class[actualClass]++;
+            }
+        }
+    }
+
+    // Set the block's precision
+    int total = TP + FP;
+    if (total > 0) {
+        this->blockPrecision = static_cast<float>(TP) / total;
+    } else {
+        this->blockPrecision = 1.0f;
+    }
+
+    // Calculate precision lost by each class and populate the member variable
+    if (FP > 0) {
+        float totalPrecisionLoss = static_cast<float>(FP) / total;
+
+        for (int i = 0; i < NUM_CLASSES; i++) {
+            if (i != this->classNum && FP_by_class[i] > 0) {
+                // Proportion of total loss attributed to class i
+                this->precisionLostByClass[i] = totalPrecisionLoss * static_cast<float>(FP_by_class[i]) / FP;
+            }
+        }
+    }
+}
+
+
+
+
+
 
 float HyperBlock::distance_to_HB_Avg(int numAttributes, const float* point) const{
     constexpr float EPSILON = 1e-6f;

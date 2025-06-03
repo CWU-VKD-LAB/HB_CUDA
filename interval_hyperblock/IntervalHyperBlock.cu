@@ -810,6 +810,12 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
         // if we run into more time challenges, our lives may be simpler if we revisit the merger cuda function.
         // dataByAttribute = separateByAttribute(data, FIELD_LENGTH);
         // mergerNotInCuda(data, hyperBlocks, dataByAttribute);
+
+        // Assign the block an ID so we can keep track of it across simplifications and removals!
+        for(int i = 0; i < hyperBlocks.size(); i++) {
+            hyperBlocks[i].blockId = i;
+        }
+
     } catch (exception e){
         cout << "Error in generateHBs: merger_cuda" << endl;
         cout << e.what() << endl;

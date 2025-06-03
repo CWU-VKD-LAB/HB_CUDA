@@ -2,6 +2,7 @@
 // Created by asnyd on 3/20/2025.
 //
 #include "DataUtil.h"
+#include <numeric>
 
 extern int FIELD_LENGTH;
 extern int NUM_CLASSES;
@@ -10,37 +11,48 @@ extern int NUM_CLASSES;
 
 
 // In-place stratified split: modifies trainingData by moving points to validationData
-// this allows us to use validation data, without actually using the test data, which would be cheating.
-void DataUtil::createValidationSplit(std::vector<std::vector<std::vector<float>>>& trainingData, std::vector<std::vector<std::vector<float>>>& validationData, float validationFraction, unsigned int randomSeed) {
+void DataUtil::createValidationSplit(
+    std::vector<std::vector<std::vector<float>>>& trainingData,
+    std::vector<std::vector<std::vector<float>>>& validationData,
+    float validationFraction,
+    unsigned int randomSeed
+) {
+    // Random for the shuffling
     std::mt19937 rng(randomSeed);
     validationData.clear();
     validationData.resize(trainingData.size());
 
-    // Go through each class
+    // Step 1: Find the minimum class size
+    int minClassSize = INT_MAX;
+    for (const auto& pointsInClass : trainingData) {
+        minClassSize = std::min(minClassSize, static_cast<int>(pointsInClass.size()));
+    }
+
+    // Step 2: Calculate number of validation points per class
+    int valPerClass = std::max(1, static_cast<int>(minClassSize * validationFraction));
+
+    // Step 3: Stratified sampling with fixed count
     for (int classIdx = 0; classIdx < trainingData.size(); ++classIdx) {
         auto& pointsInClass = trainingData[classIdx];
-
         std::vector<int> indices(pointsInClass.size());
-        for (int i = 0; i < pointsInClass.size(); ++i)
-            indices[i] = i;
-
+        std::iota(indices.begin(), indices.end(), 0);
         std::shuffle(indices.begin(), indices.end(), rng);
 
-        int valCount = static_cast<int>(pointsInClass.size() * validationFraction);
+        int actualValCount = std::min(valPerClass, static_cast<int>(pointsInClass.size()));
 
-        // Move validation points
-        for (int i = 0; i < valCount; ++i) {
+        // Move to validation
+        for (int i = 0; i < actualValCount; ++i) {
             validationData[classIdx].push_back(std::move(pointsInClass[indices[i]]));
         }
 
-        // Erase validation points from training set
-        // Important: sort indices in reverse so erase does not invalidate remaining indices
-        std::sort(indices.begin(), indices.begin() + valCount, std::greater<int>());
-        for (int i = 0; i < valCount; ++i) {
+        // Remove from training (reverse sorted)
+        std::sort(indices.begin(), indices.begin() + actualValCount, std::greater<int>());
+        for (int i = 0; i < actualValCount; ++i) {
             pointsInClass.erase(pointsInClass.begin() + indices[i]);
         }
     }
 }
+
 
 
 

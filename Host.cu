@@ -209,6 +209,51 @@ vector<vector<HyperBlock>> oneToOneHyper(const vector<vector<vector<float>>>& tr
 
     return oneToOneHyperBlocks;
 }
+void try_expand_to_unit(std::vector<HyperBlock>& blocks,
+                        const std::vector<std::vector<std::vector<float>>>& dataset,
+                        float threshold = 0.1f) {
+
+    int numClasses = dataset.size();
+    int numAttributes = dataset[0][0].size();
+
+#pragma omp parallel for schedule(dynamic)
+    for (int b = 0; b < 12; ++b) {
+        HyperBlock& block = blocks[b];
+        int thisClass = block.classNum;
+
+        for (int attr = 0; attr < numAttributes; ++attr) {
+            if (block.minimums[attr].size() != 1 || block.maximums[attr].size() != 1)
+                continue;
+
+            float min = block.minimums[attr][0];
+            float max = block.maximums[attr][0];
+
+            if (std::abs(min) > threshold || std::abs(1.0f - max) > threshold)
+                continue;
+
+            bool blocked = false;
+
+            for (int cls = 0; cls < numClasses && !blocked; ++cls) {
+                if (cls == thisClass) continue;
+
+                for (const auto& point : dataset[cls]) {
+                    float val = point[attr];
+                    if (val < 0.0f || val > 1.0f) continue;
+
+                    if (block.inside_HB(numAttributes, point.data())) {
+                        blocked = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!blocked) {
+                block.minimums[attr][0] = 0.0f;
+                block.maximums[attr][0] = 1.0f;
+            }
+        }
+    }
+}
 
 float testAccuracyOfHyperBlocks(vector<HyperBlock> &hyperBlocks, vector<vector<vector<float>>> &testData, vector<vector<vector<float>>> &trainingData, map<pair<int, int>, PointSummary>& pointSummaries, int k = 5, float threshold = 0.25) {
 
@@ -221,7 +266,7 @@ float testAccuracyOfHyperBlocks(vector<HyperBlock> &hyperBlocks, vector<vector<v
 
     // now build our second confusion matrix out of the unclassified stuff only
     vector<vector<vector<float>>> stillNotClassifiedPoints(NUM_CLASSES);
-    vector<vector<long>> knnMatrix = ClassificationTests::buildConfusionMatrix(hyperBlocks, trainingData, notClassifiedPoints, ClassificationTests::THRESHOLD_KNN, stillNotClassifiedPoints, NUM_CLASSES, pointSummaries, k, threshold);
+    vector<vector<long>> knnMatrix = ClassificationTests::buildConfusionMatrix(hyperBlocks, trainingData, notClassifiedPoints, ClassificationTests::PURE_KNN, stillNotClassifiedPoints, NUM_CLASSES, pointSummaries, k, threshold);
 
     cout << "------------------------KNN CONFUSION MATRIX--------------------------------" << endl;
     float knnAccuracy = PrintingUtil::printConfusionMatrix(knnMatrix, NUM_CLASSES, CLASS_MAP_INT);
@@ -463,7 +508,7 @@ vector<float> runKFold(vector<vector<vector<float>>> &dataset, vector<pair<int,i
 
             // simplify them, with the simplification count we have specifed as a parameter. usually 0, but playing with this value can get us better results because we are removing more blocks
             Simplifications::REMOVAL_COUNT = removalCount;
-            vector<int> result = Simplifications::runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
+            //vector<int> result = Simplifications::runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
 
             // clause count computed here because sometimes we don't simplify
             int totalPoints = 0;
@@ -483,6 +528,8 @@ vector<float> runKFold(vector<vector<vector<float>>> &dataset, vector<pair<int,i
             acc += testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData,pointSummaries, nearestNeighborK, similarityThreshold);
             blockCount += hyperBlocks.size();
             cCount += clauseCount;
+
+            cout << "Block count: " << hyperBlocks.size() << endl;
 
         } // end of one train/test loop
         else {
@@ -820,7 +867,7 @@ void evaluateOneToOneHyperBlocks(
                             votes[i]++;
                         }
                         if (block.classNum == j && block.inside_HB(point.size(), point.data())) {
-                            votes[j++];
+                            votes[j]++;
                         }
                     }
                 }
@@ -944,6 +991,239 @@ vector<int> findOneToSomeOrder(vector<vector<vector<float>>>& validationData, ve
 
     return blockOrder;
 }
+
+
+/**
+ * THIS IS THE PRECISION FROM THE CLASSIFIERS VIEW POINT.
+ * For example, the HBs for class 0, we care about the precision of the HBs.
+ *
+ * We do not calculate for all points p_i in class 0, what is the precision of the overall model (all HBs of all classes).
+ *
+ * @param confusionMatrix
+ * @return
+ */
+vector<float> calculateHBClassPrecisions(vector<vector<long>>& confusionMatrix) {
+    // Find the precision of each of the classes of HB in the confusion matrix
+    // TP / (TP + FP)
+    vector<float> precisions(NUM_CLASSES, 0.0f);
+
+    for(int i = 0; i < confusionMatrix.size(); i++) {
+        int TP = 0;
+        int FP = 0;
+        for(int j = 0; j < confusionMatrix[i].size(); j++) {
+            if(i == j) {
+                TP += confusionMatrix[i][j];
+            }else {
+                FP += confusionMatrix[i][j];
+            }
+        }
+
+        long total = TP + FP;
+        if(total > 0) {
+            precisions[i] = static_cast<float>(TP) / total;
+        } else {
+            precisions[i] = 0.0f;
+        }
+    }
+
+    return precisions;
+}
+
+/**
+ * We want to go through each class of HBs.
+ * For each class of HBs, we want to find the percent of precison lost by the other classes.
+ *
+ * Ex HBs class 0
+ * [0, 0, .12]
+ * This indicates that class 0 and 1 caused NO precision lost. However, class 2 causes 12% to be lost.
+ *
+ * @param confusionMatrix
+ * @return
+ */
+vector<vector<float>> calculateByClassPrecisionLost(const vector<vector<long>>& confusionMatrix) {
+    int numClasses = confusionMatrix.size();
+    vector<vector<float>> precisionLoss(numClasses, vector<float>(numClasses, 0.0f));
+
+    for (int i = 0; i < numClasses; ++i) {
+        long TP = confusionMatrix[i][i];
+        long FP_total = 0;
+
+        for (int j = 0; j < numClasses; ++j) {
+            if (i != j) {
+                FP_total += confusionMatrix[i][j];
+            }
+        }
+
+        long total = TP + FP_total;
+        if (total == 0 || FP_total == 0) {
+            for (int j = 0; j < numClasses; ++j)
+                precisionLoss[i][j] = 0.0f;
+            continue;
+        }
+
+        float precisionLossTotal = static_cast<float>(FP_total) / total;  // actual precision loss (e.g., 0.01)
+
+        for (int j = 0; j < numClasses; ++j) {
+            if (i != j) {
+                // contribution of class j to total loss, scaled by total loss
+                precisionLoss[i][j] = precisionLossTotal * static_cast<float>(confusionMatrix[i][j]) / FP_total;
+            }
+        }
+    }
+
+    return precisionLoss;
+}
+
+
+/**
+ * All we want from this function is the by class precision lost along with the by class HB Precision
+ * @param trainingData
+ * @param eachClassBestVectorIndex
+ * @param hyperBlocks
+ */
+float getValidationInfo(vector<vector<vector<float>>>& trainingData,
+    vector<int> eachClassBestVectorIndex, vector<HyperBlock>& hyperBlocks,
+    vector<vector<vector<float>>>& testingData,
+    vector<vector<int>> bestVectorsIndexes
+    ) {
+
+    map<pair<int, int>, PointSummary> pointSummaries;
+
+    //TODO: We need to set up a temp so that the training data is reset to its entire version after running this program.
+    vector<vector<vector<float>>> validationData;
+    DataUtil::createValidationSplit( trainingData, validationData, .10, 42);
+
+    // Build the hbs
+    IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
+    Simplifications::runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
+//    cout << "1" << endl;
+    // Test the validation HBS, returns confusion matrix, vector<vector<long>>
+    vector<vector<vector<float>>> stillUnclassified(NUM_CLASSES);
+    vector<vector<long>> confusionMatrix = ClassificationTests::buildConfusionMatrix(hyperBlocks, trainingData, validationData, ClassificationTests::HYPERBLOCKS,stillUnclassified , NUM_CLASSES, pointSummaries);
+
+    for(auto& hb : hyperBlocks) {
+        hb.setHBPrecisions(pointSummaries, NUM_CLASSES);
+    }
+
+    /*
+    for(auto& hb : hyperBlocks) {
+        cout << "Lost Precision Scores: " << endl;
+        for(const auto& a : hb.precisionLostByClass) {
+            cout << a << ",";
+        }
+
+        cout << endl;
+        cout << "Overall Precision of HB: " << hb.blockPrecision << endl;
+    }
+    */
+    // Go through and make a non-distinct confusion matrix.
+    std::vector<std::vector<long>> ultraConfusionMatrix(NUM_CLASSES, std::vector<long>(NUM_CLASSES, 0));
+
+    for (const auto& entry : pointSummaries) {
+        const auto& key = entry.first;
+        const PointSummary& summary = entry.second;
+        int trueClass = summary.classIdx;
+
+        for (const BlockInfo& hit : summary.blockHits) {
+            int blockClass = hit.blockClass;
+            ultraConfusionMatrix[trueClass][blockClass] += 1;
+        }
+    }
+
+
+    pointSummaries.clear();
+    vector<vector<long>> newConfusion = ClassificationTests::buildConfusionMatrix(hyperBlocks, trainingData, testingData, ClassificationTests::PRECISION_WEIGHTED, stillUnclassified , NUM_CLASSES, pointSummaries);
+    cout << "\nPrecision Weighted Matrix " << endl;
+    PrintingUtil::printConfusionMatrix(newConfusion, NUM_CLASSES, CLASS_MAP_INT);
+
+    vector<vector<vector<float>>> unclassed(NUM_CLASSES);
+    vector<vector<long>> knnMatrix = ClassificationTests::buildConfusionMatrix(hyperBlocks, trainingData, stillUnclassified, ClassificationTests::PURE_KNN, unclassed , NUM_CLASSES, pointSummaries);
+    cout << "\nKNN matrix" << endl;
+    PrintingUtil::printConfusionMatrix(knnMatrix, NUM_CLASSES, CLASS_MAP_INT);
+
+    for(int i = 0; i < knnMatrix.size(); ++i) {
+        for (int j = 0; j < knnMatrix[i].size(); ++j) {
+            newConfusion[i][j] += knnMatrix[i][j];
+        }
+    }
+    cout << "\nOld Matrix" << endl;
+    vector<vector<long>> oldConf = ClassificationTests::buildConfusionMatrix(hyperBlocks, trainingData, testingData, ClassificationTests::HYPERBLOCKS, stillUnclassified , NUM_CLASSES, pointSummaries);
+    PrintingUtil::printConfusionMatrix(oldConf, NUM_CLASSES, CLASS_MAP_INT);
+
+    return PrintingUtil::printConfusionMatrix(newConfusion, NUM_CLASSES, CLASS_MAP_INT);
+}
+
+
+
+vector<float> precisionKFold(vector<vector<vector<float>>> &dataset, int nearestNeighborK = 5, float similarityThreshold = 0.25f, bool hidePrinting = false) {
+    if (dataset.empty()) {
+        cout << "Please enter a training dataset before using K Fold validation" << endl;
+        return {-1, -1, -1};
+    }
+
+    int k = 10;
+    streambuf* oldBuf = nullptr;
+    if (hidePrinting) {
+        ostringstream nullSink;
+        oldBuf = cout.rdbuf(nullSink.rdbuf());
+    }
+
+    vector<vector<vector<vector<float>>>> kFolds = DataUtil::splitDataset(dataset, k);
+    float acc = 0.0f;
+    int blockCount = 0;
+    int cCount = 0;
+
+    for (int i = 0; i < k; i++) {
+        vector<vector<vector<float>>> trainingData(NUM_CLASSES);
+
+        for (int fold = 0; fold < k; fold++) {
+            if (fold == i) continue;
+            for (int cls = 0; cls < NUM_CLASSES; cls++) {
+                trainingData[cls].insert(trainingData[cls].end(), kFolds[fold][cls].begin(), kFolds[fold][cls].end());
+            }
+        }
+
+        vector<vector<vector<float>>> testData = kFolds[i];
+
+        vector<vector<float>> bestVectors;
+        vector<vector<int>> bestVectorsIndexes(NUM_CLASSES, vector<int>(FIELD_LENGTH, 0));
+        vector<int> eachClassBestVectorIndex(NUM_CLASSES);
+        computeLDAOrdering(trainingData, bestVectors, bestVectorsIndexes, eachClassBestVectorIndex);
+
+        cout << "----------------------------FOLD " << (i + 1) << " RESULTS----------------------------------" << endl;
+
+        vector<HyperBlock> hyperBlocks;
+
+        acc += getValidationInfo(trainingData, eachClassBestVectorIndex, hyperBlocks, testData, bestVectorsIndexes);
+
+        int clauseCount = 0;
+        for (const auto &hb : hyperBlocks) {
+            for (int a = 0; a < FIELD_LENGTH; a++) {
+                if (hb.minimums[a][0] != 0.0f || hb.maximums[a][0] != 1.0f)
+                    clauseCount++;
+            }
+        }
+
+        blockCount += hyperBlocks.size();
+        cCount += clauseCount;
+
+        cout << "Block count: " << hyperBlocks.size() << endl;
+    }
+
+    float avgAcc = acc / k;
+    float blockAvg = static_cast<float>(blockCount) / k;
+    float clauseAvg = static_cast<float>(cCount) / k;
+
+    if (hidePrinting)
+        cout.rdbuf(oldBuf);
+
+    cout << "OVERALL ACCURACY " << avgAcc << endl;
+    cout << "Average block count " << blockAvg << endl;
+    cout << "Average clause count " << clauseAvg << endl;
+
+    return {avgAcc, blockAvg, clauseAvg};
+}
+
 
 // -------------------------------------------------------------------------
 // Interactive mode: run when argc < 2
@@ -1075,10 +1355,9 @@ void runInteractive() {
             case 4: { // IMPORT EXISTING HYPERBLOCKS
                 cout << "Enter existing hyperblocks file name: " << endl;
                 getline(cin, hyperBlocksImportFileName);
-                hyperBlocks = DataUtil::loadBasicHBsFromBinary(hyperBlocksImportFileName);
-                cout << "HyperBlocks imported from file " << hyperBlocksImportFileName << " successfully" << endl;
+                hyperBlocks = DataUtil::loadBasicHBsFromCSV(hyperBlocksImportFileName);
 
-				//try_expand_blocks_and_save(hyperBlocks, trainingData);
+                cout << "HyperBlocks imported from file " << hyperBlocksImportFileName << " successfully" << endl;
 
                 for(HyperBlock& hb: hyperBlocks){
                   hb.find_avg_and_size(trainingData);
@@ -1086,6 +1365,7 @@ void runInteractive() {
 
                 PrintingUtil::waitForEnter();
                 break;
+
             }
             case 5: { // EXPORT HYPERBLOCKS
                 cout << "Enter the file to save HyperBlocks to: " << endl;
@@ -1113,8 +1393,6 @@ void runInteractive() {
 
                 for (const auto &c : trainingData) totalPoints += c.size();
 
-                //for(HyperBlock& hb: hyperBlocks) hb.findSize(trainingData);
-
                 cout << "After removing useless blocks we have: " << result[1] << " clauses\n";
                 cout << "We got a final total of: " << hyperBlocks.size() << " blocks." << endl;
                 cout << "We had: " << totalPoints << " points of training data\n";
@@ -1138,7 +1416,7 @@ void runInteractive() {
                 vector<pair<int,int>> classPairs{};
 
                 // run the k fold, taking the user input for number of k. using default values for removal count, k and whatnot
-                runKFold(trainingData, classPairs, true, true);
+                runKFold(trainingData, classPairs, true, true);  //precisionKFold(trainingData);
                 PrintingUtil::waitForEnter();
                 break;
             }
@@ -1156,21 +1434,11 @@ void runInteractive() {
                 break;
             }
             case 12: {
-                //      oneToOneBlocks = oneToOneHyper(trainingData, eachClassBestVectorIndex);
-
                 // Import 1-1 Hyperblocks
                 cout << "Enter 1-1 Hyperblocks file name: " << endl;
                 getline(cin, hyperBlocksImportFileName);
                 oneToOneBlocks = DataUtil::loadOneToOneHBsFromBinary(hyperBlocksImportFileName, classPairsOut);
                 cout << "HyperBlocks imported from file " << hyperBlocksImportFileName << " successfully" << endl;
-
-                /* Might still want this but has to be wrapped in loop through each pair.
-                for(HyperBlock& hb: hyperBlocks){
-                    hb.find_avg_and_size(trainingData);
-                }
-
-                blockSizeDistribution(hyperBlocks);
-                */
 
                 PrintingUtil::waitForEnter();
                 break;
@@ -1265,6 +1533,11 @@ void runInteractive() {
                 break;
             }
             case 17: {
+
+                // MERGE FIX: This was going to be in 17, but level N hbs displaces it
+                //getValidationInfo(trainingData, eachClassBestVectorIndex, hyperBlocks , testData, bestVectorsIndexes);
+                //
+                
                 if (trainingData.empty()) {
                     cout << "\nError: Please import training data first." << endl;
                     PrintingUtil::waitForEnter();

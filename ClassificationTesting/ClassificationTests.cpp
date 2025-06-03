@@ -10,12 +10,12 @@
  * the points we can't classify is for those which fall out of all HBs. this allows us to easily make a list of points we couldn't handle, and we would just call the function
  * again with another mode, to reclassify those points specifically.
  */
-vector<vector<long>> ClassificationTests::buildConfusionMatrix(vector<HyperBlock> &hyperBlocks, const vector<vector<vector<float>>> &trainingData, const vector<vector<vector<float>>> &pointsToClassify, int classificationMode, vector<vector<vector<float>>> &pointsWeCantClassify, const int NUM_CLASSES, map<pair<int, int>, PointSummary>& pointSummaries, int k, float threshold) {
+vector<vector<long>> ClassificationTests::buildConfusionMatrix(vector<HyperBlock> &hyperBlocks, const vector<vector<vector<float>>> &trainingData, vector<vector<vector<float>>> &testingData, int classificationMode, vector<vector<vector<float>>> &pointsWeCantClassify, const int NUM_CLASSES, map<pair<int, int>, PointSummary>& pointSummaries,int k, float threshold) {
 
     vector<vector<long>> confusionMatrix(NUM_CLASSES, vector<long>(NUM_CLASSES, 0));
 
     int totalPointsToDo = 0;
-    for (const auto &classPoints : pointsToClassify) {
+    for (const auto &classPoints : testingData) {
         totalPointsToDo += classPoints.size();
     }
 
@@ -26,10 +26,10 @@ vector<vector<long>> ClassificationTests::buildConfusionMatrix(vector<HyperBlock
     for(int cls = 0; cls < NUM_CLASSES; cls++) {
 
         // all points each class. we are going to use whichever classifier we have called our function with to build the matrix
-        for(int point = 0; point < pointsToClassify[cls].size(); point++) {
+        for(int point = 0; point < testingData[cls].size(); point++) {
 
             // get our reference to the point
-            const auto &p = pointsToClassify[cls][point];
+            const auto &p = testingData[cls][point];
             int predictedClass = -1;
             vector<BlockInfo> blockHits{};
             pair<int, vector<BlockInfo>> prediction;
@@ -72,6 +72,11 @@ vector<vector<long>> ClassificationTests::buildConfusionMatrix(vector<HyperBlock
                     predictedClass = Knn::mergableKNN(p, trainingData, hyperBlocks, NUM_CLASSES);
                     break;
 
+                case PRECISION_WEIGHTED:
+                    prediction = precisionWeightedHBs(p, testingData, hyperBlocks, NUM_CLASSES, pointSummaries);
+                    predictedClass = prediction.first;
+                    blockHits = prediction.second;
+                    break;
                 default:
                     throw new runtime_error("Unknown classification mode");
             }
@@ -94,26 +99,87 @@ vector<vector<long>> ClassificationTests::buildConfusionMatrix(vector<HyperBlock
     return confusionMatrix;
 }
 
-pair<int, vector<BlockInfo>> ClassificationTests::predictWithHBs(const vector<HyperBlock> &hyperBlocks, const vector<float> &point, int NUM_CLASSES, map<pair<int, int>, PointSummary>& pointSummaries) {
 
-    vector<int> votes(NUM_CLASSES, 0);
+pair<int, vector<BlockInfo>> ClassificationTests::precisionWeightedHBs(const vector<float> &point, std::vector<std::vector<std::vector<float>>>& testData, std::vector<HyperBlock>& hyperBlocks, int NUM_CLASSES, map<pair<int, int>, PointSummary>& pointSummaries) {
+
+    // Precision lost will hold each class of HB precison lost stats for each individual class
+    /// Ex cls 0:  [0, .04, .10] indicates the precision lost from 0 was none, 1 was 4% and 2 was 10%
+    /// hbPrecision is the precision score of the HB set itself. If class 0 has 100% that means it didn't misclassify anything as a 0 in validation.
+
+    // Find how many HBs there are from each class to weight by
+    std::vector<int> totalHBsPerClass(NUM_CLASSES);
+    for(const auto& hb : hyperBlocks) {
+        totalHBsPerClass[hb.classNum]++;
+    }
+
+    std::vector<float> floatVote(NUM_CLASSES, 0.0f);
     vector<BlockInfo> blockHits;
-    // if we instead wanted to just take the first block it falls in, we would just return early when we find a block we fall into.
-    // this voting version works better in testing though.
-    for (int i = 0; i < hyperBlocks.size(); i++) {
-        const auto &block = hyperBlocks[i];
-        if (block.inside_HB(point.size(), point.data())) {
-            votes[block.classNum]++;
-            blockHits.push_back(BlockInfo{block.classNum, i, block.size, -1});
+
+    for(int i = 0; i < hyperBlocks.size(); i++) {
+        const auto& hb = hyperBlocks[i];
+
+        // If the point is within the HB
+        if(hb.inside_HB(point.size(), point.data())) {
+            blockHits.push_back(BlockInfo{hb.classNum, hb.blockId, hb.size, -1});
+
+            // We vote for the right class using precision
+            if(totalHBsPerClass[hb.classNum] > 0) {
+                floatVote[hb.classNum] += (hb.blockPrecision / totalHBsPerClass[hb.classNum]);
+
+                // We vote for the possible other classes using the precision lost metric.
+                for(int conf = 0; conf < NUM_CLASSES; conf++) {
+                    // Vote for other classes is HB precision total * other class precision lost,
+                    floatVote[conf] += hb.precisionLostByClass[conf] / totalHBsPerClass[hb.classNum];
+                }
+            }
         }
     }
 
+    // Decide which one we want to vote for
+    float max = 0.0f;
+    int winningClass = -1;
+    for(int i = 0; i < NUM_CLASSES; i++) {
+        if(floatVote[i] > max) {
+            max = floatVote[i];
+            winningClass = i;
+        }
+    }
 
-    // Find the highest vote count
-    int maxVote = *std::max_element(votes.begin(), votes.end());
+    if (max == 0.0f) {
+        return {-1, blockHits};
+    }
 
-    // no votes at all, return -1
-    if (maxVote == 0) {
+
+    return {winningClass, blockHits};
+}
+
+
+
+
+pair<int, vector<BlockInfo>> ClassificationTests::predictWithHBs(
+    const vector<HyperBlock> &hyperBlocks, const vector<float> &point,
+    int NUM_CLASSES, map<pair<int, int>, PointSummary>& pointSummaries) {
+
+    vector<int> numHbsPerClass(NUM_CLASSES, 0);
+    for (const auto &hb : hyperBlocks) {
+        numHbsPerClass[hb.classNum]++;
+    }
+
+    vector<float> votes(NUM_CLASSES, 0.0f);
+    vector<BlockInfo> blockHits;
+
+    for (int i = 0; i < hyperBlocks.size(); i++) {
+        const auto &block = hyperBlocks[i];
+        if (block.inside_HB(point.size(), point.data())) {
+            float weight = 1.0f / numHbsPerClass[block.classNum];
+            votes[block.classNum] += weight;
+            blockHits.push_back(BlockInfo{block.classNum, block.blockId, block.size, -1});
+        }
+    }
+
+    float maxVote = *std::max_element(votes.begin(), votes.end());
+
+    if (maxVote == 0.0f) {
         return {-1, blockHits};
     }
 
@@ -135,10 +201,7 @@ pair<int, vector<BlockInfo>> ClassificationTests::predictWithHBs(const vector<Hy
 
     // if we had a real winner we can return it.
     return {winner, blockHits};
-
-
 }
-
 
 
 

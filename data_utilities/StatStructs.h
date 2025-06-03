@@ -10,10 +10,12 @@
 #include <fstream>
 #include <iostream>
 
+// MOST OF THIS IS JUST FOR DEBUGGING OR FIGURING OUT WHY ACCURACY IS GOOD (OR NOT). NOT MISSION CRITICAL STUFF, JUST DEBUGS TO DETERMINE WHERE MISCLASSIFICATION IS FROM BASICALLY.
+
 struct BlockInfo {
     int blockClass;
     int blockIdx;
-    float blockSize;
+    int blockSize;
     float blockDensity;
 };
 

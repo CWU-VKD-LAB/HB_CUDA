@@ -2,21 +2,34 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include <limits>
-// ------------------------------------------------------------------------------------------------
-// REFACTORED MERGER HYPER BLOCKS KERNEL FUNCTION. DOESN'T NEED THE COOPERATIVE GROUPS.
-// WRAP IN A LOOP. launch mergerHyperBlocks with i up to N - 1 as seed index, each time then rearrange, then reset.
-// ------------------------------------------------------------------------------------------------
+
+
+
 // Define a macro to compare float4's for equality.
 #define COMPARE_FLOAT4(a, b) ( (((a).x == (b).x) && ((a).y == (b).y) && ((a).z == (b).z) && ((a).w == (b).w)) ? 0 : 1 )
 // Define simple min/max macros for scalar floats.
 #define min_f(a, b) ((a) > (b) ? (b) : (a))
 #define max_f(a, b) ((a) > (b) ? (a) : (b))
+
 // Hybrid kernel that uses block-level cooperation but vectorizes with float4's.
+// ------------------------------------------------------------------------------------------------
+// REFACTORED MERGER HYPER BLOCKS KERNEL FUNCTION. DOESN'T NEED THE COOPERATIVE GROUPS LIKE WE USE IN DV2.0.
+// WRAP IN A LOOP. launch mergerHyperBlocks with i up to N - 1 as seed index, each time then rearrange, then reset.
+// ------------------------------------------------------------------------------------------------
+
+// the monster. this is one of the heaviest parts of the whole program. it is very heavily optimized, so hard to read.
+// a block of threads work together to check HBs, striding by number of total cuda blocks. basically it works like this.
+// we take a seed block out of the queue. each HB besides that block, and all ones we have already used, try to eat the seed block.
+// to eat it, you just take the min of the bounds of the seed block and the block we are merging, and the max.
+// so we take whoever's x1 min is lower, and whichever x1 max is higher, and so on or all attributes.
+// then we check THE ENTIRE DATASET to determine if other class points are inside our new bounds. if so, we don't update the bounds of our HB.
+// if there were no points inside, we can then do the merge, and we mark the seedblock as merged to, so it can die, and then we mark ours as merged.
+// if even one point merges to seed block, we know that we can delete it, since that block will be entirely inside of another one.
 __global__ void mergerHyperBlocks(
     const int seedIndex, 
     int *readSeedQueue, 
     const int numBlocks, 
-    const int numAttributes,   // padded to be a multiple of 4
+    const int numAttributes,   // padded to be a multiple of 4 in calling function (merger_cuda() in interval_hyperblock.cu).
     const int numPoints, 
     const float *opposingPoints,
     float *hyperBlockMins, 
@@ -50,6 +63,9 @@ __global__ void mergerHyperBlocks(
     // Declare shared memory to hold the combined bounds.
     // We allocate space for 2 * numAttributes floats.
     extern __shared__ float sharedMem[];
+
+    // we use these stupid looking float4's all over. These are literally just a struct with 4 floats.
+    // they are more efficient because we are able to read more memory at a time.
     // Treat first half as an array of float4's for the mins...
     float4 *localCombinedMins = (float4*) sharedMem;
     // ...and the second half for the maxes.
@@ -101,7 +117,7 @@ __global__ void mergerHyperBlocks(
             localCombinedMins[i] = combinedMin;
             localCombinedMaxes[i] = combinedMax;
 
-            // Did we actually use any seed values?
+            // Did we actually use any seed values? just a quick check, if we basically just used one block or the other, we already know it's valid. checking if we updated the bounds is all we are doing.
             if (COMPARE_FLOAT4(combinedMin, seedMin) || COMPARE_FLOAT4(combinedMax, seedMax)) {
                 atomicOr(&usedSeedBlock, 1);
             }
@@ -115,7 +131,8 @@ __global__ void mergerHyperBlocks(
         // Determine whether we really need to scan the dataset.
         int needDatasetCheck = (usedSeedBlock && usedCandidateBlock);
 
-        // (b) scan every point for containment
+        // check the entire dataset now. we have transposed our point matrix, so that threads are working on adjacent elements.
+        // this is a small change which gives big speedup. having threads 0 and 1 reading elements 0 and 1, instead of 0 and (numAttributes + 1) is a huge speed gain.
         for (int pointIndex = localID; pointIndex < numPoints && blockMergable && needDatasetCheck; pointIndex += blockDim.x) {
             bool pointOutside = false;
             for (int i = 0; i < numAttributesAsFours; i++) {
@@ -159,6 +176,9 @@ __global__ void mergerHyperBlocks(
 }
 
 
+// rearrange seed queue is important. we run this right after the merging has happened. so we run the merge for one particular seed block. then we rearrange.
+// the HBs which merged go to the back, and the ones which didn't slide to the front. notice how if block deadSeedNum + 1 merged, it would actually end up at the back. that's
+// intentional, because it does much better.
 __global__ void rearrangeSeedQueue(const int deadSeedNum, int *readSeedQueue, int *writeSeedQueue, int *deleteFlags, int *mergable, const int numBlocks){
 
     const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
@@ -197,6 +217,7 @@ __global__ void rearrangeSeedQueue(const int deadSeedNum, int *readSeedQueue, in
     }
 }
 
+// reset the mergeable flags for the next round.
 __global__ void resetMergableFlags(int *mergableFlags, const int numBlocks){
     // make all the flags 0.
     for(int i = blockIdx.x * blockDim.x + threadIdx.x; i < numBlocks; i += gridDim.x * blockDim.x){
@@ -212,6 +233,7 @@ __global__ void resetMergableFlags(int *mergableFlags, const int numBlocks){
 
 // ASSIGN POINTS TO BLOCKS KERNEL FUNCTION.
 // once every point has been assigned to a block, then we can start doing our removing of useless blocks.
+// all this function does is take each point, and assign it to the first HB it falls into.
 __global__ void assignPointsToBlocks(const float *dataPointsArray, const int numAttributes, const int numPoints, const float *blockMins, const float *blockMaxes, const int *blockEdges, const int numBlocks, int *dataPointBlocks){
 
     const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
@@ -299,6 +321,8 @@ __global__ void sumPointsPerBlock(int *dataPointBlocks, const int numPoints, int
     }
 }
 
+// almost the same as the assignPointsToBlocks, but this time, instead of searching for the first HB it fits inside, we take the BIGGEST HB it fits insde
+// we use the count for this part, an HB with a bigger count, we assign there.
 __global__ void findBetterBlocks(const float *dataPointsArray, const int numAttributes, const int numPoints, const float *blockMins, const float *blockMaxes, const int *blockEdges, const int numBlocks, int *dataPointBlocks, int *numPointsInBlocks){
 
     const int threadID = blockIdx.x * blockDim.x + threadIdx.x;
@@ -376,9 +400,14 @@ __global__ void findBetterBlocks(const float *dataPointsArray, const int numAttr
 // -------------------------------------------------------------------
 // Removing useless attributes functions
 /*
- *
- *
- *
+ * takes in all the data, and our goofy flattened HBs array.
+ * the core logic is this, it determine is we skipped an attribute, by allowing it's bound to be 0-1.0, or the entire dataset, if we would let any wrong points in.
+ * if we would not, we can safely remove that attribute.
+ * takes tons of pointers, because we have to track all the data, the mins and maxes, how many intervals in each HB (to accomodate disjunctions), where an HB starts, what class, and then finally the attributes we can remove and so on.
+ * THIS IS AN IMPORTANT FUNCTION TO OPTIMIZE. IN THE FUTURE, MAYBE TAKE THIS, AND MAKE AN INITIAL SIMPLER VERSION WHICH IS ABLE TO OPERATE ON A REGULAR HB ONLY.
+ * FOR EXAMPLE: RIGHT NOW THIS IS DISJUNCTION FRIENDLY, BUT THAT MEANS WE DO ALL THIS GARBAGE WITH COUNTING INTERVALS AND BLOCK START AND SO ON.
+ * IF YOU JUST MADE A VERSION WHICH ONLY WORKS ON REGULAR HBS, IT WOULD BE WAY MORE EFFICIENT. YOU MIGHT BE ABLE TO SIMPLIFY FULL_MNIST EASILY. (especially on 10 lab computers like we did.)
+ * it could be hyper optimized in the future as we did with the merging. but this version runs "good enough" for anything but mnist set.
  */
 __global__ void removeUselessAttributes(float* mins, float* maxes, const int* intervalCounts, const int minMaxLen, const int* blockEdges, const int numBlocks, const int* blockClasses, char* attrRemoveFlags, const int fieldLen, const float* dataset, const int numPoints, const int* classBorder, const int numClasses, const int *attributeOrder) {
 

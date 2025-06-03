@@ -33,7 +33,7 @@ class DataUtil {
         static void saveNormalizedVersionToCsv(std::string fileName, std::vector<std::vector<std::vector<float>>>& data);
 
         static void saveOneToOneHBsToCSV(const std::vector<std::vector<HyperBlock>>& oneToOneHBs, const std::string& fileName, int FIELD_LENGTH);
-        static std::vector<std::vector<HyperBlock>> DataUtil::loadOneToOneHBsFromCSV(const std::string& fileName,std::vector<std::pair<int, int>>& classPairsOut);
+        static std::vector<std::vector<HyperBlock>> loadOneToOneHBsFromCSV(const std::string& fileName,std::vector<std::pair<int, int>>& classPairsOut);
 
         static void createValidationSplit(std::vector<std::vector<std::vector<float>>>& trainingData, std::vector<std::vector<std::vector<float>>>& validationData,float validationFraction = 0.05f,unsigned int randomSeed = 42);
         static void splitTrainTestByPercent(std::vector<std::vector<std::vector<float>>>& trainingData, std::vector<std::vector<std::vector<float>>>& testingData, float percentTrain);
@@ -45,7 +45,7 @@ class DataUtil {
         // SAVES BASIC HBS (WITHOUT DISJUNCTIONS) TO THE FILE INPUT AS CSV.
         static void saveBasicHBsToCSV(const std::vector<HyperBlock>& hyperBlocks, const std::string& fileName, int FIELD_LENGTH);
         static std::vector<HyperBlock> loadBasicHBsFromCSV(const std::string& fileName);
-        static std::vector<std::vector<HyperBlock>> DataUtil::loadOneToSomeBlocksFromBinary(const std::string& fileName);
+        static std::vector<std::vector<HyperBlock>> loadOneToSomeBlocksFromBinary(const std::string& fileName);
 
         static void saveOneToOneHBsToBinary(const std::vector<std::vector<HyperBlock>>& oneToOneHBs, const std::string& fileName);
         static std::vector<std::vector<HyperBlock>> loadOneToOneHBsFromBinary(const std::string& fileName, std::vector<std::pair<int, int>>& classPairsOut);

@@ -28,7 +28,7 @@ class IntervalHyperBlock {
   public:
 
     // stupid structs because we can't just use a simple hash for some reason.
-    // just using these for the set of used points.
+    // classNum, classIndex
     struct PairHash {
         std::size_t operator()(const std::pair<int,int> &p) const {
             // hash function.
@@ -54,7 +54,7 @@ class IntervalHyperBlock {
 
     static void intervalHyper(std::vector<std::vector<std::vector<float>>> &realData, std::vector<std::vector<DataATTR>> &remainingData, std::vector<HyperBlock> &hyperBlocks);
 
-    static std::vector<std::vector<DataATTR>> separateByAttribute(std::vector<std::vector<std::vector<float>>>& data, int FIELD_LENGTH);
+    static std::vector<std::vector<DataATTR>> separateByAttribute(const std::vector<std::vector<std::vector<float>>>& data, int FIELD_LENGTH);
 
     static void sortByColumn(std::vector<std::vector<float>>& classData, int colIndex);
 
@@ -65,6 +65,14 @@ class IntervalHyperBlock {
     static void mergerNotInCuda(std::vector<std::vector<std::vector<float>>> &trainingData, std::vector<HyperBlock> &hyperBlocks, std::vector<std::vector<DataATTR>> &pointsBrokenUp);
 
     static bool checkMergable(std::vector<std::vector<DataATTR>> &dataByAttribute, HyperBlock &h);
+
+    static std::vector<std::vector<std::vector<float>>> increaseLevelOfTrainingSet(std::vector<HyperBlock> &hyperBlocks, std::vector<std::vector<std::vector<float>>> &inputTrainingData, int FIELD_LENGTH);
+
+    static std::unordered_set<std::pair<int,int>, PairHash, PairEq> findHBEnvelopeCases(HyperBlock &hb, std::vector<std::vector<DataATTR>> &dataByAttribute);
+
+    static std::vector<std::vector<std::vector<float>>> generateNextLevelHBs(std::vector<std::vector<std::vector<float>>> &trainingData, std::vector<HyperBlock> &inputBlocks, std::vector<HyperBlock> &nextLevelBlocks, std::vector<int> &bestAttributes, int FIELD_LENGTH, int COMMAND_LINE_ARGS_CLASS);
+
 };
+
 
 #endif //INTERVALHYPERBLOCK_H

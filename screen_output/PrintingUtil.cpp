@@ -44,9 +44,13 @@ void PrintingUtil::displayMainMenu() {
     std::cout << "12. Import 1-1 Hyperblocks.\n";
     std::cout << "13. Export 1-1 Hyperblocks.\n";
     std::cout << "14. K-Fold 1-1\n";
+    std::cout << "15. Generate One To Rest Blocks and Save.\n";
     std::cout << std::endl;
-    std::cout << "15. Find Best Parameters\n\n";
-    std::cout << "16. Quit\n\n";
+
+    std::cout << "16. Find Best Parameters (Grid Search).\n";
+    std::cout << "17. Generate Next Level HBs.\n";
+    std::cout << "18. K fold validation with Level N HBs.\n\n" << std::endl;
+    std::cout << "19. Quit\n\n";
 
 
 }

@@ -202,7 +202,7 @@ void IntervalHyperBlock::pureBlockIntervalHyper(vector<vector<DataATTR>> &dataBy
     for (int r = 0; r < nBlocks; ++r)
         if (keep[r]) {
             if (w != r) // ← guard against self-move
-                hyperBlocks[w] = std::move(hyperBlocks[r]);
+                hyperBlocks[w] = move(hyperBlocks[r]);
             ++w;
         }
     hyperBlocks.erase(hyperBlocks.begin() + w, hyperBlocks.end());
@@ -365,7 +365,7 @@ void IntervalHyperBlock::intervalHyperSupervisor(vector<vector<vector<float>>> &
     atomic<int> readyThreads(0);
     char currentPhase = 0;
 
-    // Now declare the unordered_set using the stupid structs from above.
+    // Now declare the unordered_set using the stupid structs from header.
     unordered_set<pair<int,int>, PairHash, PairEq> usedPoints;
 
     // use this so that we have an early return condition. once we've found that a column doesn't have any more good intervals, we can just skip it.
@@ -747,7 +747,7 @@ void IntervalHyperBlock::intervalHyper(vector<vector<vector<float>>> &realData, 
 /**
  * Seperates data into seperate vecs by attribute
  */
-vector<vector<DataATTR>> IntervalHyperBlock::separateByAttribute(vector<vector<vector<float>>>& data, int FIELD_LENGTH){
+vector<vector<DataATTR>> IntervalHyperBlock::separateByAttribute(const vector<vector<vector<float>>>& data, int FIELD_LENGTH){
     vector<vector<DataATTR>> attributes;
 
     // Go through the attribute columns
@@ -795,20 +795,26 @@ void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector
     // these two functions use almost identical logic, except that one uses a supervisor thread and workers, instead of
     // constantly launching and killing threads each iteration. Supervisor version works better on any machine except cwu cluster.
     // intervalHyper(data, dataByAttribute, hyperBlocks);
-    // intervalHyperSupervisor(data, dataByAttribute, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
+    intervalHyperSupervisor(data, dataByAttribute, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
 
     // makes blocks by finding pure area surrounding a point of correct class, slightly different than usual way where we take the longest interval, and use those points to find our bounds in each attribute.
-    pureBlockIntervalHyper(dataByAttribute, data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
-
+    // can get a slightly better accuracy, but generates more blocks
+    // pureBlockIntervalHyper(dataByAttribute, data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
     cout << "Num blocks after interval: " << hyperBlocks.size() << endl;
     cout << "STARTING MERGING" << endl;
     try{
         merger_cuda(data, hyperBlocks, COMMAND_LINE_ARGS_CLASS);
 
         // not in cuda is a more efficient algorithm, but is slower because its not on GPU.
-        // if we run into more time challenges, our lives may be simpler if we revisit the merger cuda function.
+        // if we run into more time challenges, our lives may be simpler if we revisit the merger cuda function and make it use this kind of set based logic instead.
         // dataByAttribute = separateByAttribute(data, FIELD_LENGTH);
         // mergerNotInCuda(data, hyperBlocks, dataByAttribute);
+
+        // Assign the block an ID so we can keep track of it across simplifications and removals!
+        for(int i = 0; i < hyperBlocks.size(); i++) {
+            hyperBlocks[i].blockId = i;
+        }
+
     } catch (exception e){
         cout << "Error in generateHBs: merger_cuda" << endl;
         cout << e.what() << endl;
@@ -1264,5 +1270,178 @@ void IntervalHyperBlock::mergerNotInCuda(vector<vector<vector<float>>> &training
     }
 }
 
+// level N HBs implementation. we increase the level by simply finding envelope cases from each HB, and re running HB generation by using those envelope cases.
+// Lincoln's research showed that this increases accuracy, and we might be able to improve the coverage as well, using simplifications on top of level N
+vector<vector<vector<float>>> IntervalHyperBlock::increaseLevelOfTrainingSet(vector<HyperBlock> &hyperBlocks, vector<vector<vector<float>>> &inputTrainingData, int FIELD_LENGTH){
+
+    // set which is going to track the cases we are finding which are envelope cases each time
+    unordered_set<pair<int,int>, PairHash, PairEq> envelopeCases;
+
+    vector<vector<DataATTR>> pointsBrokenUp = separateByAttribute(inputTrainingData, FIELD_LENGTH);
+
+    // use the size of the training data to get the number of classes
+    vector<vector<vector<float>>> newTrainingData(inputTrainingData.size());
+
+    // Flag for any invalid HB
+    int invalid = 0;
+
+    // compute all the envelope cases in parallel. invalid flag is so that if one was invalid, we can just return {}
+    #pragma omp parallel for shared(envelopeCases, invalid)
+    for(int i = 0; i < (int)hyperBlocks.size(); ++i) {
+        auto &h = hyperBlocks[i];
+        auto hbCases = findHBEnvelopeCases(h, pointsBrokenUp);
+
+        if (hbCases.empty()) {
+            #pragma omp atomic
+            invalid++;
+        } else {
+            #pragma omp critical
+            envelopeCases.insert(hbCases.begin(), hbCases.end());
+        }
+    }
+
+    // After the parallel region, check the flag
+    if (invalid) {
+        // at least one HB was invalid. we return empty. this means that the user simplified the blocks most likely.
+        return {};
+    }
+
+    // now we just iterate through, and push back a copy into newTrainingData of each point we found in our envelope Cases
+    for (auto const& pr : envelopeCases)
+        newTrainingData[pr.first].push_back(inputTrainingData[pr.first][pr.second]);
+
+    return newTrainingData;
+}
+
+// stupid comparator overload thing so that we can search the columns nicely i guess.
+// only used in this findEnvelope cases. just lets us compare the dataAttrs and a float.
+// Place this above your function (e.g. in the same .cpp):
+struct DataAttrValueLess {
+    bool operator()(const DataATTR &d, float v) const { return d.value < v; }
+    bool operator()(float v, const DataATTR &d) const { return v < d.value; }
+};
+unordered_set<pair<int,int>, IntervalHyperBlock::PairHash, IntervalHyperBlock::PairEq> IntervalHyperBlock::findHBEnvelopeCases(HyperBlock &hb, vector<vector<DataATTR>> &dataByAttribute) {
+
+    unordered_set<pair<int,int>, PairHash, PairEq> envelopeCases;
+
+    int FIELD_LENGTH = dataByAttribute.size();
+
+    for (int attribute = 0; attribute < FIELD_LENGTH; attribute++) {
+        // inner loop which really is just going to run once unless we have a disjunction with multiple attributes
+        // finds the highest point of our class with HB value. takes all points which had that matching value
+        // THIS IS THE PART WHERE WE ARE FINDING ENVELOPE CASES!!!
+        // THEY GET ADDED TO THE SET, AND THEN WE RETURN THE SET FROM EACH HB!
+        for (int rule = 0; rule < hb.maximums[attribute].size(); ++rule) {
+            float upperB  = hb.maximums[attribute][rule];
+            float lowerB  = hb.minimums[attribute][rule];
+            int   myClass = hb.classNum;
+
+            bool found = false; // did we capture *any* boundary point?
+
+            // ── upper-bound: grab ONE point (the last/“highest” duplicate) ───────────
+            auto range_hi = std::equal_range(
+                dataByAttribute[attribute].begin(),
+                dataByAttribute[attribute].end(),
+                upperB,
+                DataAttrValueLess()
+            );
+            for (auto it = range_hi.second; it != range_hi.first; ) {   // walk backward
+                --it;
+                if (it->classNum == myClass) {
+                    envelopeCases.emplace(it->classNum, it->classIndex);
+                    found = true;
+                    break; // take only the first match
+                }
+            }
+
+            // ── lower-bound: grab ONE point (the first/“lowest” duplicate) ───────────
+            auto range_lo = std::equal_range(
+                dataByAttribute[attribute].begin(),
+                dataByAttribute[attribute].end(),
+                lowerB,
+                DataAttrValueLess()
+            );
+            for (auto it = range_lo.first; it != range_lo.second; ++it) {
+                if (it->classNum == myClass) {
+                    envelopeCases.emplace(it->classNum, it->classIndex);
+                    found = true;
+                    break;                             // take only the first match
+                }
+            }
+
+            if (!found) return {};                     // boundary missing ⇒ return empty so that we can show an error has happened.
+        }
+    }
+    return envelopeCases;
+}
+
+// takes in parameters for our original input data and blocks. also takes for new blocks. that is just so that we can return the new dataset
+// and the new blocks. since we need the updated datset each time as well as the updated blocks. so we pass in blank vectors of training data to populate, and then a blank vector of hyperblocks we want to populate.
+vector<vector<vector<float>>> IntervalHyperBlock::generateNextLevelHBs(vector<vector<vector<float>>> &trainingData, vector<HyperBlock> &inputBlocks, vector<HyperBlock> &nextLevelBlocks, vector<int> &bestAttributes, int FIELD_LENGTH, int COMMAND_LINE_ARGS_CLASS) {
+
+    vector<vector<vector<float>>> newDataset = increaseLevelOfTrainingSet(inputBlocks, trainingData, FIELD_LENGTH);
+
+    if (newDataset.size() == 0) {
+        cout << "ERROR: HYPERBLOCKS COULDN'T FIND ENVELOPE CASES!\n\tHBs CAN'T BE SIMPLIFIED BEFORE INCREASING LEVEL!" << endl;
+        return {};
+    }
+
+    // generate our new HBs with the new dataset and store them into our new HB vector
+    generateHBs(newDataset, nextLevelBlocks, bestAttributes, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
+
+    // now we find those points which are in our training set which we don't cover with level 2 blocks. we take those points, make them into HBs, and send them to the merging with these level 2 blocks. so that we get full coverage.
+    // each thread in openMP makes their own copies, and then we just aggregate these
+    for (int cls = 0; cls < static_cast<int>(trainingData.size()); ++cls) {
+
+        // ─────────── parallel region ───────────
+        #pragma omp parallel
+        {
+            // thread-local containers (no races here)
+            vector<vector<vector<float>>> localDataThread(trainingData.size());
+            vector<HyperBlock>            localBlocksThread;
+
+            #pragma omp for schedule(static)
+            for (int p = 0; p < static_cast<int>(trainingData[cls].size()); ++p) {
+
+                // get the point, determine if it's in any HBs.
+                const auto &point = trainingData[cls][p];
+                bool inABlock = false;
+
+                // if it's in an HB, we are good, if not we make an HB out of it, and put it into the list. then we re run the merging with this point in it later.
+                for (const auto &h : nextLevelBlocks) {
+                    if (h.inside_HB(FIELD_LENGTH, point.data())) {
+                        inABlock = true;
+                        break;
+                    }
+                }
+
+                vector<vector<float>> mins(FIELD_LENGTH);
+                vector<vector<float>> maxes(FIELD_LENGTH);
+                for (int att = 0; att < FIELD_LENGTH; ++att) {
+                    mins[att].push_back(point[att]);
+                    maxes[att].push_back(point[att]);
+                }
+
+                if (!inABlock) {
+                    localBlocksThread.emplace_back(maxes, mins, cls);
+                    localDataThread[cls].emplace_back(point);
+                }
+            } // end for-p loop
+
+            // aggregate each thread’s contribution exactly once
+            #pragma omp critical
+            {
+                nextLevelBlocks.insert(end(nextLevelBlocks),make_move_iterator(begin(localBlocksThread)),make_move_iterator(end(localBlocksThread)));
+                for (size_t i = 0; i < localDataThread.size(); ++i) {
+                    newDataset[i].insert(end(newDataset[i]),   make_move_iterator(begin(localDataThread[i])),    make_move_iterator(end(localDataThread[i])));
+                }
+            }
+        } // end parallel region
+    }
 
 
+    // run the merging one more time, adding in the cases which we didn't cover. this means each level increase runs two merges. but the second one should be fast.
+    merger_cuda(newDataset, nextLevelBlocks, COMMAND_LINE_ARGS_CLASS);
+
+    return newDataset;
+}

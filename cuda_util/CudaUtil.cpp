@@ -1,5 +1,8 @@
 #include "CudaUtil.h"
 
+// BASICALLY ALL JUST LITTLE HELPER FUNCTIONS TO GET DIFFERENT NUMBERS WHICH MAY BE USEFUL IN LAUNCHING CUDA KERNELS
+
+
 // Get the number of CUDA cores per SM for a given GPU architecture
 int getCudaCoresPerSM(int major, int minor) {
     switch (major) {

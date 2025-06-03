@@ -9,7 +9,7 @@ when compared to Black-Box models.
 
 
 Compile:
-nvcc -Xcompiler /openmp -o a ./Host.cu ./hyperblock/HyperBlock.cpp ./hyperblock_generation/MergerHyperBlock.cu ./cuda_util/CudaUtil.cpp ./data_utilities/DataUtil.cpp ./interval_hyperblock/IntervalHyperBlock.cu ./knn/Knn.cpp ./screen_output/PrintingUtil.cpp ./simplifications/Simplifications.cu -g -G -O3 
+nvcc -Xcompiler /openmp -o a ./Host.cu ./hyperblock/HyperBlock.cpp ./hyperblock_generation/MergerHyperBlock.cu ./cuda_util/CudaUtil.cpp ./data_utilities/DataUtil.cpp ./interval_hyperblock/IntervalHyperBlock.cu ./knn/Knn.cpp ./screen_output/PrintingUtil.cpp ./simplifications/Simplifications.cu ./ClassificationTesting/ClassificationTests.cpp -g -G -O3 
 
 Run:
     ./a

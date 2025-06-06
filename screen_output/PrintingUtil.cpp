@@ -8,6 +8,7 @@
 #include <vector>
 #include <map>
 #include <limits>
+#include <numeric>
 
 using namespace std;
 
@@ -64,50 +65,106 @@ void PrintingUtil::displayMainMenu() {
 
 }
 
-float PrintingUtil::printConfusionMatrix(vector<vector<long>>& data, const int NUM_CLASSES, map<int, string>& CLASS_MAP_INT) {
-    vector<string> classLabels(NUM_CLASSES);
+/**
+ * This struct holds the performance metrics
+ * for a set of hyperblocks.
+ * 
+ * Typically, you would have the overall set of 
+ * metrics be stored in the floats. Then each individual
+ * class should be stored in the vectors. 
+ * 
+ * The entry [i] in the vector should be for class i. 
+ * 
+ */
+struct PerformanceMetrics{
+    float accuracy;
+    vector<float> byClassAccuracy;
+    
+    // Precision = TP / (TP + FP) 
+    float precision;
+    vector<float> byClassPrecision;
 
-    vector<float> accuracies(NUM_CLASSES, 0.0);
+    // Recall = TP / (TP + FN)
+    float recall;
+    vector<float> byClassRecall;
 
-    // Calculate the accuracies of each of the rows.
-    // Only the diagonal values are correct predictions
-    long overallCorrect = 0;
-    long overallIncorrect = 0;
-    long overallTotalClassifications = 0;
-    for (int i = 0; i < NUM_CLASSES; ++i) {
-        long correct = 0;
-        long incorrect = 0;
-        long totalClassifications = 0;
+    // (2 * Precision  
+    float f1;
+    vector<float> byClassF1;
 
-        for (int j = 0; j < NUM_CLASSES; ++j) {
-            totalClassifications += data[i][j];
-            if (i == j) {
-                correct += data[i][j];  // Diagonal value indicates correct predictions
-            } else {
-                incorrect += data[i][j];  // Off-diagonal values are incorrect predictions
-            }
+    // Constructor
+    PerformanceMetrics(float a, vector<float> cA, float p, vector<float> cP, float r, vector<float> cR, float f, vector<float> cF) : 
+    accuracy(a), byClassAccuracy(cA), precision(p), byClassPrecision(cP), recall(r), byClassRecall(cR), f1(f), byClassF1(cF) {}
+};
+
+
+/**
+ * Takes in the confusion matrix for the classifier,
+ * and computes performance metrics of the model.
+ * 
+ * This is returned in a struct!
+ */
+PerformanceMetrics computePerformanceMetrics(vector<vector<long>>& confusionMatrix) {
+    int numClasses = confusionMatrix.size();
+    vector<float> byClassAccuracy(numClasses, 0.0f);
+    vector<float> byClassPrecision(numClasses, 0.0f);
+    vector<float> byClassRecall(numClasses, 0.0f);
+    vector<float> byClassF1(numClasses, 0.0f);
+
+    long total = 0;
+    long correct = 0;
+
+    // Compute precision, recall, F1, accuracy for each class
+    for (int i = 0; i < numClasses; ++i) {
+        long tp = confusionMatrix[i][i];
+        
+        // sum of actual class i (used for recall)
+        long rowSum = 0;
+
+        // sum of predicted class i (used for precision)
+        long colSum = 0;
+
+        for (int j = 0; j < numClasses; ++j) {
+            rowSum += confusionMatrix[i][j]; // all predicted labels for actual i
+            colSum += confusionMatrix[j][i]; // all actual labels we predicted as i
+            total += confusionMatrix[i][j];
+
+            if (i == j) correct += confusionMatrix[i][j]; // Diagonal on the matrix
         }
 
-        if (totalClassifications > 0) {
-            accuracies[i] = (float)correct / totalClassifications;
-        }
+        // Avoid divide-by-zero
+        float precision = (colSum == 0) ? 0.0f : static_cast<float>(tp) / colSum;
+        float recall    = (rowSum == 0) ? 0.0f : static_cast<float>(tp) / rowSum;
+        float f1        = (precision + recall == 0) ? 0.0f : 2 * precision * recall / (precision + recall);
+        float acc       = (rowSum == 0) ? 0.0f : static_cast<float>(tp) / rowSum;
 
-        overallCorrect += correct;
-        overallIncorrect += incorrect;
-        overallTotalClassifications += totalClassifications;
+        byClassPrecision[i] = precision;
+        byClassRecall[i] = recall;
+        byClassF1[i] = f1;
+        byClassAccuracy[i] = acc;
     }
 
-    // Overall Accuracy, prevent divide by 0 with the ternary
-    float overallAccuracy = (overallTotalClassifications != 0) ? ((float)overallCorrect / overallTotalClassifications) : 0;
+    float accuracy = (total == 0) ? 0.0f : static_cast<float>(correct) / total;
+
+    float avgPrecision = accumulate(byClassPrecision.begin(), byClassPrecision.end(), 0.0f) / numClasses;
+    float avgRecall    = accumulate(byClassRecall.begin(), byClassRecall.end(), 0.0f) / numClasses;
+    float avgF1        = accumulate(byClassF1.begin(), byClassF1.end(), 0.0f) / numClasses;
+
+    return PerformanceMetrics(accuracy, byClassAccuracy, avgPrecision, byClassPrecision,avgRecall, byClassRecall, avgF1, byClassF1);
+}
+
+float PrintingUtil::printConfusionMatrix(vector<vector<long>>& confusionMatrix, const int NUM_CLASSES, map<int, string>& CLASS_MAP_INT) {
+    PerformanceMetrics metrics = computePerformanceMetrics(confusionMatrix);
 
     // Calculate column width based on the longest class name and largest number
     size_t maxWidth = 8; // Minimum width
 
-    for (const auto& name : classLabels) {
-        maxWidth = max(maxWidth, name.length() + 2);
+    // Find the spacing we need for the class labels.
+    for (int i = 0; i < confusionMatrix.size(); i++) {
+        maxWidth = max(maxWidth, CLASS_MAP_INT[i].length() + 2);
     }
 
-    for (const auto& row : data) {
+    for (const auto& row : confusionMatrix) {
         for (const auto& cell : row) {
             string numStr = to_string(cell);
             maxWidth = max(maxWidth, numStr.length() + 2);
@@ -128,19 +185,27 @@ float PrintingUtil::printConfusionMatrix(vector<vector<long>>& data, const int N
     }
     cout << endl;
 
-    // Print each row with row label
-    for (size_t i = 0; i < data.size(); i++) {
-        cout << setw(maxWidth) << CLASS_MAP_INT[i] << " |";
+    // Go through and print the "by class" metrics.
+    cout << "=== Class Accuracies ===" << endl;
+    for(int i = 0; i < confusionMatrix.size(); i++) cout << "Class " << CLASS_MAP_INT[i] << ": " << metrics.byClassAccuracy[i] << endl;
 
-        for (size_t j = 0; j < data[i].size(); j++) {
-            cout << setw(maxWidth) << data[i][j] << " |";
-        }
+    cout << "=== Class Precisions ===" << endl;
+    for(int i = 0; i < confusionMatrix.size(); i++) cout << "Class " << CLASS_MAP_INT[i] << ": " << metrics.byClassPrecision[i] << endl;
+    
+    cout << "===== Class Recall =====" << endl;
+    for(int i = 0; i < confusionMatrix.size(); i++) cout << "Class " << CLASS_MAP_INT[i] << ": " << metrics.byClassRecall[i] << endl;
 
-        cout << accuracies[i] << endl;
-    }
+    cout << "====== Class F1 ========" << endl;
+    for(int i = 0; i < confusionMatrix.size(); i++) cout << "Class " << CLASS_MAP_INT[i] << ": " << metrics.byClassF1[i] << endl;
+    
+    // Print the overall results!
+    cout << "Overall accuracy: " << metrics.accuracy << endl;
+    cout << "Overall precision: " << metrics.precision << endl;
+    cout << "Overall recall is: " << metrics.recall << endl;
+    cout << "Overall F1 score is: " << metrics.f1 << endl;
 
-    cout << "The overall accuracy is " << overallAccuracy << endl;
-    return overallAccuracy;
+    //TODO: Could change this to return whole struct. 
+    return metrics.accuracy;
 }
 
 

@@ -7,46 +7,46 @@
 extern int FIELD_LENGTH;
 extern int NUM_CLASSES;
 
-
+using namespace std;
 
 
 // In-place stratified split: modifies trainingData by moving points to validationData
 void DataUtil::createValidationSplit(
-    std::vector<std::vector<std::vector<float>>>& trainingData,
-    std::vector<std::vector<std::vector<float>>>& validationData,
+    vector<vector<vector<float>>>& trainingData,
+    vector<vector<vector<float>>>& validationData,
     float validationFraction,
     unsigned int randomSeed
 ) {
     // Random for the shuffling
-    std::mt19937 rng(randomSeed);
+    mt19937 rng(randomSeed);
     validationData.clear();
     validationData.resize(trainingData.size());
 
     // Step 1: Find the minimum class size
     int minClassSize = INT_MAX;
     for (const auto& pointsInClass : trainingData) {
-        minClassSize = std::min(minClassSize, static_cast<int>(pointsInClass.size()));
+        minClassSize = min(minClassSize, static_cast<int>(pointsInClass.size()));
     }
 
     // Step 2: Calculate number of validation points per class
-    int valPerClass = std::max(1, static_cast<int>(minClassSize * validationFraction));
+    int valPerClass = max(1, static_cast<int>(minClassSize * validationFraction));
 
     // Step 3: Stratified sampling with fixed count
     for (int classIdx = 0; classIdx < trainingData.size(); ++classIdx) {
         auto& pointsInClass = trainingData[classIdx];
-        std::vector<int> indices(pointsInClass.size());
-        std::iota(indices.begin(), indices.end(), 0);
-        std::shuffle(indices.begin(), indices.end(), rng);
+        vector<int> indices(pointsInClass.size());
+        iota(indices.begin(), indices.end(), 0);
+        shuffle(indices.begin(), indices.end(), rng);
 
-        int actualValCount = std::min(valPerClass, static_cast<int>(pointsInClass.size()));
+        int actualValCount = min(valPerClass, static_cast<int>(pointsInClass.size()));
 
         // Move to validation
         for (int i = 0; i < actualValCount; ++i) {
-            validationData[classIdx].push_back(std::move(pointsInClass[indices[i]]));
+            validationData[classIdx].push_back(move(pointsInClass[indices[i]]));
         }
 
         // Remove from training (reverse sorted)
-        std::sort(indices.begin(), indices.begin() + actualValCount, std::greater<int>());
+        sort(indices.begin(), indices.begin() + actualValCount, greater<int>());
         for (int i = 0; i < actualValCount; ++i) {
             pointsInClass.erase(pointsInClass.begin() + indices[i]);
         }
@@ -59,26 +59,26 @@ void DataUtil::createValidationSplit(
 /*  Returns a class seperated version of the dataset
  *  Each class has an entry in the outer vector with a 2-d vector of its points
  */
-std::vector<std::vector<std::vector<float>>> DataUtil::dataSetup(const std::string filepath, std::map<std::string, int>& classMap, std::map<int, std::string>& reversedClassMap) {
-    // 3D std::std::vector: data[class][point][attribute]
-    std::vector<std::vector<std::vector<float>>> data;
+vector<vector<vector<float>>> DataUtil::dataSetup(const string filepath, map<string, int>& classMap, map<int, string>& reversedClassMap) {
+    // 3D vector: data[class][point][attribute]
+    vector<vector<vector<float>>> data;
 
-    std::ifstream file(filepath);
+    ifstream file(filepath);
     if (!file.is_open()) {
-        std::cerr << "Failed to open file " << filepath << std::endl;
+        cerr << "Failed to open file " << filepath << endl;
         return data;
     }
 
     int classNum = 0;
-    std::string line;
+    string line;
     // Ignore the header, can use later if needed
     getline(file, line);
 
     // Read through all rows of CSV
     while (getline(file, line)) {
-        std::stringstream ss(line);
-        std::string cell;
-        std::vector<std::string> row;
+        stringstream ss(line);
+        string cell;
+        vector<string> row;
 
         // Read the entire row, splitting by commas
         while (getline(ss, cell, ',')) {
@@ -88,24 +88,24 @@ std::vector<std::vector<std::vector<float>>> DataUtil::dataSetup(const std::stri
         // Skip empty lines
         if (row.empty()) continue;
 
-        std::string classLabel = row.back();
+        string classLabel = row.back();
         row.pop_back();
 
         // Check if class exists, else create new entry
         if (classMap.count(classLabel) == 0) {
             classMap[classLabel] = classNum;
-            data.push_back(std::vector<std::vector<float>>());
+            data.push_back(vector<vector<float>>());
             classNum++;
         }
 
         int classIndex = classMap[classLabel];
 
-        std::vector<float> point;
-        for (const std::string& val : row) {
+        vector<float> point;
+        for (const string& val : row) {
             try {
                 point.push_back(stof(val));  // Convert to float and add to the point
-            } catch (const std::invalid_argument&) {
-                std::cerr << "Invalid value '" << val << "' in CSV" << std::endl;
+            } catch (const invalid_argument&) {
+                cerr << "Invalid value '" << val << "' in CSV" << endl;
                 point.push_back(0.0f);  // Default to 0 if conversion fails
             }
         }
@@ -131,11 +131,11 @@ std::vector<std::vector<std::vector<float>>> DataUtil::dataSetup(const std::stri
  * assumes each row in the 2-D vector is 1 hyperblock
  * the first 1/2 of the row is the max's, the end is the mins.
  */
-void DataUtil::saveHyperBlocksToFile(const std::string& filepath, const std::vector<std::vector<std::vector<float>>>& hyperBlocks) {
-    std::ofstream file(filepath);
+void DataUtil::saveHyperBlocksToFile(const string& filepath, const vector<vector<vector<float>>>& hyperBlocks) {
+    ofstream file(filepath);
 
     if (!file.is_open()) {
-        std::cerr << "Failed to open file: " << filepath << std::endl;
+        cerr << "Failed to open file: " << filepath << endl;
         return;
     }
 
@@ -154,17 +154,17 @@ void DataUtil::saveHyperBlocksToFile(const std::string& filepath, const std::vec
     }
 
     file.close();
-    std::cout << "Hyperblocks saved to " << filepath << std::endl;
+    cout << "Hyperblocks saved to " << filepath << endl;
 }
 
 /**
 * This will save the normalized dataset back so that we can use the same one in DV with the same normalization.
 */
-void DataUtil::saveNormalizedVersionToCsv(std::string fileName, std::vector<std::vector<std::vector<float>>>& data) {
-    std::ofstream outFile(fileName);
+void DataUtil::saveNormalizedVersionToCsv(string fileName, vector<vector<vector<float>>>& data) {
+    ofstream outFile(fileName);
 
     if (!outFile.is_open()) {
-        std::cerr << "Error opening file: " << fileName << std::endl;
+        cerr << "Error opening file: " << fileName << endl;
         return;
     }
 
@@ -193,21 +193,21 @@ void DataUtil::saveNormalizedVersionToCsv(std::string fileName, std::vector<std:
 }
 
 // just loads a vector of HBs back from a file when we have exported.
-std::vector<HyperBlock> DataUtil::loadBasicHBsFromCSV(const std::string& fileName) {
-    std::ifstream file(fileName);
-    std::vector<HyperBlock> hyperBlocks;
+vector<HyperBlock> DataUtil::loadBasicHBsFromCSV(const string& fileName) {
+    ifstream file(fileName);
+    vector<HyperBlock> hyperBlocks;
 
     if (!file.is_open()) {
-        std::cerr << "Error opening file: " << fileName << std::endl;
+        cerr << "Error opening file: " << fileName << endl;
         return hyperBlocks;
     }
 
-    std::string line;
+    string line;
     while (getline(file, line)) {
-        std::stringstream ss(line);
-        std::vector<std::vector<float>> minimums, maximums;
-        std::string value;
-        std::vector<float> temp_vals;
+        stringstream ss(line);
+        vector<vector<float>> minimums, maximums;
+        string value;
+        vector<float> temp_vals;
 
         while (getline(ss, value, ',')) {
             value.erase(0, value.find_first_not_of(" \t"));
@@ -240,9 +240,9 @@ std::vector<HyperBlock> DataUtil::loadBasicHBsFromCSV(const std::string& fileNam
 /**
 * A function to normalize the test set using the given mins/maxes that were used to normalize the initial set
 */
-void DataUtil::normalizeTestSet(std::vector<std::vector<std::vector<float>>>& testSet, const std::vector<float>& minValues, const std::vector<float>& maxValues, int FIELD_LENGTH) {
+void DataUtil::normalizeTestSet(vector<vector<vector<float>>>& testSet, const vector<float>& minValues, const vector<float>& maxValues, int FIELD_LENGTH) {
     if (testSet.empty()){
-      std::cout << "Test set was empty when trying to normalize" << std::endl;
+      cout << "Test set was empty when trying to normalize" << endl;
       return;
 	}
 
@@ -263,7 +263,7 @@ void DataUtil::normalizeTestSet(std::vector<std::vector<std::vector<float>>>& te
       for (auto& point : class_data){
         for (int k = 0; k < FIELD_LENGTH; k++){
           if(point[k] > 1.0f){
-	         std::cout << "Out of range" << point[k] << std::endl;
+	         cout << "Out of range" << point[k] << endl;
              point[k] = 1.000000f;
 		  }
           if(point[k] < 0.0f){
@@ -279,8 +279,8 @@ void DataUtil::normalizeTestSet(std::vector<std::vector<std::vector<float>>>& te
 }
 
 // normalizes the training data using just the min and max value in each attribute
-void DataUtil::minMaxNormalization(std::vector<std::vector<std::vector<float>>>& dataset, const std::vector<float>& minValues, const std::vector<float>& maxValues, int FIELD_LENGTH) {
-    std::cout << "Normalizing the dataset" << std::endl;
+void DataUtil::minMaxNormalization(vector<vector<vector<float>>>& dataset, const vector<float>& minValues, const vector<float>& maxValues, int FIELD_LENGTH) {
+    cout << "Normalizing the dataset" << endl;
     if (dataset.empty()) return;
 
     int num_classes = dataset.size();
@@ -302,16 +302,16 @@ void DataUtil::minMaxNormalization(std::vector<std::vector<std::vector<float>>>&
 }
 
 
-// Function to reorder testing dataset based on training class std::mapping
-std::vector<std::vector<std::vector<float>>> DataUtil::reorderTestingDataset(const std::vector<std::vector<std::vector<float>>>& testingData, const std::map<std::string, int>& CLASS_MAP_TRAINING, const std::map<std::string, int>& CLASS_MAP_TESTING) {
-    // Create a new std::vector with the same size as the testing data
-    std::vector<std::vector<std::vector<float>>> reorderedTestingData(testingData.size());
+// Function to reorder testing dataset based on training class mapping
+vector<vector<vector<float>>> DataUtil::reorderTestingDataset(const vector<vector<vector<float>>>& testingData, const map<string, int>& CLASS_MAP_TRAINING, const map<string, int>& CLASS_MAP_TESTING) {
+    // Create a new vector with the same size as the testing data
+    vector<vector<vector<float>>> reorderedTestingData(testingData.size());
 
     // Create a mapping from testing indices to training indices
-    std::map<int, int> indexMap;
+    map<int, int> indexMap;
     // For each (className -> trainingIndex) in the training map
     for (const auto& entry : CLASS_MAP_TRAINING) {
-        const std::string& className   = entry.first;
+        const string& className   = entry.first;
         int trainingIndex = entry.second;
 
         // Find the same class in the testing map
@@ -340,12 +340,12 @@ std::vector<std::vector<std::vector<float>>> DataUtil::reorderTestingDataset(con
 }
 
 
-std::vector<HyperBlock> DataUtil::loadBasicHBsFromBinary(const std::string& fileName) {
-    std::ifstream file(fileName, std::ios::binary);
-    std::vector<HyperBlock> loadedBlocks;
+vector<HyperBlock> DataUtil::loadBasicHBsFromBinary(const string& fileName) {
+    ifstream file(fileName, ios::binary);
+    vector<HyperBlock> loadedBlocks;
 
     if (!file.is_open()) {
-        std::cerr << "Error opening binary file: " << fileName << std::endl;
+        cerr << "Error opening binary file: " << fileName << endl;
         return loadedBlocks;
     }
 
@@ -354,8 +354,8 @@ std::vector<HyperBlock> DataUtil::loadBasicHBsFromBinary(const std::string& file
     file.read(reinterpret_cast<char*>(&fieldLength), sizeof(int));
 
     for (int b = 0; b < numBlocks; ++b) {
-        std::vector<std::vector<float>> mins(fieldLength, std::vector<float>(1));
-        std::vector<std::vector<float>> maxs(fieldLength, std::vector<float>(1));
+        vector<vector<float>> mins(fieldLength, vector<float>(1));
+        vector<vector<float>> maxs(fieldLength, vector<float>(1));
 
         for (int i = 0; i < fieldLength; ++i) {
             file.read(reinterpret_cast<char*>(&mins[i][0]), sizeof(float));
@@ -374,10 +374,10 @@ std::vector<HyperBlock> DataUtil::loadBasicHBsFromBinary(const std::string& file
     return loadedBlocks;
 }
 
-void DataUtil::saveBasicHBsToBinary(const std::vector<HyperBlock>& hyperBlocks, const std::string& fileName, int FIELD_LENGTH) {
-    std::ofstream file(fileName, std::ios::binary);
+void DataUtil::saveBasicHBsToBinary(const vector<HyperBlock>& hyperBlocks, const string& fileName, int FIELD_LENGTH) {
+    ofstream file(fileName, ios::binary);
     if (!file.is_open()) {
-        std::cerr << "Error opening binary file: " << fileName << std::endl;
+        cerr << "Error opening binary file: " << fileName << endl;
         return;
     }
 
@@ -406,13 +406,13 @@ void DataUtil::saveBasicHBsToBinary(const std::vector<HyperBlock>& hyperBlocks, 
 }
 
 // same as regular load from binary. returns a list of HBs, but this case, it is the one to some blocks, where we have several lists of HBs since we generated many sets.
-std::vector<std::vector<HyperBlock>> DataUtil::loadOneToSomeBlocksFromBinary(const std::string& fileName) {
-    std::vector<HyperBlock> allBlocks = DataUtil::loadBasicHBsFromCSV(fileName);
-    std::vector<std::vector<HyperBlock>> splitBlocks;
+vector<vector<HyperBlock>> DataUtil::loadOneToSomeBlocksFromBinary(const string& fileName) {
+    vector<HyperBlock> allBlocks = DataUtil::loadBasicHBsFromCSV(fileName);
+    vector<vector<HyperBlock>> splitBlocks;
 
     if (allBlocks.empty()) return splitBlocks;
 
-    std::vector<HyperBlock> currentGroup;
+    vector<HyperBlock> currentGroup;
     int currentClass = allBlocks[0].classNum;
 
     for (const auto& block : allBlocks) {
@@ -439,23 +439,23 @@ std::vector<std::vector<HyperBlock>> DataUtil::loadOneToSomeBlocksFromBinary(con
 *
 * This print isn't caring about disjunctive blocks.
 */
-void DataUtil::saveBasicHBsToCSV(const std::vector<HyperBlock>& hyperBlocks, const std::string& fileName, int FIELD_LENGTH){
+void DataUtil::saveBasicHBsToCSV(const vector<HyperBlock>& hyperBlocks, const string& fileName, int FIELD_LENGTH){
 	// Open file for writing
-    std::ofstream file(fileName);
+    ofstream file(fileName);
     if (!file.is_open()) {
-        std::cerr << "Error opening file: " << fileName << std::endl;
+        cerr << "Error opening file: " << fileName << endl;
         return;
     }
 
 	// min1, min2, min3, ..., minN, max1, max2, max3, ..., maxN, class
 	for (const auto& hyperBlock : hyperBlocks) {
         // Write minimums
-        for (const std::vector<float>& min : hyperBlock.minimums) {
+        for (const vector<float>& min : hyperBlock.minimums) {
             file << min[0] << ",";
         }
 
         // Write maximums
-        for (const std::vector<float>& max : hyperBlock.maximums) {
+        for (const vector<float>& max : hyperBlock.maximums) {
             file << max[0] << ",";
         }
 
@@ -467,10 +467,10 @@ void DataUtil::saveBasicHBsToCSV(const std::vector<HyperBlock>& hyperBlocks, con
 }
 
 
-void DataUtil::saveOneToOneHBsToCSV(const std::vector<std::vector<HyperBlock>>& oneToOneHBs, const std::string& fileName, int FIELD_LENGTH){
-    std::ofstream file(fileName);
+void DataUtil::saveOneToOneHBsToCSV(const vector<vector<HyperBlock>>& oneToOneHBs, const string& fileName, int FIELD_LENGTH){
+    ofstream file(fileName);
     if (!file.is_open()) {
-        std::cerr << "Error opening file: " << fileName << std::endl;
+        cerr << "Error opening file: " << fileName << endl;
         return;
     }
 
@@ -478,14 +478,14 @@ void DataUtil::saveOneToOneHBsToCSV(const std::vector<std::vector<HyperBlock>>& 
         if (blockSet.empty()) continue;
 
         // --- FIXED HEADER SAVING --- //
-        std::set<int> classNums;
+        set<int> classNums;
         for (const auto& hb : blockSet) {
             classNums.insert(hb.classNum);
             if (classNums.size() == 2) break;
         }
 
         if (classNums.size() != 2) {
-            std::cerr << "Warning: Expected 2 classes in block set but found " << classNums.size() << std::endl;
+            cerr << "Warning: Expected 2 classes in block set but found " << classNums.size() << endl;
         }
 
         auto it = classNums.begin();
@@ -493,11 +493,11 @@ void DataUtil::saveOneToOneHBsToCSV(const std::vector<std::vector<HyperBlock>>& 
         // --------------------------- //
 
         for (const auto& hyperBlock : blockSet) {
-            for (const std::vector<float>& min : hyperBlock.minimums) {
+            for (const vector<float>& min : hyperBlock.minimums) {
                 file << min[0] << ",";
             }
 
-            for (const std::vector<float>& max : hyperBlock.maximums) {
+            for (const vector<float>& max : hyperBlock.maximums) {
                 file << max[0] << ",";
             }
 
@@ -544,10 +544,10 @@ void DataUtil::saveOneToOneHBsToCSV(const std::vector<std::vector<HyperBlock>>& 
  * - HyperBlock is assumed to be constructible from (maximums, minimums, classNum).
  *
  */
-void DataUtil::saveOneToOneHBsToBinary(const std::vector<std::vector<HyperBlock>>& oneToOneHBs, const std::string& fileName) {
-    std::ofstream out(fileName, std::ios::binary);
+void DataUtil::saveOneToOneHBsToBinary(const vector<vector<HyperBlock>>& oneToOneHBs, const string& fileName) {
+    ofstream out(fileName, ios::binary);
     if (!out.is_open()) {
-        std::cerr << "Error opening binary file for write: " << fileName << std::endl;
+        cerr << "Error opening binary file for write: " << fileName << endl;
         return;
     }
 
@@ -556,7 +556,7 @@ void DataUtil::saveOneToOneHBsToBinary(const std::vector<std::vector<HyperBlock>
 
     for (const auto& blockSet : oneToOneHBs) {
         // Save class pair
-        std::set<int> classNums;
+        set<int> classNums;
         for (const auto& hb : blockSet) {
             classNums.insert(hb.classNum);
             if (classNums.size() == 2) break;
@@ -597,17 +597,17 @@ void DataUtil::saveOneToOneHBsToBinary(const std::vector<std::vector<HyperBlock>
 /**
 * This will load the One-To-One HyperBlocks from their file.
 */
-std::vector<std::vector<HyperBlock>> DataUtil::loadOneToOneHBsFromCSV(const std::string& fileName,std::vector<std::pair<int, int>>& classPairsOut) {
-    std::ifstream file(fileName);
-    std::vector<std::vector<HyperBlock>> allHyperBlocks;
-    std::vector<HyperBlock> currentSet;
+vector<vector<HyperBlock>> DataUtil::loadOneToOneHBsFromCSV(const string& fileName,vector<pair<int, int>>& classPairsOut) {
+    ifstream file(fileName);
+    vector<vector<HyperBlock>> allHyperBlocks;
+    vector<HyperBlock> currentSet;
 
     if (!file.is_open()) {
-        std::cerr << "Error opening file: " << fileName << std::endl;
+        cerr << "Error opening file: " << fileName << endl;
         return allHyperBlocks;
     }
 
-    std::string line;
+    string line;
     int currentClassA = -1;
     int currentClassB = -1;
 
@@ -628,8 +628,8 @@ std::vector<std::vector<HyperBlock>> DataUtil::loadOneToOneHBsFromCSV(const std:
 
         if (line[0] == '#') {
             // Metadata line, extract classes
-            std::stringstream ss(line.substr(1)); // Removes the # tag
-            std::string token;
+            stringstream ss(line.substr(1)); // Removes the # tag
+            string token;
             if (getline(ss, token, ',')) {
                 currentClassA = stoi(token);
             }
@@ -640,10 +640,10 @@ std::vector<std::vector<HyperBlock>> DataUtil::loadOneToOneHBsFromCSV(const std:
         }
 
         // Normal block line
-        std::stringstream ss(line);
-        std::vector<std::vector<float>> minimums, maximums;
-        std::string value;
-        std::vector<float> temp_vals;
+        stringstream ss(line);
+        vector<vector<float>> minimums, maximums;
+        string value;
+        vector<float> temp_vals;
 
         while (getline(ss, value, ',')) {
             value.erase(0, value.find_first_not_of(" \t"));
@@ -680,12 +680,12 @@ std::vector<std::vector<HyperBlock>> DataUtil::loadOneToOneHBsFromCSV(const std:
 }
 
 
-std::vector<std::vector<HyperBlock>> DataUtil::loadOneToOneHBsFromBinary(const std::string& fileName, std::vector<std::pair<int, int>>& classPairsOut) {
-    std::ifstream in(fileName, std::ios::binary);
-    std::vector<std::vector<HyperBlock>> allHyperBlocks;
+vector<vector<HyperBlock>> DataUtil::loadOneToOneHBsFromBinary(const string& fileName, vector<pair<int, int>>& classPairsOut) {
+    ifstream in(fileName, ios::binary);
+    vector<vector<HyperBlock>> allHyperBlocks;
 
     if (!in.is_open()) {
-        std::cerr << "Error opening binary file for read: " << fileName << std::endl;
+        cerr << "Error opening binary file for read: " << fileName << endl;
         return allHyperBlocks;
     }
 
@@ -701,14 +701,14 @@ std::vector<std::vector<HyperBlock>> DataUtil::loadOneToOneHBsFromBinary(const s
         int numBlocks;
         in.read(reinterpret_cast<char*>(&numBlocks), sizeof(int));
 
-        std::vector<HyperBlock> currentSet;
+        vector<HyperBlock> currentSet;
 
         for (int b = 0; b < numBlocks; ++b) {
             int attrCount;
             in.read(reinterpret_cast<char*>(&attrCount), sizeof(int));
 
-            std::vector<std::vector<float>> mins(attrCount);
-            std::vector<std::vector<float>> maxs(attrCount);
+            vector<vector<float>> mins(attrCount);
+            vector<vector<float>> maxs(attrCount);
 
             for (int i = 0; i < attrCount; ++i) {
                 float val;
@@ -741,13 +741,13 @@ std::vector<std::vector<HyperBlock>> DataUtil::loadOneToOneHBsFromBinary(const s
 * Can use this in normalization and also for making sure test set is normalized with
 * the same values as the training set.
 */
-void DataUtil::findMinMaxValuesInDataset(const std::vector<std::vector<std::vector<float>>>& dataset, std::vector<float>& minValues, std::vector<float>& maxValues, int FIELD_LENGTH) {
+void DataUtil::findMinMaxValuesInDataset(const vector<vector<vector<float>>>& dataset, vector<float>& minValues, vector<float>& maxValues, int FIELD_LENGTH) {
     // Step 1: Find min and max for each attribute
     for (const auto& class_data : dataset) {
         for (const auto& point : class_data) {
             for (int k = 0; k < FIELD_LENGTH; k++) {
-                minValues[k] = std::min(minValues[k], point[k]);
-                maxValues[k] = std::max(maxValues[k], point[k]);
+                minValues[k] = min(minValues[k], point[k]);
+                maxValues[k] = max(maxValues[k], point[k]);
             }
         }
     }
@@ -755,13 +755,13 @@ void DataUtil::findMinMaxValuesInDataset(const std::vector<std::vector<std::vect
 
 
 // just used to mark if a column has all same value
-std::vector<bool> DataUtil::markUniformColumns(const std::vector<std::vector<std::vector<float>>>& data) {
-    // std::cout << "Starting mark uniform columns\n" << std::endl;
+vector<bool> DataUtil::markUniformColumns(const vector<vector<vector<float>>>& data) {
+    // cout << "Starting mark uniform columns\n" << endl;
 
-    if (data.empty() || data[0].empty()) return std::vector<bool>(); // Handle edge case
+    if (data.empty() || data[0].empty()) return vector<bool>(); // Handle edge case
 
     int numCols = data[0][0].size();
-    std::vector<bool> removed(numCols, false);
+    vector<bool> removed(numCols, false);
 
     // Iterate through each column
     for (int col = 0; col < numCols; col++) {
@@ -795,12 +795,12 @@ std::vector<bool> DataUtil::markUniformColumns(const std::vector<std::vector<std
 // also has a bit of a crazy return. we return the flattened mins and maxes of our list of HBs, but then also two more arrays.one for the block edges.
 // block edges array tells us where each HB starts and ends. for example block 0 is at index 0 obviously. But then block 1 may be at 4, and then block 2 could be at index 9 if we had a disjunction somewhere.
 // block classes is just the int value of each one, casted as a float. each block's class is in this vector.
-std::vector<std::vector<float>> DataUtil::flattenMinsMaxesForRUB(std::vector<HyperBlock>& hyper_blocks, int FIELD_LENGTH){
-    // Declare std::vectors
-    std::vector<float> flatMinsList;
-    std::vector<float> flatMaxesList;
-    std::vector<float> blockEdges;
-    std::vector<float> blockClasses(hyper_blocks.size());
+vector<vector<float>> DataUtil::flattenMinsMaxesForRUB(vector<HyperBlock>& hyper_blocks, int FIELD_LENGTH){
+    // Declare vectors
+    vector<float> flatMinsList;
+    vector<float> flatMaxesList;
+    vector<float> blockEdges;
+    vector<float> blockClasses(hyper_blocks.size());
 
     // First block starts at index 0
     blockEdges.push_back(0.0f);
@@ -829,19 +829,19 @@ std::vector<std::vector<float>> DataUtil::flattenMinsMaxesForRUB(std::vector<Hyp
     }
 
     // Assemble the result using move semantics to avoid extra copies
-    std::vector<std::vector<float>> result;
-    result.push_back(std::move(flatMinsList));
-    result.push_back(std::move(flatMaxesList));
-    result.push_back(std::move(blockEdges));
-    result.push_back(std::move(blockClasses));
+    vector<vector<float>> result;
+    result.push_back(move(flatMinsList));
+    result.push_back(move(flatMaxesList));
+    result.push_back(move(blockEdges));
+    result.push_back(move(blockClasses));
     return result;
 }
 
 // just flattens all our data into a vector<vector<float>>. we have to keep a tracker of where each class started and ended.
 // that is the point of the class border. so say class 1's start will be index 600 of the flattened set, classBorder[1] == 600.
-std::vector<std::vector<float>> DataUtil::flattenDataset(std::vector<std::vector<std::vector<float>>>& data) {
-    std::vector<float> dataset;
-    std::vector<float> classBorder(data.size() + 1);
+vector<vector<float>> DataUtil::flattenDataset(vector<vector<vector<float>>>& data) {
+    vector<float> dataset;
+    vector<float> classBorder(data.size() + 1);
     classBorder[0] = 0.0f;
 
     // For each class
@@ -858,7 +858,7 @@ std::vector<std::vector<float>> DataUtil::flattenDataset(std::vector<std::vector
             }
         }
     }
-    std::vector<std::vector<float>> result;
+    vector<vector<float>> result;
     result.push_back(move(dataset));
     result.push_back(move(classBorder));
     return result;
@@ -867,14 +867,14 @@ std::vector<std::vector<float>> DataUtil::flattenDataset(std::vector<std::vector
 
 // our function to flatten our list of HBs without encoding lengths in. this is what we use for removing attirbutes
 // this flattens the HBs very nicely. it doesn't encode the count of each attribute, because we use it BEFORE we could ever have a disjunction.
-std::vector<std::vector<float>> DataUtil::flatMinMaxNoEncode(std::vector<HyperBlock> hyper_blocks, int FIELD_LENGTH) {
+vector<vector<float>> DataUtil::flatMinMaxNoEncode(vector<HyperBlock> hyper_blocks, int FIELD_LENGTH) {
 
     int size = hyper_blocks.size();
-    std::vector<float> flatMinsList;
-    std::vector<float> flatMaxesList;
-    std::vector<float> blockEdges(size + 1, 0.0f);
-    std::vector<float> blockClasses(size, 0.0f);
-    std::vector<float> intervalCounts(size * FIELD_LENGTH, 0.0f);
+    vector<float> flatMinsList;
+    vector<float> flatMaxesList;
+    vector<float> blockEdges(size + 1, 0.0f);
+    vector<float> blockClasses(size, 0.0f);
+    vector<float> intervalCounts(size * FIELD_LENGTH, 0.0f);
 
     // First block starts at 0.
     blockEdges[0] = 0.0f;
@@ -883,7 +883,7 @@ std::vector<std::vector<float>> DataUtil::flatMinMaxNoEncode(std::vector<HyperBl
     // Process each hyper block
     for (size_t hb = 0; hb < size; hb++) {
         HyperBlock& block = hyper_blocks[hb];
-        // cast the classNum as a float so that we can put it in the std::vector of floats we are returning
+        // cast the classNum as a float so that we can put it in the vector of floats we are returning
         blockClasses[hb] = static_cast<float>(block.classNum);
         int length = 0;
 
@@ -912,8 +912,8 @@ std::vector<std::vector<float>> DataUtil::flatMinMaxNoEncode(std::vector<HyperBl
 }
 
 
-void DataUtil::splitTrainTestByPercent(std::vector<std::vector<std::vector<float>>>& trainingData, std::vector<std::vector<std::vector<float>>>& testingData, float percentTrain) {
-    std::mt19937 rng(42);
+void DataUtil::splitTrainTestByPercent(vector<vector<vector<float>>>& trainingData, vector<vector<vector<float>>>& testingData, float percentTrain) {
+    mt19937 rng(42);
     testingData.clear();
     testingData.resize(trainingData.size());
 
@@ -921,14 +921,14 @@ void DataUtil::splitTrainTestByPercent(std::vector<std::vector<std::vector<float
         auto& classPoints = trainingData[classIdx];
 
         // Shuffle points for randomness
-        std::shuffle(classPoints.begin(), classPoints.end(), rng);
+        shuffle(classPoints.begin(), classPoints.end(), rng);
 
         int originalSize = classPoints.size();
         int newTrainCount = static_cast<int>(originalSize * percentTrain);
 
         // Move points from trainingData to testingData
         while (classPoints.size() > newTrainCount) {
-            testingData[classIdx].push_back(std::move(classPoints.back()));
+            testingData[classIdx].push_back(move(classPoints.back()));
             classPoints.pop_back();
         }
     }
@@ -938,21 +938,21 @@ void DataUtil::splitTrainTestByPercent(std::vector<std::vector<std::vector<float
 // Splits an already-normalized dataset into k folds with stratified sampling.
 // The input 'dataset' is expected to be organized as: [class][point][attribute].
 // The returned 4D vector is structured as: [fold][class][point][attribute].
-std::vector<std::vector<std::vector<std::vector<float>>>> DataUtil::splitDataset(const std::vector<std::vector<std::vector<float>>> &dataset, int k) {
+vector<vector<vector<vector<float>>>> DataUtil::splitDataset(const vector<vector<vector<float>>> &dataset, int k) {
     // Create a 4D vector with k folds.
     // Each fold contains one vector per class.
-    std::vector<std::vector<std::vector<std::vector<float>>>> folds(k, std::vector<std::vector<std::vector<float>>>(dataset.size()));
+    vector<vector<vector<vector<float>>>> folds(k, vector<vector<vector<float>>>(dataset.size()));
 
     // Use a fixed random seed for reproducibility.
-    std::mt19937 rng(42);
+    mt19937 rng(42);
 
     // For each class, shuffle its points and distribute them round-robin into the k folds.
     for (size_t classIdx = 0; classIdx < dataset.size(); classIdx++) {
         // Copy the points for this class.
-        std::vector<std::vector<float>> points = dataset[classIdx];
+        vector<vector<float>> points = dataset[classIdx];
 
         // Shuffle the points.
-        std::shuffle(points.begin(), points.end(), rng);
+        shuffle(points.begin(), points.end(), rng);
 
         // Distribute the points into folds.
         for (int i = 0; i < points.size(); i++) {

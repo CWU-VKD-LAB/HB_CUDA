@@ -12,9 +12,9 @@
 class Simplifications {
     public:
         static int REMOVAL_COUNT;
-        static void removeUselessBlocks(std::vector<std::vector<std::vector<float>>> &data, std::vector<HyperBlock>& hyper_blocks);
-        static std::vector<int> runSimplifications(std::vector<HyperBlock> &hyperBlocks, std::vector<std::vector<std::vector<float>>> &trainData, std::vector<std::vector<int>> &bestAttributeOrdering);
-        static void removeUselessAttr(std::vector<HyperBlock> &hyper_blocks, std::vector<std::vector<std::vector<float>>> &data, std::vector<std::vector<int>> &attributeOrderings);
+        static void removeUselessBlocks(vector<vector<vector<float>>> &data, vector<HyperBlock>& hyper_blocks);
+        static vector<int> runSimplifications(vector<HyperBlock> &hyperBlocks, vector<vector<vector<float>>> &trainData, vector<vector<int>> &bestAttributeOrdering);
+        static void removeUselessAttr(vector<HyperBlock> &hyper_blocks, vector<vector<vector<float>>> &data, vector<vector<int>> &attributeOrderings);
 };
 
 

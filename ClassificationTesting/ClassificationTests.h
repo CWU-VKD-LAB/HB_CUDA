@@ -34,7 +34,7 @@ public:
 
     // main function which takes in points we need to classify, and classifies them using whichever mode we are in.
     static vector<vector<long>> buildConfusionMatrix(vector<HyperBlock> &hyperBlocks, const vector<vector<vector<float>>> &trainingData, vector<vector<vector<float>>> &pointsToClassify, int classificationMode, vector<vector<vector<float>>> &pointsWeCantClassify, const int NUM_CLASSES, map<pair<int, int>, PointSummary>& pointSummaries, int k = 5, float threshold = 0.25);
-    static pair<int, vector<BlockInfo>> precisionWeightedHBs(const vector<float> &point, std::vector<std::vector<std::vector<float>>>& testData, std::vector<HyperBlock>& hyperBlocks, int NUM_CLASSES, map<pair<int, int>, PointSummary>& pointSummaries);
+    static pair<int, vector<BlockInfo>> precisionWeightedHBs(const vector<float> &point, vector<vector<vector<float>>>& testData, vector<HyperBlock>& hyperBlocks, int NUM_CLASSES, map<pair<int, int>, PointSummary>& pointSummaries);
 
     static pair<int, vector<BlockInfo>> predictWithHBs(const vector<HyperBlock> &hyperBlocks, const vector<float> &point, int NUM_CLASSES, map<pair<int, int>, PointSummary>& pointSummaries);
 

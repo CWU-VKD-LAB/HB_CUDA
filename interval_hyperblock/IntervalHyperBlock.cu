@@ -784,6 +784,30 @@ void IntervalHyperBlock::sortByColumn(vector<vector<float>>& classData, int colI
     });
 }
 
+/**
+ * This function takes in the dataset and other supporting info used for optimizing the block creation
+ * and then generates HBs.
+ *
+ * It first calls the IntervalHyper algorithm. This will find the pure intervals of a class on each attribute and
+ * make simple hbs out of them.
+ *
+ * After this the simple HBs are passed to the merger cuda algorithm to be merged together.
+ *
+ * This won't generate all combinations of all points, which means it may be missing some patterns, however,
+ * that method is ultra computationally expensive so this approach was taken. If one wanted to, they could send in all the points
+ * in the dataset to the merger cuda algorithm without running the interval algorithm first. This would just treat each point as a single point
+ * HB and merge like normal.
+ *
+ * More info, once again in: "Fully Explainable Classification Models Using Hyperblocks", 2025. Ryan Gallagher, Austin Snyder, Boris Kovalerchuk
+ *
+ * @param data The training dataset to build hyperblocks from
+ * @param hyperBlocks The empty hyperblocks vector to be populated with HBs that are generated.
+ * @param bestAttributes
+ * @param FIELD_LENGTH The number of features in this dataset.
+ * @param COMMAND_LINE_ARGS_CLASS Command line argument taken in, allows to run on a single class at a time. For example, if you run on the 4090s in the SAMU140 lab.
+ *                                this would allow you to split the classes between each machine. (MPI might be possible for this instead of manually running
+ *                                , but we never got around to getting access)
+ */
 void IntervalHyperBlock::generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyperBlocks, vector<int> &bestAttributes, int FIELD_LENGTH, int COMMAND_LINE_ARGS_CLASS){
 
     // Get data to create hyperblocks

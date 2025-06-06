@@ -4,7 +4,11 @@
 #include "Simplifications.h"
 int Simplifications::REMOVAL_COUNT = 0;
 
-// runs our three kernel functions which remove useless blocks.
+/**
+ * Runs our three kernel functions which remove useless blocks / Remove Redundant Blocks (R2A)
+ *
+ * Details are discussed further in "Fully Explainable Classification Models Using Hyperblocks", 2025. Ryan Gallagher, Austin Snyder, Boris Kovalerchuk
+ */
 void Simplifications::removeUselessBlocks(std::vector<std::vector<std::vector<float>>> &data, std::vector<HyperBlock>& hyper_blocks) {
     /*
      * The algorithm to remove useless blocks does basically this.
@@ -107,6 +111,17 @@ void Simplifications::removeUselessBlocks(std::vector<std::vector<std::vector<fl
     }
 }
 
+/**
+ * Attempts to remove redundant attributes from hyperblocks.
+ *
+ * This can be done if the attribute is not needed for classification,
+ * for example if everything is seperable by x1, then we don't need to keep x2.
+ *
+ * Details are discussed further in "Fully Explainable Classification Models Using Hyperblocks", 2025. Ryan Gallagher, Austin Snyder, Boris Kovalerchuk
+ * @param hyper_blocks
+ * @param data
+ * @param attributeOrderings
+ */
 void Simplifications::removeUselessAttr(std::vector<HyperBlock>& hyper_blocks, std::vector<std::vector<std::vector<float>>>& data, std::vector<std::vector<int>>& attributeOrderings) {
     int FIELD_LENGTH = data[0][0].size();
 

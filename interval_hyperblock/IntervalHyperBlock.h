@@ -24,53 +24,54 @@
 #ifndef INTERVALHYPERBLOCK_H
 #define INTERVALHYPERBLOCK_H
 
+using namespace std;
 class IntervalHyperBlock {
   public:
 
     // stupid structs because we can't just use a simple hash for some reason.
     // classNum, classIndex
     struct PairHash {
-        std::size_t operator()(const std::pair<int,int> &p) const {
+        size_t operator()(const pair<int,int> &p) const {
             // hash function.
-            return static_cast<std::size_t>(p.first) * 809ULL + static_cast<std::size_t>(p.second); // using 809 because mnist is 784 attributes, so that would maybe be an issue if smaller?
+            return static_cast<size_t>(p.first) * 809ULL + static_cast<size_t>(p.second); // using 809 because mnist is 784 attributes, so that would maybe be an issue if smaller?
         }
     };
 
     // default equality operator should be fine for int and int. just checks if the two numbers are equal
     struct PairEq {
-        bool operator()(const std::pair<int,int> &a, const std::pair<int,int> &b) const {
+        bool operator()(const pair<int,int> &a, const pair<int,int> &b) const {
             return a == b;
         }
     };
 
 
-    static void pureBlockIntervalHyper(std::vector<std::vector<DataATTR>> &dataByAttribute, std::vector<std::vector<std::vector<float>>> &trainingData, std::vector<HyperBlock> &hyperBlocks, int COMMAND_LINE_ARGS_CLASS);
+    static void pureBlockIntervalHyper(vector<vector<DataATTR>> &dataByAttribute, vector<vector<vector<float>>> &trainingData, vector<HyperBlock> &hyperBlocks, int COMMAND_LINE_ARGS_CLASS);
 
-    static void intervalHyperWorker(std::vector<std::vector<DataATTR>> &attributeColumns, Interval &threadBestInterval, int threadID, int threadCount, std::atomic<int> &readyThreadsCount, char *currentPhase, std::unordered_set<std::pair<int, int>, PairHash, PairEq> &usedPoints, std::vector<char> &doneColumns, int COMMAND_LINE_ARGS_CLASS);
+    static void intervalHyperWorker(vector<vector<DataATTR>> &attributeColumns, Interval &threadBestInterval, int threadID, int threadCount, atomic<int> &readyThreadsCount, char *currentPhase, unordered_set<pair<int, int>, PairHash, PairEq> &usedPoints, vector<char> &doneColumns, int COMMAND_LINE_ARGS_CLASS);
 
-    static void intervalHyperSupervisor(std::vector<std::vector<std::vector<float>>> &realData, std::vector<std::vector<DataATTR>> &dataByAttribute, std::vector<HyperBlock> &hyperBlocks, int COMMAND_LINE_ARGS_CLASS);
+    static void intervalHyperSupervisor(vector<vector<vector<float>>> &realData, vector<vector<DataATTR>> &dataByAttribute, vector<HyperBlock> &hyperBlocks, int COMMAND_LINE_ARGS_CLASS);
 
-    static Interval longestInterval(std::vector<DataATTR> &dataByAttribute, int attribute);
+    static Interval longestInterval(vector<DataATTR> &dataByAttribute, int attribute);
 
-    static void intervalHyper(std::vector<std::vector<std::vector<float>>> &realData, std::vector<std::vector<DataATTR>> &remainingData, std::vector<HyperBlock> &hyperBlocks);
+    static void intervalHyper(vector<vector<vector<float>>> &realData, vector<vector<DataATTR>> &remainingData, vector<HyperBlock> &hyperBlocks);
 
-    static std::vector<std::vector<DataATTR>> separateByAttribute(const std::vector<std::vector<std::vector<float>>>& data, int FIELD_LENGTH);
+    static vector<vector<DataATTR>> separateByAttribute(const vector<vector<vector<float>>>& data, int FIELD_LENGTH);
 
-    static void sortByColumn(std::vector<std::vector<float>>& classData, int colIndex);
+    static void sortByColumn(vector<vector<float>>& classData, int colIndex);
 
-    static void generateHBs(std::vector<std::vector<std::vector<float>>>& data, std::vector<HyperBlock>& hyperBlocks, std::vector<int> &bestAttributes,int FIELD_LENGTH, int COMMAND_LINE_ARGS_CLASS);
+    static void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyperBlocks, vector<int> &bestAttributes,int FIELD_LENGTH, int COMMAND_LINE_ARGS_CLASS);
 
-	static void merger_cuda(const std::vector<std::vector<std::vector<float>>>& allData, std::vector<HyperBlock>& hyperBlocks, int COMMAND_LINE_ARGS_CLASS);
+	static void merger_cuda(const vector<vector<vector<float>>>& allData, vector<HyperBlock>& hyperBlocks, int COMMAND_LINE_ARGS_CLASS);
 
-    static void mergerNotInCuda(std::vector<std::vector<std::vector<float>>> &trainingData, std::vector<HyperBlock> &hyperBlocks, std::vector<std::vector<DataATTR>> &pointsBrokenUp);
+    static void mergerNotInCuda(vector<vector<vector<float>>> &trainingData, vector<HyperBlock> &hyperBlocks, vector<vector<DataATTR>> &pointsBrokenUp);
 
-    static bool checkMergable(std::vector<std::vector<DataATTR>> &dataByAttribute, HyperBlock &h);
+    static bool checkMergable(vector<vector<DataATTR>> &dataByAttribute, HyperBlock &h);
 
-    static std::vector<std::vector<std::vector<float>>> increaseLevelOfTrainingSet(std::vector<HyperBlock> &hyperBlocks, std::vector<std::vector<std::vector<float>>> &inputTrainingData, int FIELD_LENGTH);
+    static vector<vector<vector<float>>> increaseLevelOfTrainingSet(vector<HyperBlock> &hyperBlocks, vector<vector<vector<float>>> &inputTrainingData, int FIELD_LENGTH);
 
-    static std::unordered_set<std::pair<int,int>, PairHash, PairEq> findHBEnvelopeCases(HyperBlock &hb, std::vector<std::vector<DataATTR>> &dataByAttribute);
+    static unordered_set<pair<int,int>, PairHash, PairEq> findHBEnvelopeCases(HyperBlock &hb, vector<vector<DataATTR>> &dataByAttribute);
 
-    static std::vector<std::vector<std::vector<float>>> generateNextLevelHBs(std::vector<std::vector<std::vector<float>>> &trainingData, std::vector<HyperBlock> &inputBlocks, std::vector<HyperBlock> &nextLevelBlocks, std::vector<int> &bestAttributes, int FIELD_LENGTH, int COMMAND_LINE_ARGS_CLASS);
+    static vector<vector<vector<float>>> generateNextLevelHBs(vector<vector<vector<float>>> &trainingData, vector<HyperBlock> &inputBlocks, vector<HyperBlock> &nextLevelBlocks, vector<int> &bestAttributes, int FIELD_LENGTH, int COMMAND_LINE_ARGS_CLASS);
 
 };
 

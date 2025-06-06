@@ -10,18 +10,19 @@
 // our flag for if we want to apply arc cos to each vector or not. In DV it is applied,
 // and this gets us slightly better blocks.
 #define USE_TRIG
+using namespace std;
 
 // ------------------------------------------------------------
 // 1) A helper to compute the partial sum of a data set's means
 // ------------------------------------------------------------
-std::vector<float> partialMean(const std::vector<std::vector<float>>& data,
+vector<float> partialMean(const vector<vector<float>>& data,
                                int start, int end)
 {
     if (start >= end) {
         return {};
     }
     int numFeatures = data[0].size();
-    std::vector<float> localSum(numFeatures, 0.0f);
+    vector<float> localSum(numFeatures, 0.0f);
 
     for (int idx = start; idx < end; idx++) {
         const auto& row = data[idx];
@@ -35,11 +36,11 @@ std::vector<float> partialMean(const std::vector<std::vector<float>>& data,
 // --------------------------------------------------------------
 // 2) A helper to compute a partial scatter matrix for [start, end)
 // --------------------------------------------------------------
-std::vector<std::vector<float>> partialScatter(const std::vector<std::vector<float>>& data, const std::vector<float>& mean, int start, int end)
+vector<vector<float>> partialScatter(const vector<vector<float>>& data, const vector<float>& mean, int start, int end)
 {
     int numFeatures = static_cast<int>(mean.size());
     // Create a local scatter matrix
-    std::vector<std::vector<float>> localSw(numFeatures, std::vector<float>(numFeatures, 0.0f));
+    vector<vector<float>> localSw(numFeatures, vector<float>(numFeatures, 0.0f));
 
     for (int idx = start; idx < end; idx++) {
         const auto& x = data[idx];
@@ -57,9 +58,9 @@ std::vector<std::vector<float>> partialScatter(const std::vector<std::vector<flo
 // Matrix inverse using naive Gauss-Jordan elimination
 // (Consider a library for large matrices.)
 // --------------------------------------------------------------
-std::vector<std::vector<float>> inverse(const std::vector<std::vector<float>>& matrix) {
+vector<vector<float>> inverse(const vector<vector<float>>& matrix) {
     int n = matrix.size();
-    std::vector<std::vector<float>> augmented(n, std::vector<float>(2 * n, 0.0f));
+    vector<vector<float>> augmented(n, vector<float>(2 * n, 0.0f));
 
     // Create augmented matrix
     for (int i = 0; i < n; i++) {
@@ -72,8 +73,8 @@ std::vector<std::vector<float>> inverse(const std::vector<std::vector<float>>& m
     // Forward elimination
     for (int i = 0; i < n; i++) {
         float pivot = augmented[i][i];
-        if (std::fabs(pivot) < 1e-12f) {
-            std::cerr << "Matrix is singular or near-singular.\n";
+        if (fabs(pivot) < 1e-12f) {
+            cerr << "Matrix is singular or near-singular.\n";
             exit(EXIT_FAILURE);
         }
         // Normalize pivot row
@@ -92,7 +93,7 @@ std::vector<std::vector<float>> inverse(const std::vector<std::vector<float>>& m
     }
 
     // Extract inverse
-    std::vector<std::vector<float>> inv(n, std::vector<float>(n, 0.0f));
+    vector<vector<float>> inv(n, vector<float>(n, 0.0f));
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
             inv[i][j] = augmented[i][j + n];
@@ -104,10 +105,10 @@ std::vector<std::vector<float>> inverse(const std::vector<std::vector<float>>& m
 // --------------------------------------------------------------
 // Simple matrix-vector multiply
 // --------------------------------------------------------------
-std::vector<float> matrixVectorMultiply(const std::vector<std::vector<float>>& A, const std::vector<float>& v) {
+vector<float> matrixVectorMultiply(const vector<vector<float>>& A, const vector<float>& v) {
     int rows = A.size();
     int cols = A[0].size();
-    std::vector<float> result(rows, 0.0f);
+    vector<float> result(rows, 0.0f);
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < cols; j++) {
             result[i] += A[i][j] * v[j];
@@ -119,7 +120,7 @@ std::vector<float> matrixVectorMultiply(const std::vector<std::vector<float>>& A
 // --------------------------------------------------------------
 // Helper: dot product of two vectors
 // --------------------------------------------------------------
-inline float dotProduct(const std::vector<float>& a, const std::vector<float>& b) {
+inline float dotProduct(const vector<float>& a, const vector<float>& b) {
     assert(a.size() == b.size());
     float sum = 0.0f;
     for (size_t i = 0; i < a.size(); i++) {
@@ -130,22 +131,22 @@ inline float dotProduct(const std::vector<float>& a, const std::vector<float>& b
 
 // Define a struct to hold both the weight vector and its bias.
 struct LDAClassifier {
-    std::vector<float> w;
+    vector<float> w;
     float bias;
 };
 
 // --------------------------------------------------------------
 // 3) Compute a single LDA vector w (and bias) for classA vs. classB
-//    with partial parallelization via std::async
+//    with partial parallelization via async
 // --------------------------------------------------------------
-LDAClassifier computeBinaryLDA(const std::vector<std::vector<float>>& classA,
-                               const std::vector<std::vector<float>>& classB)
+LDAClassifier computeBinaryLDA(const vector<vector<float>>& classA,
+                               const vector<vector<float>>& classB)
 {
     // We assume both classA and classB have at least one row
     int numFeatures = classA[0].size();
 
     // Decide how many threads to launch
-    unsigned concurrency = std::thread::hardware_concurrency();
+    unsigned concurrency = thread::hardware_concurrency();
     if (concurrency == 0) {
         concurrency = 4; // fallback if hardware_concurrency is not available
     }
@@ -153,22 +154,22 @@ LDAClassifier computeBinaryLDA(const std::vector<std::vector<float>>& classA,
     // ---------------------------
     // 3.1) Compute mean of classA
     // ---------------------------
-    auto meanA_future = std::async(std::launch::async,
+    auto meanA_future = async(launch::async,
                                    [&, concurrency]() {
         int totalSamples = static_cast<int>(classA.size());
         int chunkSize = (totalSamples + concurrency - 1) / concurrency;
 
         // Launch partial sums
-        std::vector<std::future<std::vector<float>>> futures;
+        vector<future<vector<float>>> futures;
         int start = 0;
         while (start < totalSamples) {
-            int end = std::min(start + chunkSize, totalSamples);
-            futures.push_back(std::async(std::launch::async,
-                partialMean, std::cref(classA), start, end));
+            int end = min(start + chunkSize, totalSamples);
+            futures.push_back(async(launch::async,
+                partialMean, cref(classA), start, end));
             start = end;
         }
         // Combine partial sums
-        std::vector<float> sumA(numFeatures, 0.0f);
+        vector<float> sumA(numFeatures, 0.0f);
         for (auto &f : futures) {
             auto localSum = f.get();
             for (int i = 0; i < numFeatures; i++) {
@@ -185,22 +186,22 @@ LDAClassifier computeBinaryLDA(const std::vector<std::vector<float>>& classA,
     // ---------------------------
     // 3.2) Compute mean of classB
     // ---------------------------
-    auto meanB_future = std::async(std::launch::async,
+    auto meanB_future = async(launch::async,
                                    [&, concurrency]() {
         int totalSamples = static_cast<int>(classB.size());
         int chunkSize = (totalSamples + concurrency - 1) / concurrency;
 
         // Launch partial sums
-        std::vector<std::future<std::vector<float>>> futures;
+        vector<future<vector<float>>> futures;
         int start = 0;
         while (start < totalSamples) {
-            int end = std::min(start + chunkSize, totalSamples);
-            futures.push_back(std::async(std::launch::async,
-                partialMean, std::cref(classB), start, end));
+            int end = min(start + chunkSize, totalSamples);
+            futures.push_back(async(launch::async,
+                partialMean, cref(classB), start, end));
             start = end;
         }
         // Combine partial sums
-        std::vector<float> sumB(numFeatures, 0.0f);
+        vector<float> sumB(numFeatures, 0.0f);
         for (auto &f : futures) {
             auto localSum = f.get();
             for (int i = 0; i < numFeatures; i++) {
@@ -215,26 +216,26 @@ LDAClassifier computeBinaryLDA(const std::vector<std::vector<float>>& classA,
     });
 
     // Wait for means
-    std::vector<float> meanA = meanA_future.get();
-    std::vector<float> meanB = meanB_future.get();
+    vector<float> meanA = meanA_future.get();
+    vector<float> meanB = meanB_future.get();
 
     // --------------------------------
     // 3.3) Compute scatter for classA
     // --------------------------------
-    std::vector<std::vector<float>> Sw(numFeatures, std::vector<float>(numFeatures, 0.0f));
+    vector<vector<float>> Sw(numFeatures, vector<float>(numFeatures, 0.0f));
 
-    auto scatterA_future = std::async(std::launch::async,
+    auto scatterA_future = async(launch::async,
                                       [&, concurrency]() {
-        std::vector<std::vector<float>> localSw(numFeatures, std::vector<float>(numFeatures, 0.0f));
+        vector<vector<float>> localSw(numFeatures, vector<float>(numFeatures, 0.0f));
         int totalSamples = static_cast<int>(classA.size());
         int chunkSize = (totalSamples + concurrency - 1) / concurrency;
 
-        std::vector<std::future<std::vector<std::vector<float>>>> futures;
+        vector<future<vector<vector<float>>>> futures;
         int start = 0;
         while (start < totalSamples) {
-            int end = std::min(start + chunkSize, totalSamples);
-            futures.push_back(std::async(std::launch::async,
-                partialScatter, std::cref(classA), std::cref(meanA), start, end));
+            int end = min(start + chunkSize, totalSamples);
+            futures.push_back(async(launch::async,
+                partialScatter, cref(classA), cref(meanA), start, end));
             start = end;
         }
         // Combine partial results
@@ -252,18 +253,18 @@ LDAClassifier computeBinaryLDA(const std::vector<std::vector<float>>& classA,
     // --------------------------------
     // 3.4) Compute scatter for classB
     // --------------------------------
-    auto scatterB_future = std::async(std::launch::async,
+    auto scatterB_future = async(launch::async,
                                       [&, concurrency]() {
-        std::vector<std::vector<float>> localSw(numFeatures, std::vector<float>(numFeatures, 0.0f));
+        vector<vector<float>> localSw(numFeatures, vector<float>(numFeatures, 0.0f));
         int totalSamples = static_cast<int>(classB.size());
         int chunkSize = (totalSamples + concurrency - 1) / concurrency;
 
-        std::vector<std::future<std::vector<std::vector<float>>>> futures;
+        vector<future<vector<vector<float>>>> futures;
         int start = 0;
         while (start < totalSamples) {
-            int end = std::min(start + chunkSize, totalSamples);
-            futures.push_back(std::async(std::launch::async,
-                partialScatter, std::cref(classB), std::cref(meanB), start, end));
+            int end = min(start + chunkSize, totalSamples);
+            futures.push_back(async(launch::async,
+                partialScatter, cref(classB), cref(meanB), start, end));
             start = end;
         }
         // Combine partial results
@@ -294,19 +295,19 @@ LDAClassifier computeBinaryLDA(const std::vector<std::vector<float>>& classA,
     }
 
     // 3.5) Compute w = Sw^-1 * (meanB - meanA)
-    std::vector<std::vector<float>> SwInv = inverse(Sw);
-    std::vector<float> meanDiff(numFeatures, 0.0f);
+    vector<vector<float>> SwInv = inverse(Sw);
+    vector<float> meanDiff(numFeatures, 0.0f);
     for (int j = 0; j < numFeatures; j++) {
         meanDiff[j] = meanB[j] - meanA[j];
     }
-    std::vector<float> w = matrixVectorMultiply(SwInv, meanDiff);
+    vector<float> w = matrixVectorMultiply(SwInv, meanDiff);
 
     // 3.6) Normalize w
     float normVal = 0.0f;
     for (float val : w) {
         normVal += val * val;
     }
-    normVal = std::sqrt(normVal);
+    normVal = sqrt(normVal);
     if (normVal > 1e-12f) {
         for (float &val : w) {
             val /= normVal;
@@ -327,13 +328,13 @@ LDAClassifier computeBinaryLDA(const std::vector<std::vector<float>>& classA,
     }
 
     LDAClassifier classifier;
-    classifier.w = std::move(w);
+    classifier.w = move(w);
     classifier.bias = bias;
     return classifier;
 }
 
 // predictClass: for a given sample, compute (w^T x - bias) and return the class with the highest score.
-int predictClass(const std::vector<LDAClassifier>& classifiers, const std::vector<float>& sample) {
+int predictClass(const vector<LDAClassifier>& classifiers, const vector<float>& sample) {
     int bestClass = -1;
     float bestScore = -1e9f; // a very low starting score
     for (size_t i = 0; i < classifiers.size(); i++) {
@@ -348,11 +349,11 @@ int predictClass(const std::vector<LDAClassifier>& classifiers, const std::vecto
 
 // testMultiClassAccuracy: loops over each sample in inputData (labeled by class),
 // predicts its class using predictClass, and computes overall accuracy.
-std::vector<int> testMultiClassAccuracy(const std::vector<LDAClassifier>& classifiers,
-                                        const std::vector<std::vector<std::vector<float>>>& inputData) {
+vector<int> testMultiClassAccuracy(const vector<LDAClassifier>& classifiers,
+                                        const vector<vector<vector<float>>>& inputData) {
     int numClasses = inputData.size();
-    std::vector<int> correctPerClass(numClasses, 0);
-    std::vector<int> totalPerClass(numClasses, 0);
+    vector<int> correctPerClass(numClasses, 0);
+    vector<int> totalPerClass(numClasses, 0);
     int totalCorrect = 0;
     int totalSamples = 0;
 
@@ -369,26 +370,26 @@ std::vector<int> testMultiClassAccuracy(const std::vector<LDAClassifier>& classi
     }
 
     // Compute per-class accuracy and associate with class index
-    std::vector<std::pair<int, float>> classAcc;
+    vector<pair<int, float>> classAcc;
     for (int i = 0; i < numClasses; ++i) {
         float acc = totalPerClass[i] > 0 ? static_cast<float>(correctPerClass[i]) / totalPerClass[i] : 0.0f;
-        classAcc.push_back(std::make_pair(i, acc));
+        classAcc.push_back(make_pair(i, acc));
     }
 
     // Sort by descending accuracy
-    std::sort(classAcc.begin(), classAcc.end(),
-              [](const std::pair<int, float>& a, const std::pair<int, float>& b) {
+    sort(classAcc.begin(), classAcc.end(),
+              [](const pair<int, float>& a, const pair<int, float>& b) {
                   return a.second > b.second;
               });
 
     // Extract sorted class indices
-    std::vector<int> ordering;
+    vector<int> ordering;
     for (const auto& pair : classAcc) {
         ordering.push_back(pair.first);
     }
 
     for(int i = 0; i < ordering.size(); i++) {
-      std::cout << ordering[i] << " " << std::endl;
+      cout << ordering[i] << " " << endl;
     }
     return ordering;
 }
@@ -403,9 +404,9 @@ std::vector<int> testMultiClassAccuracy(const std::vector<LDAClassifier>& classi
  * Returns a vector of separation vectors (with optional arccos normalization),
  * one per class.
  */
-std::pair<std::vector<std::vector<float>>, std::vector<int>> linearDiscriminantAnalysis(const std::vector<std::vector<std::vector<float>>>& inputData) {
+pair<vector<vector<float>>, vector<int>> linearDiscriminantAnalysis(const vector<vector<vector<float>>>& inputData) {
     int numClasses = inputData.size();
-    std::vector<LDAClassifier> classifiers(numClasses); // one classifier per class
+    vector<LDAClassifier> classifiers(numClasses); // one classifier per class
 
     // For each class i, gather its samples in classA and gather all other samples in classB
     for (int i = 0; i < numClasses; i++) {
@@ -413,7 +414,7 @@ std::pair<std::vector<std::vector<float>>, std::vector<int>> linearDiscriminantA
         const auto& classA = inputData[i];
 
         // classB = union of samples of all other classes
-        std::vector<std::vector<float>> classB;
+        vector<vector<float>> classB;
         for (int j = 0; j < numClasses; j++) {
             if (j == i) continue; // skip class i
             classB.insert(classB.end(), inputData[j].begin(), inputData[j].end());
@@ -423,14 +424,14 @@ std::pair<std::vector<std::vector<float>>, std::vector<int>> linearDiscriminantA
     }
 
     // Optionally apply arc-cos transformation to the final w's
-    std::vector<std::vector<float>> separationVectors;
+    vector<vector<float>> separationVectors;
     for (LDAClassifier &classifier : classifiers) {
 #ifdef USE_TRIG
         // Copy the classifier weights
-        std::vector<float> normalizedVector = classifier.w;
+        vector<float> normalizedVector = classifier.w;
 
-        float maxVal = *std::max_element(normalizedVector.begin(), normalizedVector.end());
-        float minVal = *std::min_element(normalizedVector.begin(), normalizedVector.end());
+        float maxVal = *max_element(normalizedVector.begin(), normalizedVector.end());
+        float minVal = *min_element(normalizedVector.begin(), normalizedVector.end());
 
         // Avoid div-by-zero if all values are the same
         float range = maxVal - minVal;
@@ -442,16 +443,16 @@ std::pair<std::vector<std::vector<float>>, std::vector<int>> linearDiscriminantA
         for (auto& val : normalizedVector) {
             float norm = (val - minVal) / range;
             // arccos(1) -> 0°, arccos(0) -> 90°
-            val = std::acos(norm) * radToDeg;
+            val = acos(norm) * radToDeg;
         }
-        separationVectors.push_back(std::move(normalizedVector));
+        separationVectors.push_back(move(normalizedVector));
 #else
         separationVectors.push_back(classifier.w);
 #endif
     }
 
     // Evaluate accuracy
-    std::vector<int> classOrder = testMultiClassAccuracy(classifiers, inputData);
+    vector<int> classOrder = testMultiClassAccuracy(classifiers, inputData);
 
-    return std::make_pair(separationVectors, classOrder);
+    return make_pair(separationVectors, classOrder);
 }

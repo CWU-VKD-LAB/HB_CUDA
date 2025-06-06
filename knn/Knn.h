@@ -8,9 +8,7 @@
 
 #include <vector>
 #include "../hyperblock/HyperBlock.h"
-#include "../data_utilities/DataUtil.h"
 #include "../interval_hyperblock/DataAttr.h"
-#include "../interval_hyperblock/IntervalHyperBlock.h"
 
 class Knn {
     public:

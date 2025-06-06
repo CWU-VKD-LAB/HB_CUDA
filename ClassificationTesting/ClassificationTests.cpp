@@ -100,19 +100,19 @@ vector<vector<long>> ClassificationTests::buildConfusionMatrix(vector<HyperBlock
 }
 
 
-pair<int, vector<BlockInfo>> ClassificationTests::precisionWeightedHBs(const vector<float> &point, std::vector<std::vector<std::vector<float>>>& testData, std::vector<HyperBlock>& hyperBlocks, int NUM_CLASSES, map<pair<int, int>, PointSummary>& pointSummaries) {
+pair<int, vector<BlockInfo>> ClassificationTests::precisionWeightedHBs(const vector<float> &point, vector<vector<vector<float>>>& testData, vector<HyperBlock>& hyperBlocks, int NUM_CLASSES, map<pair<int, int>, PointSummary>& pointSummaries) {
 
     // Precision lost will hold each class of HB precison lost stats for each individual class
     /// Ex cls 0:  [0, .04, .10] indicates the precision lost from 0 was none, 1 was 4% and 2 was 10%
     /// hbPrecision is the precision score of the HB set itself. If class 0 has 100% that means it didn't misclassify anything as a 0 in validation.
 
     // Find how many HBs there are from each class to weight by
-    std::vector<int> totalHBsPerClass(NUM_CLASSES);
+    vector<int> totalHBsPerClass(NUM_CLASSES);
     for(const auto& hb : hyperBlocks) {
         totalHBsPerClass[hb.classNum]++;
     }
 
-    std::vector<float> floatVote(NUM_CLASSES, 0.0f);
+    vector<float> floatVote(NUM_CLASSES, 0.0f);
     vector<BlockInfo> blockHits;
 
     for(int i = 0; i < hyperBlocks.size(); i++) {
@@ -177,7 +177,7 @@ pair<int, vector<BlockInfo>> ClassificationTests::predictWithHBs(
         }
     }
 
-    float maxVote = *std::max_element(votes.begin(), votes.end());
+    float maxVote = *max_element(votes.begin(), votes.end());
 
     if (maxVote == 0.0f) {
         return {-1, blockHits};

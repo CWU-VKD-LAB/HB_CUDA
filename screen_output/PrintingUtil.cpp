@@ -9,6 +9,8 @@
 #include <map>
 #include <limits>
 
+using namespace std;
+
 // Function to clear the console screen (cross-platform)
 void PrintingUtil::clearScreen() {
 #ifdef _WIN32
@@ -18,47 +20,54 @@ void PrintingUtil::clearScreen() {
 #endif
 }
 
-// Function to wait for user input before continuing
+/**
+ * Function to wait for user input before continuing.
+ * Used in the command line interface.
+ */
 void PrintingUtil::waitForEnter() {
-    std::cout << "\nPress Enter to continue...";
-    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    cout << "\nPress Enter to continue...";
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
 }
 
-// Function to display the main menu
+/**
+ * This is a function to display the command line interface menu.
+ *
+ * Update me if you add new options to the switch case in Host.cu
+ */
 void PrintingUtil::displayMainMenu() {
     clearScreen();
-    std::cout << "=== HyperBlock Classification System ===\n\n";
-    std::cout << "1. Import training data.\n";
-    std::cout << "2. Import testing data.\n";
-    std::cout << "3. Save normalized training data.\n";
-    std::cout << std::endl;
-    std::cout << "4. Import regular Hyperblocks.\n";
-    std::cout << "5. Export regular Hyperblocks.\n";
-    std::cout << "6. Generate Hyperblocks.\n";
-    std::cout << "7. Simplify Hyperblocks.\n";
-    std::cout << "8. Test Hyperblocks.\n";
-    std::cout << "9. Test 1-1 HyperBlocks.\n";
-    std::cout << "10. K Fold Cross Validation.\n";
-    std::cout << std::endl;
-    std::cout << "11. Generate 1-1 Hyperblocks.\n";
-    std::cout << "12. Import 1-1 Hyperblocks.\n";
-    std::cout << "13. Export 1-1 Hyperblocks.\n";
-    std::cout << "14. K-Fold 1-1\n";
-    std::cout << "15. Generate One To Rest Blocks and Save.\n";
-    std::cout << std::endl;
+    cout << "=== HyperBlock Classification System ===\n\n";
+    cout << "1. Import training data.\n";
+    cout << "2. Import testing data.\n";
+    cout << "3. Save normalized training data.\n";
+    cout << endl;
+    cout << "4. Import regular Hyperblocks.\n";
+    cout << "5. Export regular Hyperblocks.\n";
+    cout << "6. Generate Hyperblocks.\n";
+    cout << "7. Simplify Hyperblocks.\n";
+    cout << "8. Test Hyperblocks.\n";
+    cout << "9. Test 1-1 HyperBlocks.\n";
+    cout << "10. K Fold Cross Validation.\n";
+    cout << endl;
+    cout << "11. Generate 1-1 Hyperblocks.\n";
+    cout << "12. Import 1-1 Hyperblocks.\n";
+    cout << "13. Export 1-1 Hyperblocks.\n";
+    cout << "14. K-Fold 1-1\n";
+    cout << "15. Generate One To Rest Blocks and Save.\n";
+    cout << endl;
 
-    std::cout << "16. Find Best Parameters (Grid Search).\n";
-    std::cout << "17. Generate Next Level HBs.\n";
-    std::cout << "18. K fold validation with Level N HBs.\n\n" << std::endl;
-    std::cout << "19. Quit\n\n";
+    cout << "16. Find Best Parameters (Grid Search).\n";
+    cout << "17. Generate Next Level HBs.\n";
+    cout << "18. K fold validation with Level N HBs.\n\n" << endl;
+    cout << "19. Quit\n\n";
 
 
 }
 
-float PrintingUtil::printConfusionMatrix(std::vector<std::vector<long>>& data, const int NUM_CLASSES, std::map<int, std::string>& CLASS_MAP_INT) {
-    std::vector<std::string> classLabels(NUM_CLASSES);
+float PrintingUtil::printConfusionMatrix(vector<vector<long>>& data, const int NUM_CLASSES, map<int, string>& CLASS_MAP_INT) {
+    vector<string> classLabels(NUM_CLASSES);
 
-    std::vector<float> accuracies(NUM_CLASSES, 0.0);
+    vector<float> accuracies(NUM_CLASSES, 0.0);
 
     // Calculate the accuracies of each of the rows.
     // Only the diagonal values are correct predictions
@@ -95,57 +104,64 @@ float PrintingUtil::printConfusionMatrix(std::vector<std::vector<long>>& data, c
     size_t maxWidth = 8; // Minimum width
 
     for (const auto& name : classLabels) {
-        maxWidth = std::max(maxWidth, name.length() + 2);
+        maxWidth = max(maxWidth, name.length() + 2);
     }
 
     for (const auto& row : data) {
         for (const auto& cell : row) {
-            std::string numStr = std::to_string(cell);
-            maxWidth = std::max(maxWidth, numStr.length() + 2);
+            string numStr = to_string(cell);
+            maxWidth = max(maxWidth, numStr.length() + 2);
         }
     }
 
     // Print header row with "Actual\Predicted" in the corner
-    std::cout << std::setw(maxWidth) << "Act\\Pred" << " |";
+    cout << setw(maxWidth) << "Act\\Pred" << " |";
     for (int i = 0; i < NUM_CLASSES; i++) {
-        std::cout << std::setw(maxWidth) << CLASS_MAP_INT[i] << " |";
+        cout << setw(maxWidth) << CLASS_MAP_INT[i] << " |";
     }
-    std::cout << std::endl;
+    cout << endl;
 
     // Print separator line
-    std::cout << std::string(maxWidth, '-') << "-+";
+    cout << string(maxWidth, '-') << "-+";
     for (size_t i = 0; i < CLASS_MAP_INT.size(); i++) {
-        std::cout << std::string(maxWidth, '-') << "-+";
+        cout << string(maxWidth, '-') << "-+";
     }
-    std::cout << std::endl;
+    cout << endl;
 
     // Print each row with row label
     for (size_t i = 0; i < data.size(); i++) {
-        std::cout << std::setw(maxWidth) << CLASS_MAP_INT[i] << " |";
+        cout << setw(maxWidth) << CLASS_MAP_INT[i] << " |";
 
         for (size_t j = 0; j < data[i].size(); j++) {
-            std::cout << std::setw(maxWidth) << data[i][j] << " |";
+            cout << setw(maxWidth) << data[i][j] << " |";
         }
 
-        std::cout << accuracies[i] << std::endl;
+        cout << accuracies[i] << endl;
     }
 
-    std::cout << "The overall accuracy is " << overallAccuracy << std::endl;
+    cout << "The overall accuracy is " << overallAccuracy << endl;
     return overallAccuracy;
 }
 
 
-void PrintingUtil::printDataset(const std::vector<std::vector<std::vector<float>>>& vec) {
+/**
+ * This just prints out the dataset for debugging purposes.
+ *
+ * @param vec The dataset, [class][pointIdx][attrIdx]
+ */
+void PrintingUtil::printDataset(const vector<vector<vector<float>>>& vec) {
     for (int i = 0; i < vec.size(); i++) {
-        std::cout << "Class " << i << ":" << std::endl;
+        cout << "Class " << i << ":" << endl;
+
         for (const auto& row : vec[i]) {
-            std::cout << "  [";
+            cout << "  [";
+
             for (int j = 0; j < row.size(); j++) {
-                std::cout << row[j];
-                if (j < row.size() - 1) std::cout << ", ";
+                cout << row[j];
+                if (j < row.size() - 1) cout << ", ";
             }
-            std::cout << "]" << std::endl;
+            cout << "]" << endl;
         }
-        std::cout << std::endl;  // Add spacing between classes
+        cout << endl;
     }
 }

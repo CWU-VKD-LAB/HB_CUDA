@@ -1,23 +1,24 @@
 #include "HyperBlock.h"
 
 #include "../data_utilities/StatStructs.h"
+using namespace std;
 
 // Constructor definition
-HyperBlock::HyperBlock(const std::vector<std::vector<float>>& maxs, const std::vector<std::vector<float>>& mins, int cls) : maximums(maxs), minimums(mins), classNum(cls) {
+HyperBlock::HyperBlock(const vector<vector<float>>& maxs, const vector<vector<float>>& mins, int cls) : maximums(maxs), minimums(mins), classNum(cls) {
     // make sure to do this. the top bottom pairs are not always used. it is used when we are using indexed based merging stuff instead of regular cuda.
     topBottomPairs.resize(maxs.size());
 }
 
 // make a block out of a set of data instead of a min and max bound list. used in the interval Hyper function sometimes.
-HyperBlock::HyperBlock(std::vector<std::vector<std::vector<float>>>& hb_data, int cls){
+HyperBlock::HyperBlock(vector<vector<vector<float>>>& hb_data, int cls){
     int attr_count = hb_data[0][0].size(); // Number of attributes
-    //std::cout << "print the vector\n" << std::endl;
+    //cout << "print the vector\n" << endl;
     // Initialize maxes and mins with size and initial values
-    std::vector<std::vector<float>> maxes(attr_count, std::vector<float>(1, -std::numeric_limits<float>::infinity()));
-    std::vector<std::vector<float>> mins(attr_count, std::vector<float>(1, std::numeric_limits<float>::infinity()));
+    vector<vector<float>> maxes(attr_count, vector<float>(1, -numeric_limits<float>::infinity()));
+    vector<vector<float>> mins(attr_count, vector<float>(1, numeric_limits<float>::infinity()));
 
     // Find max and min for each attribute
-    for(const std::vector<float>& point : hb_data[0]){
+    for(const vector<float>& point : hb_data[0]){
         for(int i = 0; i < point.size(); i++){
             if(point[i] > maxes[i][0]){
                 maxes[i][0] = point[i];
@@ -29,7 +30,7 @@ HyperBlock::HyperBlock(std::vector<std::vector<std::vector<float>>>& hb_data, in
     }
 
     size = -1;
-    pointIndices = std::vector<std::vector<int>>();
+    pointIndices = vector<vector<int>>();
     maximums = maxes;
     minimums = mins;
     classNum = cls;
@@ -93,7 +94,7 @@ float HyperBlock::distance_to_HB_Edge(int numAttributes, const float* point) con
         // So we don't add anything to totalDistanceSquared
     }
 
-    return std::sqrt(totalDistanceSquared);
+    return sqrt(totalDistanceSquared);
 }
 
 
@@ -107,13 +108,13 @@ float HyperBlock::distance_to_HB_Edge(int numAttributes, const float* point) con
  * @param useVotedResult If this is true, the algorithm should use the final prediction to not penalize blocks that were wrong but didn't result in bad classificatrion.
  * @return The precision of this HyperBlock (TP / (TP + FP))
  */
-void HyperBlock::setHBPrecisions(std::map<std::pair<int, int>, PointSummary> summaries, int NUM_CLASSES, bool useVotedResult) {
+void HyperBlock::setHBPrecisions(map<pair<int, int>, PointSummary> summaries, int NUM_CLASSES, bool useVotedResult) {
     // Initialize the precisionLostByClass vector
     this->precisionLostByClass.assign(NUM_CLASSES, 0.0f);
 
     int TP = 0;  // True positives: points of this block's class that fell into this block
     int FP = 0;  // False positives: points of other classes that fell into this block
-    std::vector<int> FP_by_class(NUM_CLASSES, 0);  // Track FP by each class
+    vector<int> FP_by_class(NUM_CLASSES, 0);  // Track FP by each class
 
     // Go through all point summaries to find points that fell into this block
     for (const auto& entry : summaries) {
@@ -179,8 +180,9 @@ float HyperBlock::distance_to_HB_Avg(int numAttributes, const float* point) cons
             totalDistanceSquared += dist * dist;
         }
     }
-    return std::sqrt(totalDistanceSquared);
+    return sqrt(totalDistanceSquared);
 }
+
 
 float HyperBlock::distance_to_HB_Combo(int numAttributes, const float* point) const {
     constexpr float EPSILON = 1e-6f;
@@ -200,7 +202,7 @@ float HyperBlock::distance_to_HB_Combo(int numAttributes, const float* point) co
         // So we don't add anything to totalDistanceSquared
     }
 
-    return std::sqrt(totalDistanceSquared);
+    return sqrt(totalDistanceSquared);
 }
 
 
@@ -213,18 +215,18 @@ float HyperBlock::distance_to_HB_Combo(int numAttributes, const float* point) co
 * point too. This should be done by adding all the points together and then at the end dividing each attribute by size.
 * this will allow for us to know where the "true" center of the block is.
 */
-void HyperBlock::find_avg_and_size(const std::vector<std::vector<std::vector<float>>>& data) {
+void HyperBlock::find_avg_and_size(const vector<vector<vector<float>>>& data) {
     int totalSize = 0;
-    std::vector<float> sumPoint(data[0][0].size(), 0.0f); // Initialize sum vector with zeros
+    vector<float> sumPoint(data[0][0].size(), 0.0f); // Initialize sum vector with zeros
     pointIndices.clear();
     pointIndices.resize(data.size());
 
     // Thread-local storage
     #pragma omp parallel
     {
-        std::vector<float> localSum(data[0][0].size(), 0.0f);
+        vector<float> localSum(data[0][0].size(), 0.0f);
         int localSize = 0;
-        std::vector<std::vector<int>> localIndices(data.size()); // Thread-local indices
+        vector<vector<int>> localIndices(data.size()); // Thread-local indices
 
         #pragma omp for nowait
         for (int classIdx = 0; classIdx < data.size(); classIdx++) {
@@ -268,7 +270,7 @@ void HyperBlock::find_avg_and_size(const std::vector<std::vector<std::vector<flo
     this->avgPoint = sumPoint;
 }
 
-void HyperBlock::tameBounds(const std::vector<std::vector<std::vector<float>>>& trainingData) {
+void HyperBlock::tameBounds(const vector<vector<vector<float>>>& trainingData) {
     // Ensure we are working with non-disjunctive bounds
     int numDims = minimums.size();
     int numPoints = pointIndices[classNum].size();
@@ -276,16 +278,16 @@ void HyperBlock::tameBounds(const std::vector<std::vector<std::vector<float>>>& 
     if (numPoints == 0) return;
 
     // Gather points in the block
-    std::vector<std::vector<float>> inBlockPoints(numPoints);
+    vector<vector<float>> inBlockPoints(numPoints);
     for (int i = 0; i < numPoints; i++) {
         int pointIdx = pointIndices[classNum][i];
         inBlockPoints[i] = trainingData[classNum][pointIdx];
     }
 
     // Compute dominance count for min (dominated by others)
-    std::vector<int> minDominanceCounts(numPoints, 0);
+    vector<int> minDominanceCounts(numPoints, 0);
     // Compute dominance count for max (dominates others)
-    std::vector<int> maxDominanceCounts(numPoints, 0);
+    vector<int> maxDominanceCounts(numPoints, 0);
 
     for (int i = 0; i < numPoints; i++) {
         for (int j = 0; j < numPoints; j++) {

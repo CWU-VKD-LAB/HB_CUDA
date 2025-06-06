@@ -1,15 +1,16 @@
 //
 // Created by asnyd on 3/20/2025.
 //
+//  This file includes various implementations of kNN methods, could be refactored to just interchange
+//  the distance metrics in most cases. These kNNs were used as fallback classifiers, aka, points which
+//  were not classified by the HBs would be sent here to be classified.
+//
 
 #include "Knn.h"
 #include <vector>
 #include <utility>
 #include <queue>
-#include <iostream>
 #include <cmath>
-#include <unordered_map>
-#include <omp.h>
 #include <algorithm>
 
 

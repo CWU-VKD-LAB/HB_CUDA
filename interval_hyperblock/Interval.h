@@ -1,5 +1,5 @@
 //
-// Created by asnyd on 3/21/2025.
+// Created by Austin Snyder on 3/21/2025.
 //
 
 #ifndef INTERVAL_H
@@ -16,7 +16,6 @@ struct Interval{
 
     Interval(int s, int st, int e, int a, int d) : size(s), start(st), end(e), attribute(a), dominantClass(d) {}
 };
-
 
 
 #endif //INTERVAL_H

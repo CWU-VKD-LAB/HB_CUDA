@@ -1,16 +1,10 @@
 //
-// Created by asnyd on 3/20/2025.
+// Created by Austin Snyder on 3/20/2025.
 //
-#include <iomanip>
-#include "PrintingUtil.h"
-#include <iostream>
-#include <string>
-#include <vector>
-#include <map>
-#include <limits>
-#include <numeric>
 
+#include "PrintingUtil.h"
 using namespace std;
+
 
 // Function to clear the console screen (cross-platform)
 void PrintingUtil::clearScreen() {
@@ -21,6 +15,7 @@ void PrintingUtil::clearScreen() {
 #endif
 }
 
+
 /**
  * Function to wait for user input before continuing.
  * Used in the command line interface.
@@ -30,6 +25,7 @@ void PrintingUtil::waitForEnter() {
     cin.ignore(numeric_limits<streamsize>::max(), '\n');
 }
 
+
 /**
  * This is a function to display the command line interface menu.
  *
@@ -37,33 +33,33 @@ void PrintingUtil::waitForEnter() {
  */
 void PrintingUtil::displayMainMenu() {
     clearScreen();
-    cout << "=== HyperBlock Classification System ===\n\n";
+    cout << "=== Hyperblock (HB) Classification System ===\n\n";
     cout << "1. Import training data.\n";
     cout << "2. Import testing data.\n";
     cout << "3. Save normalized training data.\n";
     cout << endl;
-    cout << "4. Import regular Hyperblocks.\n";
-    cout << "5. Export regular Hyperblocks.\n";
-    cout << "6. Generate Hyperblocks.\n";
-    cout << "7. Simplify Hyperblocks.\n";
-    cout << "8. Test Hyperblocks.\n";
-    cout << "9. Test 1-1 HyperBlocks.\n";
-    cout << "10. K Fold Cross Validation.\n";
+    cout << "4. Import regular HBs.\n";
+    cout << "5. Export regular HBs.\n";
+    cout << "6. Generate HBs.\n";
+    cout << "7. Simplify HBs.\n";
+    cout << "8. Test HBs.\n";
+    cout << "9. Test 1-1 HBs.\n";
+    cout << "10. K-Fold Cross Validation.\n";
     cout << endl;
-    cout << "11. Generate 1-1 Hyperblocks.\n";
-    cout << "12. Import 1-1 Hyperblocks.\n";
-    cout << "13. Export 1-1 Hyperblocks.\n";
-    cout << "14. K-Fold 1-1\n";
+    cout << "11. Generate 1-1 HBs.\n";
+    cout << "12. Import 1-1 HBs.\n";
+    cout << "13. Export 1-1 HBs.\n";
+    cout << "14. K-Fold on 1-1 HBs\n";
     cout << "15. Generate One To Rest Blocks and Save.\n";
     cout << endl;
 
     cout << "16. Find Best Parameters (Grid Search).\n";
     cout << "17. Generate Next Level HBs.\n";
-    cout << "18. K fold validation with Level N HBs.\n\n" << endl;
-    cout << "19. Quit\n\n";
-
-
+    cout << "18. K-Fold validation with Level N HBs.\n\n" << endl;
+    cout << "19. Generate and Test Precision Weighted HBs. (Experimental)";
+    cout << "20. Quit\n\n";
 }
+
 
 /**
  * This struct holds the performance metrics

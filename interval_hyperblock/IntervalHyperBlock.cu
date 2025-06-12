@@ -1,14 +1,11 @@
 //
-// Created by asnyd on 3/20/2025.
+// Created by Austin Snyder on 3/20/2025.
 //
-
 #include "IntervalHyperBlock.h"
-#include <algorithm>
 using namespace std;
 
 
-#define EPSILON 1e-6
-// comparing float helper
+#define EPSILON 1e-6 // comparing float helper
 
 static bool closeEnough(float a, float b) {
     return abs(a - b) < EPSILON;

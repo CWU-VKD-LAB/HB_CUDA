@@ -1,12 +1,13 @@
+// Created by Austin Snyder on 3/20/2025.
 
-// Created by asnyd on 3/20/2025.
 #pragma once
-#include <vector>
 #include "../hyperblock/HyperBlock.h"
 #include <cuda_runtime.h>
 #include "../data_utilities/DataUtil.h"
 #include "../hyperblock_generation/MergerHyperBlock.cuh"
 #include <algorithm>
+#include <vector>
+
 #ifndef SIMPLIFICATIONS_H
 #define SIMPLIFICATIONS_H
 class Simplifications {

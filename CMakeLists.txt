@@ -34,9 +34,7 @@ set(SOURCES
         ./hyperblock_generation/MergerHyperBlock.cu
         ./interval_hyperblock/IntervalHyperBlock.cu
         ./simplifications/Simplifications.cu
-
         ./hyperblock/HyperBlock.cpp
-        ./cuda_util/CudaUtil.cpp
         ./data_utilities/DataUtil.cpp
         ./knn/Knn.cpp
         ./screen_output/PrintingUtil.cpp

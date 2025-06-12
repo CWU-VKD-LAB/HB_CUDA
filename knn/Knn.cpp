@@ -1,5 +1,5 @@
 //
-// Created by asnyd on 3/20/2025.
+// Created by Austin Snyder on 3/20/2025.
 //
 //  This file includes various implementations of kNN methods, could be refactored to just interchange
 //  the distance metrics in most cases. These kNNs were used as fallback classifiers, aka, points which
@@ -7,12 +7,6 @@
 //
 
 #include "Knn.h"
-#include <vector>
-#include <utility>
-#include <queue>
-#include <cmath>
-#include <algorithm>
-
 
 constexpr float EPSILON = 1e-6f;
 

@@ -1,6 +1,5 @@
 #include "HyperBlock.h"
 
-#include "../data_utilities/StatStructs.h"
 using namespace std;
 
 // Constructor definition
@@ -118,10 +117,8 @@ void HyperBlock::setHBPrecisions(map<pair<int, int>, PointSummary> summaries, in
 
     // Go through all point summaries to find points that fell into this block
     for (const auto& entry : summaries) {
-        const auto& key = entry.first;
+        int actualClass = entry.first.first;
         const auto& pointSummary = entry.second;
-
-        int actualClass = key.first;
 
         // Check if this point fell into our block
         bool pointInThisBlock = false;

@@ -1,11 +1,9 @@
 //
 // Created by Ryan Gallagher on 5/5/25.
 //
-
 #ifndef CLASSIFICATIONTESTS_H
 #define CLASSIFICATIONTESTS_H
 
-using namespace std;
 #include <vector>
 #include <unordered_map>
 #include <map>
@@ -15,6 +13,7 @@ using namespace std;
 #include "../data_utilities/StatStructs.h"
 
 #include "../hyperblock/HyperBlock.h"
+using namespace std;
 
 class ClassificationTests {
 public:

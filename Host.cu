@@ -16,12 +16,6 @@
 #include <map>
 #include <cmath>
 #include <tuple>
-#include <tuple>
-#include <tuple>
-#include <tuple>
-#include <tuple>
-
-#include "./cuda_util/CudaUtil.h"
 #include "./hyperblock_generation/MergerHyperBlock.cuh"
 #include "./hyperblock/HyperBlock.h"
 #include "./interval_hyperblock/IntervalHyperBlock.h"
@@ -1076,16 +1070,35 @@ vector<vector<float>> calculateByClassPrecisionLost(const vector<vector<long>>& 
 
 
 /**
- * All we want from this function is the by class precision lost along with the by class HB Precision
- * @param trainingData
- * @param eachClassBestVectorIndex
- * @param hyperBlocks
+ * This function is a experimental one to test how weighting the votes of HBs by their performance
+ * on a validation set. At a high level what we do in this is:
+ *
+ * 1. Split the training dataset into "reducedTraining" and "validationData"
+ * 2. Generate HBs using the "reducedTraining" dataset.
+ * 3. Evaluate the HBs using the "validationData" as a testing set. Within this we build PointSummaries
+ *    which links every block index to the points from validation which fell inside the block. This allows
+ *    for metrics like precision to be kept. Specifically, each block stores, its precision AND the amount of precision
+ *    that each other class of points caused it to lose. The latter gives us a prediction of what the block might misclassify
+ *    as belonging to its own class. Ex. high loss of precision from class y, means this blocks might actually vote for a y.
+ *
+ * 4. We save the afforementioned stats, then evaluate the HBs on the TRUE TESTING dataset using the precision weighted voting.
+ * 5. Return the accuracy obtained.
+ *
+ *
+ * @param trainingData  The training dataset input by the user.
+ * @param eachClassBestVectorIndex Will be NUM_CLASSES long. Stores the best attribute to sort each class by during intervalHyper generation process.
+ *                                 basically the most separating attribute for the specific class.
+ * @param hyperBlocks              Empty Hyperblocks array, will be full when the function exits.
+ * @param testingData      The dataset to be used during the final testing phase of the precision weighted hbs.
+ * @param bestVectorsIndexes The order of attributes for each class. ex: {{0,1,2}, {2, 1, 0}} the attribute removal order
+ *                           when simplifications are run for class 1 would be 0,1,2. The second class would be 2,1,0
+ * @return  The accuracy, could be the stat struct if confusion matrix function is updated.
  */
-float getValidationInfo(vector<vector<vector<float>>>& trainingData,
-    vector<int> eachClassBestVectorIndex, vector<HyperBlock>& hyperBlocks,
-    vector<vector<vector<float>>>& testingData,
-    vector<vector<int>> bestVectorsIndexes
-    ) {
+float genAndRunPrecisionWeightedHBs(vector<vector<vector<float>>>& trainingData,
+                                    vector<int> eachClassBestVectorIndex, vector<HyperBlock>& hyperBlocks,
+                                    vector<vector<vector<float>>>& testingData,
+                                    vector<vector<int>> bestVectorsIndexes
+) {
 
     map<pair<int, int>, PointSummary> pointSummaries;
 
@@ -1096,7 +1109,7 @@ float getValidationInfo(vector<vector<vector<float>>>& trainingData,
     // Build the hbs
     IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
     Simplifications::runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
-//    cout << "1" << endl;
+
     // Test the validation HBS, returns confusion matrix, vector<vector<long>>
     vector<vector<vector<float>>> stillUnclassified(NUM_CLASSES);
     vector<vector<long>> confusionMatrix = ClassificationTests::buildConfusionMatrix(hyperBlocks, trainingData, validationData, ClassificationTests::HYPERBLOCKS,stillUnclassified , NUM_CLASSES, pointSummaries);
@@ -1105,22 +1118,10 @@ float getValidationInfo(vector<vector<vector<float>>>& trainingData,
         hb.setHBPrecisions(pointSummaries, NUM_CLASSES);
     }
 
-    /*
-    for(auto& hb : hyperBlocks) {
-        cout << "Lost Precision Scores: " << endl;
-        for(const auto& a : hb.precisionLostByClass) {
-            cout << a << ",";
-        }
-
-        cout << endl;
-        cout << "Overall Precision of HB: " << hb.blockPrecision << endl;
-    }
-    */
     // Go through and make a non-distinct confusion matrix.
     std::vector<std::vector<long>> ultraConfusionMatrix(NUM_CLASSES, std::vector<long>(NUM_CLASSES, 0));
 
     for (const auto& entry : pointSummaries) {
-        const auto& key = entry.first;
         const PointSummary& summary = entry.second;
         int trueClass = summary.classIdx;
 
@@ -1194,7 +1195,7 @@ vector<float> precisionKFold(vector<vector<vector<float>>> &dataset, int nearest
 
         vector<HyperBlock> hyperBlocks;
 
-        acc += getValidationInfo(trainingData, eachClassBestVectorIndex, hyperBlocks, testData, bestVectorsIndexes);
+        acc += genAndRunPrecisionWeightedHBs(trainingData, eachClassBestVectorIndex, hyperBlocks, testData, bestVectorsIndexes);
 
         int clauseCount = 0;
         for (const auto &hb : hyperBlocks) {
@@ -1355,7 +1356,7 @@ void runInteractive() {
             case 4: { // IMPORT EXISTING HYPERBLOCKS
                 cout << "Enter existing hyperblocks file name: " << endl;
                 getline(cin, hyperBlocksImportFileName);
-                hyperBlocks = DataUtil::loadBasicHBsFromCSV(hyperBlocksImportFileName);
+                hyperBlocks = DataUtil::loadBasicHBsFromBinary(hyperBlocksImportFileName);
 
                 cout << "HyperBlocks imported from file " << hyperBlocksImportFileName << " successfully" << endl;
 
@@ -1370,7 +1371,7 @@ void runInteractive() {
             case 5: { // EXPORT HYPERBLOCKS
                 cout << "Enter the file to save HyperBlocks to: " << endl;
                 getline(cin, hyperBlocksExportFileName);
-                DataUtil::saveBasicHBsToCSV(hyperBlocks, hyperBlocksExportFileName, FIELD_LENGTH);
+                DataUtil::saveBasicHBsToBinary(hyperBlocks, hyperBlocksExportFileName, FIELD_LENGTH);
                 break;
             }
             case 6: { // GENERATE NEW HYPERBLOCKS
@@ -1386,8 +1387,7 @@ void runInteractive() {
                 PrintingUtil::waitForEnter();
                 break;
             }
-            case 7: {
-                // SIMPLIFY HYPERBLOCKS
+            case 7: {       // SIMPLIFY HYPERBLOCKS
                 vector<int> result = Simplifications::runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
                 int totalPoints = 0;
 
@@ -1399,28 +1399,27 @@ void runInteractive() {
                 PrintingUtil::waitForEnter();
                 break;
             }
-            case 8: { // TEST HYPERBLOCKS ON DATASET
-                cout << "Testing hyperblocks on testing dataset" << endl;
+            case 8: { // TEST HBs ON CURRENT TESTING DATASET
+                cout << "Testing HBs on testing dataset" << endl;
                 map<pair<int, int>, PointSummary> pointSummaries;
                 testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData, pointSummaries);
                 PrintingUtil::waitForEnter();
                 break;
             }
-            case 9: {
+            case 9: {   // TEST 1-1 HBs ON CURRENT TESTING DATASET
                 evaluateOneToOneHyperBlocks(oneToOneBlocks, testData, classPairsOut, NUM_CLASSES);
                 PrintingUtil::waitForEnter();
                 break;
             }
-            case 10: {
-                // just needed because we have to pass in something
-                vector<pair<int,int>> classPairs{};
+            case 10: {  // RUN K-FOLD CROSS VALIDATION
+                vector<pair<int,int>> classPairs{}; // just needed because we have to pass in something
 
                 // run the k fold, taking the user input for number of k. using default values for removal count, k and whatnot
                 runKFold(trainingData, classPairs, true, true);  //precisionKFold(trainingData);
                 PrintingUtil::waitForEnter();
                 break;
             }
-            case 11: {
+            case 11: {  // GENERATE 1-1 HBs
                 if (trainingData.empty()) {
                     cout << "\nError: Please import training data first." << endl;
                     PrintingUtil::waitForEnter();
@@ -1433,8 +1432,7 @@ void runInteractive() {
                 PrintingUtil::waitForEnter();
                 break;
             }
-            case 12: {
-                // Import 1-1 Hyperblocks
+            case 12: {    // IMPORT 1-1 HBs
                 cout << "Enter 1-1 Hyperblocks file name: " << endl;
                 getline(cin, hyperBlocksImportFileName);
                 oneToOneBlocks = DataUtil::loadOneToOneHBsFromBinary(hyperBlocksImportFileName, classPairsOut);
@@ -1443,27 +1441,24 @@ void runInteractive() {
                 PrintingUtil::waitForEnter();
                 break;
             }
-            case 13: {
-                // Export 1-1 Hyperblocks
-                cout << "Enter the file to save HyperBlocks to: " << endl;
+            case 13: { // EXPORT 1-1 HBs
+                cout << "Enter the file to save Hyperblocks to: " << endl;
                 getline(cin, hyperBlocksExportFileName);
                 DataUtil::saveOneToOneHBsToBinary(oneToOneBlocks, hyperBlocksExportFileName);
                 break;
             }
-            case 14: {
+            case 14: {  // RUN K-FOLD USING THE 1-1 HBs
+                vector<pair<int,int>> classPairs{}; // need to make up the class pairings
 
-                // need to make up the class pairings
-                vector<pair<int,int>> classPairs{};
-                // RUN K FOLD FOR THE ONE TO ONE TYPE BLOCKS.
                 runKFold(trainingData, classPairs, false, true);
                 PrintingUtil::waitForEnter();
                 break;
             }
-            case 15: {
-
+            case 15: {  // GENERATE 1-Rest HBs
                 // POINT BASED ORDER
                 oneToRestBlocks.clear();
-                // Train the oneToSome Blocks
+
+
                 auto start = chrono::high_resolution_clock::now();
                 oneToRestBlocks = oneToRestHyper(trainingData, eachClassBestVectorIndex);
                 auto end = chrono::high_resolution_clock::now();
@@ -1533,11 +1528,6 @@ void runInteractive() {
                 break;
             }
             case 17: {
-
-                // MERGE FIX: This was going to be in 17, but level N hbs displaces it
-                //getValidationInfo(trainingData, eachClassBestVectorIndex, hyperBlocks , testData, bestVectorsIndexes);
-                //
-                
                 if (trainingData.empty()) {
                     cout << "\nError: Please import training data first." << endl;
                     PrintingUtil::waitForEnter();
@@ -1547,7 +1537,7 @@ void runInteractive() {
                     hyperBlocks = move(newBlocks);
                 }
                 static int levelN = 1;
-                cout << "Finished Generating level " << ++levelN << " level HyperBlocks" << endl;
+                cout << "Finished Generating level " << ++levelN << " HBs" << endl;
                 PrintingUtil::waitForEnter();
                 break;
             }
@@ -1558,6 +1548,12 @@ void runInteractive() {
                 break;
             }
             case 19: {
+                // MERGE FIX: This was going to be in 17, but level N hbs displaces it
+                genAndRunPrecisionWeightedHBs(trainingData, eachClassBestVectorIndex, hyperBlocks , testData, bestVectorsIndexes);
+                PrintingUtil::waitForEnter();
+                break;
+            }
+            case 20: {
                 running = false;
                 break;
             }

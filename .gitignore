@@ -5,6 +5,12 @@ a.exe
 .vscode/
 a.exp
 a.lib
-DATASETS
+datasets
 a.pdb
 vc140.pdb
+build
+Debug
+cmake-build-debug-visual-studio
+mnist2300Blocks.csv
+pruned_mnist_blocks.csv
+mini_mnist_blocks.csv

@@ -1,6 +1,8 @@
 #pragma once
 #include <cuda_runtime.h>
 #include "../hyperblock/HyperBlock.h"
+#include <stdio.h>
+#include <limits>
 
 #ifndef HyperBlockCuda_CUH
 #define HyperBlockCuda_CUH

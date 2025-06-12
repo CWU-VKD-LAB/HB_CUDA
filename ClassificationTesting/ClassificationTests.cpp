@@ -1,9 +1,8 @@
 //
 // Created by Ryan Gallagher on 5/5/25.
 //
-
 #include "ClassificationTests.h"
-
+using namespace std;
 
 /*
  * takes in our hyperblocks by reference. takes in the points we need to classify. and takes in a mode, as well as a reference to another container for points.

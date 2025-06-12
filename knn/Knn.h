@@ -6,9 +6,19 @@
 #ifndef KNN_H
 #define KNN_H
 
+/* Headers needed. It shows them as unused, but they ARE used in Knn.cpp */
 #include <vector>
 #include "../hyperblock/HyperBlock.h"
 #include "../interval_hyperblock/DataAttr.h"
+#include "../interval_hyperblock/IntervalHyperBlock.h"
+#include <utility>
+#include <queue>
+#include <cmath>
+#include <thread>
+#include <algorithm>
+#include <numeric>
+#include <random>
+
 
 class Knn {
     public:

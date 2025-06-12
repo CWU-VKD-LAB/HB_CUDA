@@ -8,11 +8,8 @@
 #include <vector>
 #include <future>
 #include <algorithm>
-#include <csignal>
 #include <iostream>
-#include <map>
 #include <ostream>
-#include <unordered_set>
 #include <utility>
 #include <thread>
 #include <numeric>

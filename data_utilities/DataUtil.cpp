@@ -1,9 +1,7 @@
 //
-// Created by asnyd on 3/20/2025.
+// Created by Austin Snyder on 3/20/2025.
 //
 #include "DataUtil.h"
-#include <numeric>
-
 extern int FIELD_LENGTH;
 extern int NUM_CLASSES;
 

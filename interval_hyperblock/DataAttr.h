@@ -1,7 +1,6 @@
 //
-// Created by asnyd on 3/21/2025.
+// Created by Austin Snyder on 3/21/2025.
 //
-
 #ifndef DATAATTR_H
 #define DATAATTR_H
 

@@ -1,7 +1,6 @@
 //
-// Created by asnyd on 5/5/2025.
+// Created by Austin Snyder on 5/5/2025.
 //
-
 #ifndef STATSTRUCTS_H
 #define STATSTRUCTS_H
 #include <map>
@@ -11,7 +10,6 @@
 #include <iostream>
 
 // MOST OF THIS IS JUST FOR DEBUGGING OR FIGURING OUT WHY ACCURACY IS GOOD (OR NOT). NOT MISSION CRITICAL STUFF, JUST DEBUGS TO DETERMINE WHERE MISCLASSIFICATION IS FROM BASICALLY.
-
 struct BlockInfo {
     int blockClass;
     int blockIdx;
@@ -24,19 +22,19 @@ struct PointSummary {
     int classIdx;
     int pointIdx;
     int predictedIdx;         // THE CLASS IDX IT WAS PREDICTED AS OVERALL!!!!
-    vector<BlockInfo> blockHits;
+    std::vector<BlockInfo> blockHits;
 };
 
-inline void printPointSummariesToCSV(const map<pair<int, int>, PointSummary>& pointSummaries, const string& filename) {
-    ofstream file(filename);
+inline void printPointSummariesToCSV(const std::map<std::pair<int, int>, PointSummary>& pointSummaries, const std::string& filename) {
+    std::ofstream file(filename);
     if (!file.is_open()) {
-        cerr << "Error opening file: " << filename << endl;
+        std::cerr << "Error opening file: " << filename << std::endl;
         return;
     }
 
     file << "classIdx,pointIdx,predIdx,blockClassIdx,blockIdx,blockSize,blockDensity\n";
 
-    map<pair<int, int>, PointSummary>::const_iterator it;
+    std::map<std::pair<int, int>, PointSummary>::const_iterator it;
     for (it = pointSummaries.begin(); it != pointSummaries.end(); ++it) {
         const PointSummary& summary = it->second;
         for (size_t i = 0; i < summary.blockHits.size(); ++i) {

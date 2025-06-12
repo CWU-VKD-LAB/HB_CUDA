@@ -1,10 +1,4 @@
 #include "MergerHyperBlock.cuh"
-#include <cuda_runtime.h>
-#include <stdio.h>
-#include <limits>
-
-
-
 // Define a macro to compare float4's for equality.
 #define COMPARE_FLOAT4(a, b) ( (((a).x == (b).x) && ((a).y == (b).y) && ((a).z == (b).z) && ((a).w == (b).w)) ? 0 : 1 )
 // Define simple min/max macros for scalar floats.

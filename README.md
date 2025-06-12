@@ -64,7 +64,7 @@ This section is for users who prefer to compile the program manually instead of 
 
 - **Compile**:
 ```bash
-nvcc -Xcompiler /openmp -o a.exe ./Host.cu ./hyperblock/HyperBlock.cpp ./hyperblock_generation/MergerHyperBlock.cu ./cuda_util/CudaUtil.cpp ./data_utilities/DataUtil.cpp ./interval_hyperblock/IntervalHyperBlock.cu ./knn/Knn.cpp ./screen_output/PrintingUtil.cpp ./simplifications/Simplifications.cu ./ClassificationTesting/ClassificationTests.cpp -g -G -O3
+nvcc -Xcompiler /openmp -o a.exe ./Host.cu ./hyperblock/HyperBlock.cpp ./hyperblock_generation/MergerHyperBlock.cu ./data_utilities/DataUtil.cpp ./interval_hyperblock/IntervalHyperBlock.cu ./knn/Knn.cpp ./screen_output/PrintingUtil.cpp ./simplifications/Simplifications.cu ./ClassificationTesting/ClassificationTests.cpp -g -G -O3
 ```
 
 - **Run**:
@@ -76,7 +76,7 @@ a.exe
 
 - **Compile**:
 ```bash
-nvcc -Xcompiler -fopenmp -o a ./Host.cu ./hyperblock/HyperBlock.cpp ./hyperblock_generation/MergerHyperBlock.cu ./cuda_util/CudaUtil.cpp ./data_utilities/DataUtil.cpp ./interval_hyperblock/IntervalHyperBlock.cu ./knn/Knn.cpp ./screen_output/PrintingUtil.cpp ./simplifications/Simplifications.cu ./ClassificationTesting/ClassificationTests.cpp -g -G -O3
+nvcc -Xcompiler -fopenmp -o a ./Host.cu ./hyperblock/HyperBlock.cpp ./hyperblock_generation/MergerHyperBlock.cu ./data_utilities/DataUtil.cpp ./interval_hyperblock/IntervalHyperBlock.cu ./knn/Knn.cpp ./screen_output/PrintingUtil.cpp ./simplifications/Simplifications.cu ./ClassificationTesting/ClassificationTests.cpp -g -G -O3
 ```
 
 - **Run**:

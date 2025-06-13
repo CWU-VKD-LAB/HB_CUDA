@@ -177,7 +177,6 @@ HBs can be exported and imported in two formats:
 
 
 ## Program Usage
-
 ### Getting Started (Interactive Mode)
 
 If no arguments are passed (argc < 2), the program launches into an interactive mode with a menu-driven interface. You can import datasets, normalize data, generate or simplify HBs, test on new data, or export results.
@@ -189,7 +188,7 @@ You will see a numbered menu with options like:
 
 - Import training/testing datasets
 - Choose normalization (min-max, fixed max, or none)
-- Generate new HyperBlocks
+- Generate new HBs
 - Run test accuracy on a dataset
 - Export/load precomputed blocks
 - Perform K-Fold cross validation
@@ -258,8 +257,72 @@ This mode is used for batch experiments or headless execution on a remote machin
 ---
 ## Project Structure
 
+### `Host.cu`
+This is the main entry point of the project. It contains both the `runInteractive` and `runAsync` functions for launching the program. Additionally, it includes utility methods such as `kFold` for various HB modes. While originally intended to only contain entry logic, it currently includes some miscellaneous logic that may later be refactored into dedicated files.
+
+### `CMakeLists.txt`
+Defines the build process. CMake simplifies compilation of large projects by handling dependencies and file structures. If you add new source or header files, make sure to update this script to ensure the build includes them.
+
+### `datasets/`
+Contains training, testing, and validation datasets. You should place all input `.csv` or preprocessed data files in this directory.
+
+### `classification_testing/`
+Contains modules that test and evaluate classifier performance. This includes building confusion matrices, collecting per-point classification metadata, and supporting fallback classifier logic (e.g., precision-weighted voting).
+
+### `data_utilities/`
+Houses general-purpose utilities such as normalization, k-fold splitting, and input/output helpers. These functions support the preprocessing and organization of training/testing data.
+
+### `hyperblock/`
+Defines the `Hyperblock` data structure and its associated logic. This includes `insideHB` checks, precision calculations, and metadata relevant for classification.
+
+### `hyperblock_generation/`
+Contains the CUDA-accelerated logic for generating and simplifying HBs. This includes:
+
+- `mergerHyperBlocks`: CUDA kernel that attempts to merge compatible HBs by expanding their bounds and verifying against opposing class points. Uses float4 vectorization and cooperative evaluation for efficiency.
+- `rearrangeSeedQueue`: Reorders the queue of seed blocks after merging, pushing merged blocks to the back to mimic Lincoln Hubers initial algorithm. (May not need to do this, it is an artifact at this point.)
+- `assignPointsToBlocks` and `findBetterBlocks`: Functions that assign points to the most appropriate HB, favoring largest blocks for ambiguous cases.
+- `removeUselessAttributes`: Prunes dimensions from blocks by testing whether a full-range attribute ([0,1]) would introduce classification errors. Supports disjunctive (multi-interval) representations.
 
 
+### `interval_hyperblock/`
+
+This includes the first step of the HB generation process. Essentially this file handles the generation of interval HBs. 
+These are made by sorting each class by its "best" or "most separating" attribute, then finding PURE intervals in which only that
+class exists. Ex. class 5 attribute 1, the interval [0, .5] only contains points from class 5, then this would be made into 
+a pure interval HB. For more information: https://arxiv.org/abs/2506.06986.
+
+
+### `knn/`
+Implements several fallback k-Nearest Neighbor algorithms. Includes:
+- pure k-NN on raw data
+- HB-guided k-NN
+- precision-weighted voting
+- threshold-based classification  
+  These are used when HBs alone cannot classify a point.
+
+### `lda/`
+Provides a multiclass Linear Discriminant Analysis (LDA) implementation. This file is currently only used for trying to find
+a more optimal removal order for removeUselessAttributes/removeRedundantAttributes.
+
+### `screen_output/`
+Provides utilities for displaying results and interacting with the command-line interface. Includes:
+
+- `displayMainMenu`: Prints the interactive menu used in `Host.cu`.
+- `clearScreen` and `waitForEnter`: Cross-platform terminal controls.
+- `printConfusionMatrix`: Displays the confusion matrix and calculates per-class and overall performance metrics (accuracy, precision, recall, F1) via `computePerformanceMetrics`.
+- `printDataset`: Outputs full dataset contents for debugging.
+
+Used for evaluation output, debugging, and user-driven menu interaction.
+
+### `simplifications/`
+Implements iterative HB simplification routines. Includes:
+
+- `removeUselessBlocks`: CUDA-accelerated routine that eliminates redundant blocks based on point coverage frequency.
+- `removeUselessAttr`: Identifies and removes attributes from blocks if they do not contribute to class separation.
+- `runSimplifications`: Combines both techniques and applies them until no further block or attribute pruning is possible.
+
+We detail some simplification algorithms in this paper: https://arxiv.org/abs/2506.06986. 
+  
 ## Contact Information & Credits
 
 This project was developed at the Central Washington University VKD Lab under the mentorship of Dr. Boris Kovalerchuk, and is based on the DV2.0 Hyperblocks model.

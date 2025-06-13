@@ -1,10 +1,26 @@
-# Hyperblocks
+## Table of Contents
 
-**Hyperblocks** is a standalone C++/CUDA implementation of the DV2.0 Hyperblocks model, originally developed in Java at the CWU VKD Lab. It is designed to be high-performing, explainable, and cross-platform, with GPU acceleration and parallelism support.
+- [What Are Hyperblocks?](#what-are-hyperblocks)
+- [Prerequisites](#prerequisites)
+- [Build Instructions](#build-instructions)
+- [Run Instructions](#run-instructions)
+- [Command Line Compiling Instructions](#command-line-compiling-instructions)
+- [Dataset Format](#dataset-format)
+- [Program Usage](#program-usage)
+- [Output](#output)
+- [Project Structure](#project-structure)
+- [Developer Documentation](#developer-documentation)
+- [Contact Information & Credits](#contact-information--credits)
 
-##  What Are Hyperblocks?
 
-Hyperblocks are an interpretable, rule-based machine learning model. Each Hyperblock defines axis-aligned bounds (min/max) for each attribute in the dataset, forming a hyper-rectangle in feature space.
+# Hyperblocks (HBs)
+
+This repository, is a standalone C++/CUDA implementation of the DV2.0 Hyperblocks model, originally developed in Java at the CWU VKD Lab. It is designed to be high-performing, explainable, and cross-platform, with GPU acceleration and parallelism support.
+
+---
+##  What are HBs?
+
+Hyperblocks are an interpretable, rule-based machine learning model. Each hyperblock defines axis-aligned bounds (min/max) for each attribute in the dataset, forming a hyper-rectangle in feature space.
 
 This structure supports:
 - Transparent decision-making
@@ -12,6 +28,7 @@ This structure supports:
 - Rule simplification and fusion
 - Compatibility with Subject-Matter Expert (SME) analysis
 
+---
 ## Prerequisites
 
 To build this project, you need:
@@ -24,7 +41,7 @@ To build this project, you need:
 To run this project, you need:
 
 - CUDA compatible GPU
-
+---
 ##  Build Instructions
 
 Clone the repository and run the following:
@@ -41,9 +58,7 @@ cmake ..
 # Step 3: Compile the project
 cmake --build . --config Debug
 ```
-
-
-
+---
 ##  Run Instructions
 
 After building with CMake (inside the `build/` directory), you can run the program as follows:
@@ -54,8 +69,7 @@ Run the executable from the project root:
 cd ..
 Hyperblocks.exe
 ```
-
-
+---
 ##  Command Line Compiling Instructions (Optional)
 
 This section is for users who prefer to compile the program manually instead of using CMake.
@@ -83,3 +97,99 @@ nvcc -Xcompiler -fopenmp -o a ./Host.cu ./hyperblock/HyperBlock.cpp ./hyperblock
 ```bash
 ./a
 ```
+
+
+---
+
+
+## Dataset Formatting
+
+This section is split into:
+- Dataset importing / exporting
+- Hyperblock importing / exporting
+
+### Training and Testing Datasets
+
+Datasets used for training, testing, or classification must be in **CSV format**. The system expects:
+
+- Each row corresponds to one data sample (point).
+- Each column up to the last represents **normalized float features** in the range [0, 1].
+- The **last column** must be the **class label** as an integer (e.g., 0, 1, 2...).
+
+> ⚠️ If your dataset does **not** have a header row, **you must manually remove the first line**. The parser currently does **not differentiate** and will treat the first row as a header, silently discarding it.
+
+
+
+Datasets should be placed in the `datasets/` directory. You can load them via command-line or code using utilities like `DataUtil::importData`.
+
+---
+
+### Hyperblock Save Files
+
+HBs can be exported and imported in two formats:
+
+#### 1. **Binary Format (.bin)**
+
+- Uses `DataUtil::saveBasicHBsToBinary(...)` and `DataUtil::loadBasicHBsFromBinary(...)`
+- Preserves full floating-point precision
+- Best for experiments, training reuse, and deployment
+- Format: 
+  [int num_blocks][int num_attributes]
+  [float min1, ..., minN]
+  [float max1, ..., maxN]
+  [int classNum]
+  ... repeated for each block
+
+
+#### 2. **CSV Format (.csv)**
+
+- Uses `DataUtil::saveBasicHBsToCSV(...)` and `DataUtil::loadBasicHBsFromCSV(...)`
+- Human-readable but **not precision-safe**
+- When reloaded, can lead to dropped coverage due to floating point rounding
+- Format (one row per block):
+  min1,...,minN,max1,...,maxN,class
+
+
+#### ⚠️ Important Notes:
+- The loader assumes that the saved blocks match the **dimensionality** of your current dataset. No consistency check is enforced in code.
+- If the Hyperblock save file and dataset do not align in number of attributes, the program **may silently fail or misclassify**.
+- CSV format **should only be used for demos or visual inspection**, not for preserving exact decision boundaries.
+
+---
+
+### Summary Table
+
+| Format | Precision | Human-Readable | Recommended Use |
+|--------|-----------|----------------|-----------------|
+| `.bin` | Full      | No             | All serious use |
+| `.csv` | Lossy     | Yes            | Debug / demos   |
+
+---
+
+### Utility Functions Used
+
+| Purpose         | Function Name                            |
+|-----------------|-------------------------------------------|
+| Import data     | `DataUtil::importData(...)`               |
+| Save HBs (CSV)  | `DataUtil::saveBasicHBsToCSV(...)`        |
+| Save HBs (Bin)  | `DataUtil::saveBasicHBsToBinary(...)`     |
+| Load HBs (CSV)  | `DataUtil::loadBasicHBsFromCSV(...)`      |
+| Load HBs (Bin)  | `DataUtil::loadBasicHBsFromBinary(...)`   |
+
+
+
+## Contact Information & Credits
+
+This project was developed at the Central Washington University VKD Lab under the mentorship of Dr. Boris Kovalerchuk, and is based on the DV2.0 Hyperblocks model.
+
+### Contributors
+
+---
+
+- **Austin Snyder**  
+  Email: [austin.snyder@cwu.edu](mailto:austin.snyder@cwu.edu)  
+  LinkedIn: [linkedin.com/in/austinsnyder411](https://www.linkedin.com/in/austinsnyder411/)
+
+- **Ryan Gallagher**  
+  Email: [ryan.gallagher@cwu.edu](mailto:ryan.gallagher@cwu.edu)  
+  LinkedIn: [linkedin.com/in/ryan-gallagher-0b2095285](https://www.linkedin.com/in/ryan-gallagher-0b2095285/)

@@ -212,7 +212,7 @@ Note: The main program loops are in Host.cu.
   - It is automatically aligned to correct class labels mapping via DataUtil::reorderTestingDataset(...)
 
 3. Generate or load HBs
-  - Case 6 generates Interval HBs
+  - Case 6 generates traditional HBs
   - Case 4 loads from a .bin file
   - Case 11 generates 1-vs-1 HBs
   - Case 15 generates 1-vs-rest HBs

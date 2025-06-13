@@ -315,7 +315,7 @@ Provides utilities for displaying results and interacting with the command-line 
 Used for evaluation output, debugging, and user-driven menu interaction.
 
 ### `simplifications/`
-Implements iterative HyperBlock simplification routines. Includes:
+Implements iterative HB simplification routines. Includes:
 
 - `removeUselessBlocks`: CUDA-accelerated routine that eliminates redundant blocks based on point coverage frequency.
 - `removeUselessAttr`: Identifies and removes attributes from blocks if they do not contribute to class separation.

@@ -977,7 +977,7 @@ vector<vector<vector<vector<float>>>> DataUtil::splitDataset(const vector<vector
  * @param FIELD_LENGTH The number of attributes in the dataset.
  * @return The reduced size training dataset.
  */
-std::vector<std::vector<std::vector<float>>> condensedNearestNeighbors(
+std::vector<std::vector<std::vector<float>>> DataUtil::condensedNearestNeighbors(
     const std::vector<std::vector<std::vector<float>>>& dataset,
     int FIELD_LENGTH
 ) {

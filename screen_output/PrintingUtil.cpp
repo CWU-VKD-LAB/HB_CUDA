@@ -181,6 +181,15 @@ float PrintingUtil::printConfusionMatrix(vector<vector<long>>& confusionMatrix, 
     }
     cout << endl;
 
+    // Print confusion matrix rows
+    for (int i = 0; i < NUM_CLASSES; i++) {
+        cout << setw(maxWidth) << CLASS_MAP_INT[i] << " |";
+        for (int j = 0; j < NUM_CLASSES; j++) {
+            cout << setw(maxWidth) << confusionMatrix[i][j] << " |";
+        }
+        cout << endl;
+    }
+
     // Go through and print the "by class" metrics.
     cout << "=== Class Accuracies ===" << endl;
     for(int i = 0; i < confusionMatrix.size(); i++) cout << "Class " << CLASS_MAP_INT[i] << ": " << metrics.byClassAccuracy[i] << endl;

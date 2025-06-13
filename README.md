@@ -7,9 +7,7 @@
 - [Command Line Compiling Instructions](#command-line-compiling-instructions)
 - [Dataset Format](#dataset-format)
 - [Program Usage](#program-usage)
-- [Output](#output)
 - [Project Structure](#project-structure)
-- [Developer Documentation](#developer-documentation)
 - [Contact Information & Credits](#contact-information--credits)
 
 
@@ -178,6 +176,90 @@ HBs can be exported and imported in two formats:
 
 
 
+## Program Usage
+
+### Getting Started (Interactive Mode)
+
+If no arguments are passed (argc < 2), the program launches into an interactive mode with a menu-driven interface. You can import datasets, normalize data, generate or simplify HBs, test on new data, or export results.
+
+Launch the program with:
+./Hyperblocks
+
+You will see a numbered menu with options like:
+
+- Import training/testing datasets
+- Choose normalization (min-max, fixed max, or none)
+- Generate new HyperBlocks
+- Run test accuracy on a dataset
+- Export/load precomputed blocks
+- Perform K-Fold cross validation
+- Run precision-weighted or 1-vs-1 classifiers
+
+Note: The main program loops are in Host.cu. 
+
+---
+
+### Basic Workflow
+
+1. Import a training dataset
+  - Choose from available files in the datasets/ folder
+  - Select a normalization method (min-max or fixed-scale)
+
+2. Import a testing dataset
+  - This can be normalized using training bounds or left raw
+  - It is automatically aligned to correct class labels mapping via DataUtil::reorderTestingDataset(...)
+
+3. Generate or load HBs
+  - Case 6 generates Interval HBs
+  - Case 4 loads from a .bin file
+  - Case 11 generates 1-vs-1 HBs
+  - Case 15 generates 1-vs-rest HBs
+
+4. Simplify and save results
+  - Case 7 runs simplification methods
+  - Case 5 and 13 save .bin files of generated blocks
+
+5. Run evaluation
+  - Case 8 runs a test on the test set
+  - Case 10 and 14 run cross-validation
+  - Case 16–19 run precision-weighted evaluation or level-N experiments
+
+---
+
+### Running on CWU Lab Machines (SAMU140)
+
+The lab computers in SAMU140 are equipped with NVIDIA RTX 4090 GPUs and fast CPUs, which we used for large datasets. (e.g., full MNIST runs).
+
+Recommended setup:
+
+1. Pre-compile the program on your own machine.
+2. Load the following onto a flash drive:
+  - The Hyperblocks.exe executable
+  - Any datasets you want to run (e.g., MNIST .csv training/test sets)
+3. On the lab machine:
+  - Drag Hyperblocks.exe onto the desktop
+  - Open a terminal or PowerShell window
+  - Run the program directly:  
+    ./Hyperblocks.exe
+  - Or specify a class argument (for async mode):  
+    ./Hyperblocks.exe 0
+
+This will run the system using class 0 as the focus (for async CLI workflows).
+
+---
+
+### Async Mode (Command-line)
+
+If you launch the program with command-line arguments, it will run in non-interactive asynchronous mode:
+./Hyperblocks.exe <classIndex>
+
+This mode is used for batch experiments or headless execution on a remote machine or benchmark station.
+
+---
+## Project Structure
+
+
+
 ## Contact Information & Credits
 
 This project was developed at the Central Washington University VKD Lab under the mentorship of Dr. Boris Kovalerchuk, and is based on the DV2.0 Hyperblocks model.
@@ -187,9 +269,11 @@ This project was developed at the Central Washington University VKD Lab under th
 ---
 
 - **Austin Snyder**  
-  Email: [austin.snyder@cwu.edu](mailto:austin.snyder@cwu.edu)  
-  LinkedIn: [linkedin.com/in/austinsnyder411](https://www.linkedin.com/in/austinsnyder411/)
+  - School email: [austin.snyder@cwu.edu](mailto:austin.snyder@cwu.edu)
+  - Personal email: [austin.w.snyder@outlook.com](mailto:austin.w.snyder@outlook.com)
+  - LinkedIn: [linkedin.com/in/austinsnyder411](https://www.linkedin.com/in/austinsnyder411/)
+  - Discord: mxstic.  
 
 - **Ryan Gallagher**  
-  Email: [ryan.gallagher@cwu.edu](mailto:ryan.gallagher@cwu.edu)  
-  LinkedIn: [linkedin.com/in/ryan-gallagher-0b2095285](https://www.linkedin.com/in/ryan-gallagher-0b2095285/)
+  - Email: [ryan.gallagher@cwu.edu](mailto:ryan.gallagher@cwu.edu)  
+  - LinkedIn: [linkedin.com/in/ryan-gallagher-0b2095285](https://www.linkedin.com/in/ryan-gallagher-0b2095285/)

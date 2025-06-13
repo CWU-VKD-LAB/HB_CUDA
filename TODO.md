@@ -67,3 +67,13 @@ This may generate many times faster. Consider the sorted columns as if we have r
 - b.) once we have made this list using all columns of the dataset, we may have a list like p3, p6, p8, p10. we know that we can expand our bounds up to the point where we would let one of those points in.
             - for example, we may find point 10 in our bounds for attribute 3. we may find that we can expand our x1 from x1min[0.4] to x1min[0.3] before we let in other points.
         * this makes it a bit easier to find a "more optimal" expansion. and then we may run the merging algorithm after this portion too even. 
+
+## 8.) FIX THE IMPORTING OF TEST DATA BRICKING IF THERE HAS ALREADY BEEN A SET IMPORTED 
+Essentially, if you import Iris.csv, then try to change to like diabetes.csv, it will crash. This is likely due to 
+mismatch in the training data vector size, so its just a simple out of bounds error. However, you will also need to reset the 
+things such as class_map_int
+
+## 9.) Find methods that allow us to reduce the number of training points without hurting the classification accuracy.
+Essentially some method SIMILAR to Condensed Nearest Neighbors, but adapted to respect the HB structure. CNN currently does 
+not do well due to the fact that it picks up points that are on the boundaries, which are important for methods like KNN and even very helpful.
+However, when we do this with HBs it can cause ONLY the boundary areas to be represented, meaning we may not make any blocks if they are all noisy regions. 

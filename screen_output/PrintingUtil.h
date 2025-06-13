@@ -8,6 +8,7 @@
 #include <map>
 #include <limits>
 #include <iomanip>
+#include <numeric>
 
 #ifndef PRINTINGUTIL_H
 #define PRINTINGUTIL_H

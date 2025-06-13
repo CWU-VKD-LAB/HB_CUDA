@@ -961,3 +961,92 @@ vector<vector<vector<vector<float>>>> DataUtil::splitDataset(const vector<vector
 
     return folds;
 }
+
+/**
+ * This is a Condensed Nearest Neighbors implementation CNN. Essentially it will
+ * allow us to reduce the number of points in a dataset like MNIST by building a representative set.
+ *
+ * It is being tested because it preserves decision boundaries for 1-Nearest Neighbors, and might be good for HB
+ * generation speed ups. This also comes with a risk though of overfitting to the training data, so if used in the future please
+ * read more about CNN.
+ *
+ * The following is a solid article that could help:
+ * https://abhic159.medium.com/cnn-condensed-nearest-neighbors-3261bd0c39fb
+ *
+ * @param dataset The training dataset for the HBs.
+ * @param FIELD_LENGTH The number of attributes in the dataset.
+ * @return The reduced size training dataset.
+ */
+std::vector<std::vector<std::vector<float>>> DataUtil::condensedNearestNeighbors(
+    const std::vector<std::vector<std::vector<float>>>& dataset,
+    int FIELD_LENGTH
+) {
+    typedef std::vector<float> Point;
+    typedef std::pair<Point, int> LabeledPoint;
+
+    std::vector<LabeledPoint> condensedSet;
+
+    // Step 1: Add one sample per class
+    for (int cls = 0; cls < static_cast<int>(dataset.size()); ++cls) {
+        if (!dataset[cls].empty()) {
+            condensedSet.push_back(std::make_pair(dataset[cls][0], cls));
+        }
+    }
+
+    bool changed = true;
+    while (changed) {
+        changed = false;
+
+        for (int cls = 0; cls < static_cast<int>(dataset.size()); ++cls) {
+            for (int p = 0; p < static_cast<int>(dataset[cls].size()); ++p) {
+                const Point& pt = dataset[cls][p];
+
+                // Skip if this point is already in the condensed set
+                bool alreadyIn = false;
+                for (int i = 0; i < static_cast<int>(condensedSet.size()); ++i) {
+                    if (pt == condensedSet[i].first && cls == condensedSet[i].second) {
+                        alreadyIn = true;
+                        break;
+                    }
+                }
+                if (alreadyIn) continue;
+
+                // 1-NN classification
+                float bestDist = std::numeric_limits<float>::max();
+                int bestLabel = -1;
+
+                for (int i = 0; i < static_cast<int>(condensedSet.size()); ++i) {
+                    const Point& ref = condensedSet[i].first;
+                    int refLabel = condensedSet[i].second;
+
+                    float dist = 0.0f;
+                    for (int d = 0; d < FIELD_LENGTH; ++d) {
+                        float diff = pt[d] - ref[d];
+                        dist += diff * diff;
+                    }
+
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestLabel = refLabel;
+                    }
+                }
+
+                // If misclassified, add to condensed set
+                if (bestLabel != cls) {
+                    condensedSet.push_back(std::make_pair(pt, cls));
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    // Reconstruct the 3D vector [class][point][attr]
+    std::vector<std::vector<std::vector<float>>> result(dataset.size());
+    for (int i = 0; i < static_cast<int>(condensedSet.size()); ++i) {
+        const Point& pt = condensedSet[i].first;
+        int cls = condensedSet[i].second;
+        result[cls].push_back(pt);
+    }
+
+    return result;
+}

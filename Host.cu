@@ -23,7 +23,7 @@
 #include "./screen_output/PrintingUtil.h"
 #include "./data_utilities/DataUtil.h"
 #include "./simplifications/Simplifications.h"
-#include "ClassificationTesting/ClassificationTests.h"
+#include "classification_testing/ClassificationTests.h"
 using namespace std;
 
 #ifdef _WIN32
@@ -99,60 +99,6 @@ vector<vector<HyperBlock>> oneToRestHyper(const vector<vector<vector<float>>>& t
     return oneToRestBlocks;
 }
 
-/**
- * This is the OneToSome based method of HyperBlocks.
- *
- * It will generate hyperblocks for some ordering of the classes.
- * It should be used as a sieve.
- *
-    // Based on ordering, each should train on only the ones in front of them.
-    // Ex 0, 1, 2, 3, 4, 5
-    // 1st round =>  0 : 1, 2, 3, 4, 5
-    // 2nd round =>  1 : 2, 3, 4, 5
-    // 3rd round =>  2 : 3, 4, 5
- *
- */
-vector<vector<HyperBlock>> oneToSomeHyper(const vector<int>& ordering, const vector<vector<vector<float>>>& trainSet, vector<int> ecBestVecIdx) {
-    vector<vector<HyperBlock>> oneToSomeBlocks;
-    vector<HyperBlock> tempHBs;
-
-    cout << ordering.size() << endl;
-    cout << trainSet.size() << endl;
-    cout << ecBestVecIdx.size() << endl;
-
-    const int numClasses = trainSet.size();
-
-    for(int i = 0; i < numClasses; i++) {
-        cout << "Training Class (REAL LABEL): " << CLASS_MAP_INT[ordering[i]] << "  " << numClasses - i << " more classes." << endl;
-        tempHBs.clear();
-        // Train with this class as first class, and ALL others (remaining) as the second class.
-        vector<vector<vector<float>>> trainingData(2);
-        trainingData[0] = trainSet[ordering[i]];
-
-        // Add the training data for each of the remaining classes. (flatten each and put in "point-wise")
-        for(int j = i + 1; j < numClasses; j++) {
-            for(const auto& point : trainSet[ordering[j]]) {
-                trainingData[1].push_back(point);
-            }
-        }
-        vector<int> bestVecs(2);
-        bestVecs[0] = ecBestVecIdx[ordering[i]];
-        bestVecs[1] = ecBestVecIdx[ordering[i]]; // won't really be used since only gen for first class, so set to same
-        int genForClass = 0;
-
-        // Now we should call
-        IntervalHyperBlock::generateHBs(trainingData, tempHBs, bestVecs, FIELD_LENGTH, genForClass); // only go to class "0" for generating blocks.
-        oneToSomeBlocks.push_back(tempHBs);
-
-        // Set the HBs generated to have the correct class number.
-        for(auto& hb : oneToSomeBlocks[i]) {
-            hb.classNum = ordering[i];
-        }
-    }
-
-
-    return oneToSomeBlocks;
-}
 
 /* If we have classes a, b, c. then we should generate blocks to change this to a multi-step 2 class problem
    we will make blocks for a pair at a time.
@@ -203,51 +149,6 @@ vector<vector<HyperBlock>> oneToOneHyper(const vector<vector<vector<float>>>& tr
 
     return oneToOneHyperBlocks;
 }
-void try_expand_to_unit(std::vector<HyperBlock>& blocks,
-                        const std::vector<std::vector<std::vector<float>>>& dataset,
-                        float threshold = 0.1f) {
-
-    int numClasses = dataset.size();
-    int numAttributes = dataset[0][0].size();
-
-#pragma omp parallel for schedule(dynamic)
-    for (int b = 0; b < 12; ++b) {
-        HyperBlock& block = blocks[b];
-        int thisClass = block.classNum;
-
-        for (int attr = 0; attr < numAttributes; ++attr) {
-            if (block.minimums[attr].size() != 1 || block.maximums[attr].size() != 1)
-                continue;
-
-            float min = block.minimums[attr][0];
-            float max = block.maximums[attr][0];
-
-            if (std::abs(min) > threshold || std::abs(1.0f - max) > threshold)
-                continue;
-
-            bool blocked = false;
-
-            for (int cls = 0; cls < numClasses && !blocked; ++cls) {
-                if (cls == thisClass) continue;
-
-                for (const auto& point : dataset[cls]) {
-                    float val = point[attr];
-                    if (val < 0.0f || val > 1.0f) continue;
-
-                    if (block.inside_HB(numAttributes, point.data())) {
-                        blocked = true;
-                        break;
-                    }
-                }
-            }
-
-            if (!blocked) {
-                block.minimums[attr][0] = 0.0f;
-                block.maximums[attr][0] = 1.0f;
-            }
-        }
-    }
-}
 
 float testAccuracyOfHyperBlocks(vector<HyperBlock> &hyperBlocks, vector<vector<vector<float>>> &testData, vector<vector<vector<float>>> &trainingData, map<pair<int, int>, PointSummary>& pointSummaries, int k = 5, float threshold = 0.25) {
 
@@ -273,7 +174,7 @@ float testAccuracyOfHyperBlocks(vector<HyperBlock> &hyperBlocks, vector<vector<v
         }
     }
 
-    cout << "-------------------------FINAL CONFUSION MATRIX--------------------------" << endl;
+    cout << "-------------------------FINAL (HB + KNN predictions) CONFUSION MATRIX--------------------------" << endl;
     float finalAccuracy = PrintingUtil::printConfusionMatrix(finalConfusionMatrix, NUM_CLASSES, CLASS_MAP_INT);
     return finalAccuracy;
 }
@@ -902,171 +803,6 @@ void evaluateOneToOneHyperBlocks(
     cout << "\nOverall Accuracy: " << (static_cast<float>(correctPoints) / totalPoints) * 100.0f << "%\n";
 }
 
-/**
- *  We will attempt to find some "best" ordering of the classes by training normal HBs, then calling this function,
- *  this function will return the order that we believe is best to be used by the one-to-some method.
- *
- *  This is similar to using the LDA accuracies to sort the classes as best -> worst accuracy, but
- *  it is closer to what we should actually expect our blocks to do. The LDA is inherently different from
- *  how our blocks classify, and thus this should hopefully give us a better order.
- *
- *  Order will be determined by seeing which classes HyperBlocks swallow the most points from the wrong classes.
- *  (we also keep track of how many times a point of a class falls into wrong blocks)
- *
- * @param validationData The validation data set.
- * @param hyperBlocks The HyperBlocks which were trained WITHOUT using the validation points.
- * @return a vector<int> which is the recommended order to create one-to-some blocks in.
- */
-vector<int> findOneToSomeOrder(vector<vector<vector<float>>>& validationData, vector<HyperBlock>& hyperBlocks) {
-    int numClasses = validationData.size();
-
-    // Keep track of how many times a block from each class picks up points from other classes.
-    vector<int> hbClassOverclaims(numClasses, 0);  // based on the hyperblock.class
-    // This one will keep track of how many times A POINT from a class falls into multiple blocks.
-    vector<vector<int>> sneakyPointCount(numClasses, vector<int>(numClasses, 0));
-
-    for(int i = 0; i < numClasses; ++i) {
-        for (int j = 0; j < validationData[i].size(); ++j) {
-            const auto& point = validationData[i][j];
-
-            for(const auto& block : hyperBlocks) {
-                if(block.inside_HB(point.size(), point.data())) {
-                    if(i != block.classNum) { // Incorrect classification.
-                        hbClassOverclaims[block.classNum]++;    // How many times HBs classify the WRONG point!
-                        sneakyPointCount[i][block.classNum]++;  ;  // How many times POINTS of a class fall into wrong class HBs
-                    }
-                }
-            }
-        }
-    }
-
-    // Now we should look at the numbers for hbClassOverclaims to analyze which ordering would be the best.
-    // Save raw counts (temps)
-    ofstream outFile("hbClassOverclaims.csv"); if (!outFile.is_open()) {cerr << "Error opening file for writing: " << "hbClassOverclaims.csv" << endl;}for (size_t i = 0; i < hbClassOverclaims.size(); ++i) {outFile << i << "," << hbClassOverclaims[i] << "\n";}
-    ofstream outFile2("sneakyPointCount.csv");if (!outFile2.is_open()) {cerr << "Error opening file for writing: " << "sneakyPointCount.csv" << endl;}for (size_t i = 0; i < sneakyPointCount.size(); ++i) {for (size_t j = 0; j < sneakyPointCount[i].size(); ++j) {outFile2 << sneakyPointCount[i][j];if (j + 1 != sneakyPointCount[i].size())outFile2 << ",";}outFile2 << "\n";}
-
-
-    // Build mistake counts
-    vector<pair<int, int>> pointMistakes;   // (count, class)
-    vector<pair<int, int>> blockMistakes;   // (count, class)
-    vector<pair<int, int>> combinedMistakes; // (count, class)
-
-    for (int c = 0; c < numClasses; ++c) {
-        int pointMistakeSum = 0;
-        for (int other = 0; other < numClasses; ++other) {
-            pointMistakeSum += sneakyPointCount[c][other];
-        }
-
-        int blockMistake = hbClassOverclaims[c];
-        int combined = pointMistakeSum + blockMistake;
-
-        pointMistakes.emplace_back(pointMistakeSum, c);
-        blockMistakes.emplace_back(blockMistake, c);
-        combinedMistakes.emplace_back(combined, c);
-    }
-
-    // Now sort each list
-    auto sorter = [](const pair<int, int>& a, const pair<int, int>& b) {
-        return a.first < b.first; // sort by mistake counts ascending
-    };
-
-    sort(pointMistakes.begin(), pointMistakes.end(), sorter);
-    sort(blockMistakes.begin(), blockMistakes.end(), sorter);
-    sort(combinedMistakes.begin(), combinedMistakes.end(), sorter);
-
-    // Extract orders
-    vector<int> pointOrder, blockOrder, combinedOrder;
-    for (auto& p : pointMistakes) pointOrder.push_back(p.second);
-    for (auto& p : blockMistakes) blockOrder.push_back(p.second);
-    for (auto& p : combinedMistakes) combinedOrder.push_back(p.second);
-
-    // Save the ordering. (temp)
-    ofstream orderFile("orderings.csv"); if (!orderFile.is_open()) { cerr << "Error opening file for writing orderings.csv" << endl; } else { orderFile << "pointOrder:"; for (size_t i = 0; i < pointOrder.size(); ++i) { orderFile << " " << pointOrder[i]; if (i + 1 != pointOrder.size()) orderFile << ","; } orderFile << "\n"; orderFile << "blockOrder:"; for (size_t i = 0; i < blockOrder.size(); ++i) { orderFile << " " << blockOrder[i]; if (i + 1 != blockOrder.size()) orderFile << ","; } orderFile << "\n"; orderFile << "combinedOrder:"; for (size_t i = 0; i < combinedOrder.size(); ++i) { orderFile << " " << combinedOrder[i]; if (i + 1 != combinedOrder.size()) orderFile << ","; } orderFile << "\n"; orderFile.close(); }
-
-    return blockOrder;
-}
-
-
-/**
- * THIS IS THE PRECISION FROM THE CLASSIFIERS VIEW POINT.
- * For example, the HBs for class 0, we care about the precision of the HBs.
- *
- * We do not calculate for all points p_i in class 0, what is the precision of the overall model (all HBs of all classes).
- *
- * @param confusionMatrix
- * @return
- */
-vector<float> calculateHBClassPrecisions(vector<vector<long>>& confusionMatrix) {
-    // Find the precision of each of the classes of HB in the confusion matrix
-    // TP / (TP + FP)
-    vector<float> precisions(NUM_CLASSES, 0.0f);
-
-    for(int i = 0; i < confusionMatrix.size(); i++) {
-        int TP = 0;
-        int FP = 0;
-        for(int j = 0; j < confusionMatrix[i].size(); j++) {
-            if(i == j) {
-                TP += confusionMatrix[i][j];
-            }else {
-                FP += confusionMatrix[i][j];
-            }
-        }
-
-        long total = TP + FP;
-        if(total > 0) {
-            precisions[i] = static_cast<float>(TP) / total;
-        } else {
-            precisions[i] = 0.0f;
-        }
-    }
-
-    return precisions;
-}
-
-/**
- * We want to go through each class of HBs.
- * For each class of HBs, we want to find the percent of precison lost by the other classes.
- *
- * Ex HBs class 0
- * [0, 0, .12]
- * This indicates that class 0 and 1 caused NO precision lost. However, class 2 causes 12% to be lost.
- *
- * @param confusionMatrix
- * @return
- */
-vector<vector<float>> calculateByClassPrecisionLost(const vector<vector<long>>& confusionMatrix) {
-    int numClasses = confusionMatrix.size();
-    vector<vector<float>> precisionLoss(numClasses, vector<float>(numClasses, 0.0f));
-
-    for (int i = 0; i < numClasses; ++i) {
-        long TP = confusionMatrix[i][i];
-        long FP_total = 0;
-
-        for (int j = 0; j < numClasses; ++j) {
-            if (i != j) {
-                FP_total += confusionMatrix[i][j];
-            }
-        }
-
-        long total = TP + FP_total;
-        if (total == 0 || FP_total == 0) {
-            for (int j = 0; j < numClasses; ++j)
-                precisionLoss[i][j] = 0.0f;
-            continue;
-        }
-
-        float precisionLossTotal = static_cast<float>(FP_total) / total;  // actual precision loss (e.g., 0.01)
-
-        for (int j = 0; j < numClasses; ++j) {
-            if (i != j) {
-                // contribution of class j to total loss, scaled by total loss
-                precisionLoss[i][j] = precisionLossTotal * static_cast<float>(confusionMatrix[i][j]) / FP_total;
-            }
-        }
-    }
-
-    return precisionLoss;
-}
 
 
 /**

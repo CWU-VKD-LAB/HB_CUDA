@@ -1222,3 +1222,68 @@ events:
         
       exitCode: 1
 ...
+
+---
+events:
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.0/Modules/FindOpenMP.cmake:250 (try_compile)"
+      - "C:/Program Files/CMake/share/cmake-4.0/Modules/FindOpenMP.cmake:557 (_OPENMP_GET_FLAGS)"
+      - "CMakeLists.txt:9 (find_package)"
+    description: "Detecting CUDA OpenMP compiler info"
+    directories:
+      source: "C:/Users/asnyd/CLionProjects/HyperBlocks/build/CMakeFiles/CMakeScratch/TryCompile-y2vv40"
+      binary: "C:/Users/asnyd/CLionProjects/HyperBlocks/build/CMakeFiles/CMakeScratch/TryCompile-y2vv40"
+    cmakeVariables:
+      CMAKE_CUDA_ARCHITECTURES: "52"
+      CMAKE_CUDA_FLAGS: "-D_WINDOWS -Xcompiler=\" /GR /EHsc\""
+      CMAKE_CUDA_FLAGS_DEBUG: "-Xcompiler=\" -Zi -Ob0 -Od /RTC1\""
+      CMAKE_EXE_LINKER_FLAGS: "/machine:x64"
+    buildResult:
+      variable: "OpenMP_COMPILE_RESULT_CUDA_openmp"
+      cached: true
+      stdout: |
+        Change Dir: 'C:/Users/asnyd/CLionProjects/HyperBlocks/build/CMakeFiles/CMakeScratch/TryCompile-y2vv40'
+        
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_14f4e.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=17.0 /v:n
+        MSBuild version 17.11.9+a69bbaaf5 for .NET Framework
+        Build started 6/13/2025 12:18:13 PM.
+        
+        Project "C:\\Users\\asnyd\\CLionProjects\\HyperBlocks\\build\\CMakeFiles\\CMakeScratch\\TryCompile-y2vv40\\cmTC_14f4e.vcxproj" on node 1 (default targets).
+        PrepareForBuild:
+          Creating directory "cmTC_14f4e.dir\\Debug\\".
+          Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+          Creating directory "C:\\Users\\asnyd\\CLionProjects\\HyperBlocks\\build\\CMakeFiles\\CMakeScratch\\TryCompile-y2vv40\\Debug\\".
+          Creating directory "cmTC_14f4e.dir\\Debug\\cmTC_14f4e.tlog\\".
+        InitializeBuildStatus:
+          Creating "cmTC_14f4e.dir\\Debug\\cmTC_14f4e.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+          Touching "cmTC_14f4e.dir\\Debug\\cmTC_14f4e.tlog\\unsuccessfulbuild".
+        AddCudaCompileDeps:
+          C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.41.34120\\bin\\HostX64\\x64\\cl.exe /E /nologo /showIncludes /TP /D__CUDACC__ /D__CUDACC_VER_MAJOR__=12 /D__CUDACC_VER_MINOR__=6 /D_WINDOWS /DCMAKE_INTDIR="Debug" /D_MBCS /DCMAKE_INTDIR="Debug" /I"C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.6\\bin" /I"C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.6\\include" /I. /FIcuda_runtime.h /c C:\\Users\\asnyd\\CLionProjects\\HyperBlocks\\build\\CMakeFiles\\CMakeScratch\\TryCompile-y2vv40\\OpenMPTryFlag.cu 
+        Project "C:\\Users\\asnyd\\CLionProjects\\HyperBlocks\\build\\CMakeFiles\\CMakeScratch\\TryCompile-y2vv40\\cmTC_14f4e.vcxproj" (1) is building "C:\\Users\\asnyd\\CLionProjects\\HyperBlocks\\build\\CMakeFiles\\CMakeScratch\\TryCompile-y2vv40\\cmTC_14f4e.vcxproj" (1:2) on node 1 (CudaBuildCore target(s)).
+        CudaBuildCore:
+          Compiling CUDA source file OpenMPTryFlag.cu...
+          cmd.exe /C "C:\\Users\\asnyd\\AppData\\Local\\Temp\\tmp94c3c804323d4b26b7085a34848aad7d.cmd"
+          "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.6\\bin\\nvcc.exe"  --use-local-env -ccbin "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.41.34120\\bin\\HostX64\\x64" -x cu    -I"C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.6\\include"     --keep-dir cmTC_14f4e\\x64\\Debug  -maxrregcount=0   --machine 64 --compile -cudart static -openmp --generate-code=arch=compute_52,code=[compute_52,sm_52] -Xcompiler="/EHsc -Zi -Ob0" -g  -D_WINDOWS -D"CMAKE_INTDIR=\\"Debug\\"" -D_MBCS -D"CMAKE_INTDIR=\\"Debug\\"" -Xcompiler "/EHsc /W1 /nologo /Od /FS /Zi /RTC1 /MDd /GR" -Xcompiler "/FdcmTC_14f4e.dir\\Debug\\vc143.pdb" -o cmTC_14f4e.dir\\Debug\\OpenMPTryFlag.obj "C:\\Users\\asnyd\\CLionProjects\\HyperBlocks\\build\\CMakeFiles\\CMakeScratch\\TryCompile-y2vv40\\OpenMPTryFlag.cu"
+          
+          C:\\Users\\asnyd\\CLionProjects\\HyperBlocks\\build\\CMakeFiles\\CMakeScratch\\TryCompile-y2vv40>"C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.6\\bin\\nvcc.exe"  --use-local-env -ccbin "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.41.34120\\bin\\HostX64\\x64" -x cu    -I"C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.6\\include"     --keep-dir cmTC_14f4e\\x64\\Debug  -maxrregcount=0   --machine 64 --compile -cudart static -openmp --generate-code=arch=compute_52,code=[compute_52,sm_52] -Xcompiler="/EHsc -Zi -Ob0" -g  -D_WINDOWS -D"CMAKE_INTDIR=\\"Debug\\"" -D_MBCS -D"CMAKE_INTDIR=\\"Debug\\"" -Xcompiler "/EHsc /W1 /nologo /Od /FS /Zi /RTC1 /MDd /GR" -Xcompiler "/FdcmTC_14f4e.dir\\Debug\\vc143.pdb" -o cmTC_14f4e.dir\\Debug\\OpenMPTryFlag.obj "C:\\Users\\asnyd\\CLionProjects\\HyperBlocks\\build\\CMakeFiles\\CMakeScratch\\TryCompile-y2vv40\\OpenMPTryFlag.cu" 
+          nvcc fatal   : Unknown option '-openmp'
+        C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\MSBuild\\Microsoft\\VC\\v170\\BuildCustomizations\\CUDA 12.6.targets(799,9): error MSB3721: The command ""C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.6\\bin\\nvcc.exe"  --use-local-env -ccbin "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.41.34120\\bin\\HostX64\\x64" -x cu    -I"C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.6\\include"     --keep-dir cmTC_14f4e\\x64\\Debug  -maxrregcount=0   --machine 64 --compile -cudart static -openmp --generate-code=arch=compute_52,code=[compute_52,sm_52] -Xcompiler="/EHsc -Zi -Ob0" -g  -D_WINDOWS -D"CMAKE_INTDIR=\\"Debug\\"" -D_MBCS -D"CMAKE_INTDIR=\\"Debug\\"" -Xcompiler "/EHsc /W1 /nologo /Od /FS /Zi /RTC1 /MDd /GR" -Xcompiler "/FdcmTC_14f4e.dir\\Debug\\vc143.pdb" -o cmTC_14f4e.dir\\Debug\\OpenMPTryFlag.obj "C:\\Users\\asnyd\\CLionProjects\\HyperBlocks\\build\\CMakeFiles\\CMakeScratch\\TryCompile-y2vv40\\OpenMPTryFlag.cu"" exited with code 1. [C:\\Users\\asnyd\\CLionProjects\\HyperBlocks\\build\\CMakeFiles\\CMakeScratch\\TryCompile-y2vv40\\cmTC_14f4e.vcxproj]
+        Done Building Project "C:\\Users\\asnyd\\CLionProjects\\HyperBlocks\\build\\CMakeFiles\\CMakeScratch\\TryCompile-y2vv40\\cmTC_14f4e.vcxproj" (CudaBuildCore target(s)) -- FAILED.
+        Done Building Project "C:\\Users\\asnyd\\CLionProjects\\HyperBlocks\\build\\CMakeFiles\\CMakeScratch\\TryCompile-y2vv40\\cmTC_14f4e.vcxproj" (default targets) -- FAILED.
+        
+        Build FAILED.
+        
+        "C:\\Users\\asnyd\\CLionProjects\\HyperBlocks\\build\\CMakeFiles\\CMakeScratch\\TryCompile-y2vv40\\cmTC_14f4e.vcxproj" (default target) (1) ->
+        "C:\\Users\\asnyd\\CLionProjects\\HyperBlocks\\build\\CMakeFiles\\CMakeScratch\\TryCompile-y2vv40\\cmTC_14f4e.vcxproj" (CudaBuildCore target) (1:2) ->
+        (CudaBuildCore target) -> 
+          C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\MSBuild\\Microsoft\\VC\\v170\\BuildCustomizations\\CUDA 12.6.targets(799,9): error MSB3721: The command ""C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.6\\bin\\nvcc.exe"  --use-local-env -ccbin "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.41.34120\\bin\\HostX64\\x64" -x cu    -I"C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.6\\include"     --keep-dir cmTC_14f4e\\x64\\Debug  -maxrregcount=0   --machine 64 --compile -cudart static -openmp --generate-code=arch=compute_52,code=[compute_52,sm_52] -Xcompiler="/EHsc -Zi -Ob0" -g  -D_WINDOWS -D"CMAKE_INTDIR=\\"Debug\\"" -D_MBCS -D"CMAKE_INTDIR=\\"Debug\\"" -Xcompiler "/EHsc /W1 /nologo /Od /FS /Zi /RTC1 /MDd /GR" -Xcompiler "/FdcmTC_14f4e.dir\\Debug\\vc143.pdb" -o cmTC_14f4e.dir\\Debug\\OpenMPTryFlag.obj "C:\\Users\\asnyd\\CLionProjects\\HyperBlocks\\build\\CMakeFiles\\CMakeScratch\\TryCompile-y2vv40\\OpenMPTryFlag.cu"" exited with code 1. [C:\\Users\\asnyd\\CLionProjects\\HyperBlocks\\build\\CMakeFiles\\CMakeScratch\\TryCompile-y2vv40\\cmTC_14f4e.vcxproj]
+        
+            0 Warning(s)
+            1 Error(s)
+        
+        Time Elapsed 00:00:00.88
+        
+      exitCode: 1
+...

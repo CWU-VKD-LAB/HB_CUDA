@@ -38,7 +38,7 @@ set(SOURCES
         ./data_utilities/DataUtil.cpp
         ./knn/Knn.cpp
         ./screen_output/PrintingUtil.cpp
-        ./ClassificationTesting/ClassificationTests.cpp
+        ./classification_testing/ClassificationTests.cpp
 )
 
 # Add executable target

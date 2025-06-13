@@ -23,7 +23,7 @@
 #include "./screen_output/PrintingUtil.h"
 #include "./data_utilities/DataUtil.h"
 #include "./simplifications/Simplifications.h"
-#include "ClassificationTesting/ClassificationTests.h"
+#include "classification_testing/ClassificationTests.h"
 using namespace std;
 
 #ifdef _WIN32

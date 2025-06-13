@@ -76,7 +76,7 @@ This section is for users who prefer to compile the program manually instead of 
 
 - **Compile**:
 ```bash
-nvcc -Xcompiler /openmp -o a.exe ./Host.cu ./hyperblock/HyperBlock.cpp ./hyperblock_generation/MergerHyperBlock.cu ./data_utilities/DataUtil.cpp ./interval_hyperblock/IntervalHyperBlock.cu ./knn/Knn.cpp ./screen_output/PrintingUtil.cpp ./simplifications/Simplifications.cu ./ClassificationTesting/ClassificationTests.cpp -g -G -O3
+nvcc -Xcompiler /openmp -o a.exe ./Host.cu ./hyperblock/HyperBlock.cpp ./hyperblock_generation/MergerHyperBlock.cu ./data_utilities/DataUtil.cpp ./interval_hyperblock/IntervalHyperBlock.cu ./knn/Knn.cpp ./screen_output/PrintingUtil.cpp ./simplifications/Simplifications.cu ./classification_testing/ClassificationTests.cpp -g -G -O3
 ```
 
 - **Run**:
@@ -88,7 +88,7 @@ a.exe
 
 - **Compile**:
 ```bash
-nvcc -Xcompiler -fopenmp -o a ./Host.cu ./hyperblock/HyperBlock.cpp ./hyperblock_generation/MergerHyperBlock.cu ./data_utilities/DataUtil.cpp ./interval_hyperblock/IntervalHyperBlock.cu ./knn/Knn.cpp ./screen_output/PrintingUtil.cpp ./simplifications/Simplifications.cu ./ClassificationTesting/ClassificationTests.cpp -g -G -O3
+nvcc -Xcompiler -fopenmp -o a ./Host.cu ./hyperblock/HyperBlock.cpp ./hyperblock_generation/MergerHyperBlock.cu ./data_utilities/DataUtil.cpp ./interval_hyperblock/IntervalHyperBlock.cu ./knn/Knn.cpp ./screen_output/PrintingUtil.cpp ./simplifications/Simplifications.cu ./classification_testing/ClassificationTests.cpp -g -G -O3
 ```
 
 - **Run**:
@@ -112,7 +112,7 @@ Datasets used for training, testing, or classification must be in **CSV format**
 
 - Each row corresponds to one data sample (point).
 - Each column up to the last represents **normalized float features** in the range [0, 1].
-- The **last column** must be the **class label** as an integer (e.g., 0, 1, 2...).
+- The **last column** must be the **class label**.
 
 > ⚠️ If your dataset does **not** have a header row, **you must manually remove the first line**. The parser currently does **not differentiate** and will treat the first row as a header, silently discarding it.
 
@@ -150,7 +150,7 @@ HBs can be exported and imported in two formats:
 
 #### ⚠️ Important Notes:
 - The loader assumes that the saved blocks match the **dimensionality** of your current dataset. No consistency check is enforced in code.
-- If the Hyperblock save file and dataset do not align in number of attributes, the program **may silently fail or misclassify**.
+- If the HB save file and dataset do not align in number of attributes, the program **may silently fail or misclassify**.
 - CSV format **should only be used for demos or visual inspection**, not for preserving exact decision boundaries.
 
 ---

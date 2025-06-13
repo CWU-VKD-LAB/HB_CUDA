@@ -18,7 +18,10 @@ This repository, is a standalone C++/CUDA implementation of the DV2.0 Hyperblock
 ---
 ##  What are HBs?
 
-Hyperblocks are an interpretable, rule-based machine learning model. Each hyperblock defines axis-aligned bounds (min/max) for each attribute in the dataset, forming a hyper-rectangle in feature space.
+- Hyperblocks are an interpretable, rule-based machine learning model. Each hyperblock defines axis-aligned bounds (min/max) for each attribute in the dataset, forming a hyper-rectangle in feature space. 
+- The following is an example, classifying the Setosa class from the Fischer Iris dataset, using only a single clause (x3).
+
+![HyperBlock Example](images/setosa_hb_example.png)
 
 This structure supports:
 - Transparent decision-making

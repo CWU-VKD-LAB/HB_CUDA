@@ -44,6 +44,8 @@ void sumPointsPerBlockWrapper(int *dataPointBlocks, const int numPoints, int *nu
 
 void findBetterBlocksWrapper(const float *dataPointsArray, const int numAttributes, const int numPoints, const float *blockMins, const float *blockMaxes, const int *blockEdges, const int numBlocks, int *dataPointBlocks, int *numPointsInBlocks, int gridSize, int blockSize);
 
-void removeUselessAttributesWrapper(float* mins, float* maxes, const int* intervalCounts, const int minMaxLen, const int* blockEdges, const int numBlocks, const int* blockClasses, char* attrRemoveFlags, const int fieldLen, const float* dataset, const int numPoints, const int* classBorder, const int numClasses, const int *attributeOrder, int gridSize, int blockSize);
-
+__global__ void removeUselessAttributes(float* mins, float* maxes, const int minMaxLen, const int numBlocks, const int* blockClasses, char* attrRemoveFlags, const int fieldLen, const float* dataset, const int numPoints, const int* classBorder, const int numClasses, const int *attributeOrder);
+// same as above version, but this one assumes that the HBs are only one rule per attribute. so we can use a lot more efficient methods.
+// makes changes to block bounds directly in the kernel, no need for the dumb flags.
+__global__ void removeUselessAttributesNoDisjunctions(float *mins, float *maxes, const int numBlocks, const int FIELD_LENGTH, const int *blockClasses, const float *dataset, const int numPoints, const int *classBorder, const int numClasses, const int *attributeOrder);
 #endif

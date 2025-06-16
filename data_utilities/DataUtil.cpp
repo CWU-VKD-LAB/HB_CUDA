@@ -870,44 +870,29 @@ vector<vector<float>> DataUtil::flatMinMaxNoEncode(vector<HyperBlock> hyper_bloc
     int size = hyper_blocks.size();
     vector<float> flatMinsList;
     vector<float> flatMaxesList;
-    vector<float> blockEdges(size + 1, 0.0f);
     vector<float> blockClasses(size, 0.0f);
-    vector<float> intervalCounts(size * FIELD_LENGTH, 0.0f);
 
-    // First block starts at 0.
-    blockEdges[0] = 0.0f;
-    int idx = 0;
+    const int numAttributes = hyper_blocks.at(0).minimums.size();
 
     // Process each hyper block
     for (size_t hb = 0; hb < size; hb++) {
         HyperBlock& block = hyper_blocks[hb];
         // cast the classNum as a float so that we can put it in the vector of floats we are returning
         blockClasses[hb] = static_cast<float>(block.classNum);
-        int length = 0;
 
         // Iterate through each attribute in the block
-        for (size_t m = 0; m < block.minimums.size(); m++) {
-            // Number of possible MIN/MAX values for the attribute
-            size_t numIntervals = block.minimums[m].size();
-            length += static_cast<int>(numIntervals);
-
+        for (size_t m = 0; m < numAttributes; m++) {
             // Record the count of intervals for the current attribute
-            intervalCounts[idx] = static_cast<float>(numIntervals);
-            idx++;
-
-            // Add all intervals for the current attribute.
-            for (size_t i = 0; i < numIntervals; i++) {
-                flatMinsList.push_back(block.minimums[m][i]);
-                flatMaxesList.push_back(block.maximums[m][i]);
-            }
+            flatMinsList.push_back(block.minimums[m][0]);
+            flatMaxesList.push_back(block.maximums[m][0]);
         }
-        // Mark the end of the block by accumulating the length.
-        blockEdges[hb + 1] = blockEdges[hb] + length;
     }
 
     // Return the five arrays in a vector (order matches the original Java return)
-    return { flatMinsList, flatMaxesList, blockEdges, blockClasses, intervalCounts };
+    return { flatMinsList, flatMaxesList,  blockClasses };
 }
+
+
 
 
 void DataUtil::splitTrainTestByPercent(vector<vector<vector<float>>>& trainingData, vector<vector<vector<float>>>& testingData, float percentTrain) {

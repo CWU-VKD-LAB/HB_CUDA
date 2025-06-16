@@ -2,6 +2,7 @@
 // Created by Austin Snyder on 3/20/2025.
 //
 #include "Simplifications.h"
+#include "../hyperblock_generation/MergerHyperBlock.cuh"
 int Simplifications::REMOVAL_COUNT = 0;
 
 /**
@@ -9,7 +10,7 @@ int Simplifications::REMOVAL_COUNT = 0;
  *
  * Details are discussed further in "Fully Explainable Classification Models Using Hyperblocks", 2025. Ryan Gallagher, Austin Snyder, Boris Kovalerchuk
  */
-void Simplifications::removeUselessBlocks(std::vector<std::vector<std::vector<float>>> &data, std::vector<HyperBlock>& hyper_blocks) {
+void Simplifications::removeUselessBlocks(vector<vector<vector<float>>> &data, vector<HyperBlock>& hyper_blocks) {
     /*
      * The algorithm to remove useless blocks does basically this.
      *     - take one particular point in our dataset. Find the first HB that it fits into.
@@ -23,28 +24,28 @@ void Simplifications::removeUselessBlocks(std::vector<std::vector<std::vector<fl
     for (auto &c : data)
         datasetSize += c.size();
 
-    std::vector<std::vector<float>> minMaxResult = DataUtil::flattenMinsMaxesForRUB(hyper_blocks, FIELD_LENGTH);
-    std::vector<std::vector<float>> flattenedData =  DataUtil::flattenDataset(data);
+    vector<vector<float>> minMaxResult = DataUtil::flattenMinsMaxesForRUB(hyper_blocks, FIELD_LENGTH);
+    vector<vector<float>> flattenedData =  DataUtil::flattenDataset(data);
 
     // Use references to avoid copying.
-    const std::vector<float>& blockMins   = minMaxResult[0];
-    const std::vector<float>& blockMaxes  = minMaxResult[1];
+    const vector<float>& blockMins   = minMaxResult[0];
+    const vector<float>& blockMaxes  = minMaxResult[1];
 
-    // Cast each element from the third std::vector (floats) into ints.
-    const std::vector<float> &edgesAsFloats = minMaxResult[2];
-    std::vector<int> blockEdges;
+    // Cast each element from the third vector (floats) into ints.
+    const vector<float> &edgesAsFloats = minMaxResult[2];
+    vector<int> blockEdges;
     blockEdges.resize(minMaxResult[2].size());
     // cast result [2] to ints, since this is the block edges. the array which tells us where each block starts and ends (as indexes).
-    std::transform(edgesAsFloats.begin(), edgesAsFloats.end(), blockEdges.begin(),
+    transform(edgesAsFloats.begin(), edgesAsFloats.end(), blockEdges.begin(),
               [](float val) -> int { return static_cast<int>(val); });
 
     // Get the dataPointsArray (again using a reference).
-    const std::vector<float>& dataPointsArray = flattenedData[0];
+    const vector<float>& dataPointsArray = flattenedData[0];
 
     const int numPoints = dataPointsArray.size() / FIELD_LENGTH;
-    std::vector<int> dataPointBlocks(numPoints, 0);              // Each point's chosen block.
+    vector<int> dataPointBlocks(numPoints, 0);              // Each point's chosen block.
     const int numBlocks = hyper_blocks.size();                    // Number of hyperblocks.
-    std::vector<int> numPointsInBlocks(numBlocks, 0);              // Count of points in each hyperblock.
+    vector<int> numPointsInBlocks(numBlocks, 0);              // Count of points in each hyperblock.
 
     // Allocate device memory and copy data.
     float *d_dataPointsArray, *d_blockMins, *d_blockMaxes;
@@ -108,6 +109,132 @@ void Simplifications::removeUselessBlocks(std::vector<std::vector<std::vector<fl
     for (int i = numPointsInBlocks.size() - 1; i >= 0; i--) {
         if (numPointsInBlocks[i] <= REMOVAL_COUNT)
             hyper_blocks.erase(hyper_blocks.begin() + i);
+    }
+}
+
+/**
+ * Attempts to remove redundant attributes from hyperblocks.
+ *
+ * This can be done if the attribute is not needed for classification,
+ * for example if everything is seperable by x1, then we don't need to keep x2.
+ *
+ * Details are discussed further in "Fully Explainable Classification Models Using Hyperblocks", 2025. Ryan Gallagher, Austin Snyder, Boris Kovalerchuk
+ * @param hyper_blocks
+ * @param data
+ * @param attributeOrderings
+ */
+void Simplifications::removeUselessAttrNoDisjunction(vector<HyperBlock>& hyper_blocks, vector<vector<vector<float>>>& data, vector<vector<int>>& attributeOrderings) {
+    int FIELD_LENGTH = data[0][0].size();
+
+    // Prepare host data by flattening your data structures.
+    auto fMinMaxResult =  DataUtil::flatMinMaxNoEncode(hyper_blocks, FIELD_LENGTH);
+    auto fDataResult =  DataUtil::flattenDataset(data);
+
+    // Build host arrays from the flattened results:
+    vector<float> mins = fMinMaxResult[0];
+    vector<float> maxes = fMinMaxResult[1];
+    int minMaxLen = static_cast<int>(mins.size());
+
+
+    int numBlocks = static_cast<int>(hyper_blocks.size());
+
+    vector<int> blockClasses(fMinMaxResult[3].size());
+    for (size_t i = 0; i < fMinMaxResult[3].size(); i++) {
+        blockClasses[i] = static_cast<int>(fMinMaxResult[3][i]);
+    }
+
+    // Create flags array (initialize to 0).
+    vector<char> attrRemoveFlags(hyper_blocks.size() * FIELD_LENGTH, 0);
+
+    // Prepare the dataset.
+    vector<float> dataset = fDataResult[0];
+    int numPoints = static_cast<int>(dataset.size() / FIELD_LENGTH);
+    vector<float> transposedData(dataset.size(), 0.0f);
+
+    vector<int> classBorder(fDataResult[1].size());
+    for (size_t i = 0; i < fDataResult[1].size(); i++) {
+        classBorder[i] = static_cast<int>(fDataResult[1][i]);
+    }
+    int numClasses = static_cast<int>(hyper_blocks.size());
+
+    std::vector<int> attributeOrderingsFlattened(attributeOrderings.size() * FIELD_LENGTH, 0);
+    for (int i = 0; i < attributeOrderings.size(); i++) {
+        copy(attributeOrderings[i].begin(), attributeOrderings[i].end(),
+            attributeOrderingsFlattened.begin() + i * FIELD_LENGTH);
+    }
+
+    // Transpose the dataset, from point being a row, to a point being a column
+    int rows = numPoints;
+    int cols = FIELD_LENGTH;
+    for(int i = 0; i < rows; i++) {
+        for(int j = 0; j < cols; j++) {
+            transposedData[j*rows+i] = dataset[i * cols + j];
+        }
+    }
+
+    // Device pointers.
+    float* d_mins = nullptr;
+    float* d_maxes = nullptr;
+    int* d_blockClasses = nullptr;
+    char* d_attrRemoveFlags = nullptr;
+    float* d_dataset = nullptr;
+    int* d_classBorder = nullptr;
+    int* d_attributeOrderingsFlattened = nullptr;
+
+    // Allocate device memory.
+    cudaMalloc((void**)&d_mins, mins.size() * sizeof(float));
+    cudaMalloc((void**)&d_maxes, maxes.size() * sizeof(float));
+    cudaMalloc((void**)&d_blockClasses, blockClasses.size() * sizeof(int));
+    cudaMalloc((void**)&d_attrRemoveFlags, attrRemoveFlags.size() * sizeof(char));
+    cudaMalloc((void**)&d_dataset, transposedData.size() * sizeof(float));
+    cudaMalloc((void**)&d_classBorder, classBorder.size() * sizeof(int));
+    cudaMalloc((void**)&d_attributeOrderingsFlattened, attributeOrderingsFlattened.size() * sizeof(int));
+
+    // Copy host data to device.
+    cudaMemcpy(d_mins, mins.data(), mins.size() * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_maxes, maxes.data(), maxes.size() * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_blockClasses, blockClasses.data(), blockClasses.size() * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_attrRemoveFlags, attrRemoveFlags.data(), attrRemoveFlags.size() * sizeof(char), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_dataset, transposedData.data(), transposedData.size() * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_classBorder, classBorder.data(), classBorder.size() * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_attributeOrderingsFlattened, attributeOrderingsFlattened.data(), attributeOrderingsFlattened.size() * sizeof(int), cudaMemcpyHostToDevice);
+
+    // Determine execution configuration.
+    int blockSize;
+    int gridSize;
+
+    cudaError_t err = cudaOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, mergerHyperBlocks, 0, 0);
+    gridSize = (numBlocks + blockSize - 1) / blockSize;
+
+    // Launch the kernel.
+    removeUselessAttributesNoDisjunctions<<<gridSize, blockSize>>>(d_mins, d_maxes, numBlocks, FIELD_LENGTH, d_blockClasses, d_dataset, numPoints, d_classBorder, numClasses, d_attributeOrderingsFlattened);
+    //removeUselessAttributesNoDisjunctions(float *mins, float *maxes, const int numBlocks, const int FIELD_LENGTH, const int *blockClasses, const float *dataset, const int numPoints, const int *classBorder, const int numClasses, const int *attributeOrder){
+
+    cudaDeviceSynchronize();
+
+    // Copy results from device (flags) back to host.
+    cudaMemcpy(mins.data(), d_mins, mins.size() * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(maxes.data(), d_maxes, maxes.size() * sizeof(float), cudaMemcpyDeviceToHost);
+
+    // Free device memory.
+    cudaFree(d_mins);
+    cudaFree(d_maxes);
+    cudaFree(d_blockClasses);
+    cudaFree(d_attrRemoveFlags);
+    cudaFree(d_dataset);
+    cudaFree(d_classBorder);
+    cudaFree(d_attributeOrderingsFlattened);
+
+    // Go through the blocks, copy data back in.
+    int index = 0;
+    for(int i = 0; i < numBlocks; i++) {
+        auto& hb = hyper_blocks[i];
+        // Go through the attributes
+        for(int attr = 0; attr < FIELD_LENGTH; attr++) {
+            hb.minimums[attr][0] = mins[index];
+            hb.maximums[attr][0] = maxes[index];
+            index++;
+        }
     }
 }
 
@@ -246,7 +373,8 @@ void Simplifications::removeUselessAttr(std::vector<HyperBlock>& hyper_blocks, s
     }
 }
 
-std::vector<int> Simplifications::runSimplifications(std::vector<HyperBlock> &hyperBlocks, std::vector<std::vector<std::vector<float>>> &trainData, std::vector<std::vector<int>> &bestAttributeOrderings){
+
+vector<int> Simplifications::runSimplifications(vector<HyperBlock> &hyperBlocks, vector<vector<vector<float>>> &trainData, vector<vector<int>> &bestAttributeOrderings){
     int FIELD_LENGTH = trainData[0][0].size();
     int runCount = 0;
     int totalClauses = 0;

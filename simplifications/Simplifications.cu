@@ -124,7 +124,7 @@ void Simplifications::removeUselessBlocks(vector<vector<vector<float>>> &data, v
  * @param attributeOrderings
  */
 void Simplifications::removeUselessAttrNoDisjunction(vector<HyperBlock>& hyper_blocks, vector<vector<vector<float>>>& data, vector<vector<int>>& attributeOrderings) {
-    int FIELD_LENGTH = data[0][0].size();
+    const int FIELD_LENGTH = data[0][0].size();
 
     // Prepare host data by flattening your data structures.
     auto fMinMaxResult =  DataUtil::flatMinMaxNoEncode(hyper_blocks, FIELD_LENGTH);
@@ -133,23 +133,17 @@ void Simplifications::removeUselessAttrNoDisjunction(vector<HyperBlock>& hyper_b
     // Build host arrays from the flattened results:
     vector<float> mins = fMinMaxResult[0];
     vector<float> maxes = fMinMaxResult[1];
-    int minMaxLen = static_cast<int>(mins.size());
 
-
-    int numBlocks = static_cast<int>(hyper_blocks.size());
+    const int numBlocks = static_cast<int>(hyper_blocks.size());
 
     vector<int> blockClasses(fMinMaxResult[3].size());
     for (size_t i = 0; i < fMinMaxResult[3].size(); i++) {
         blockClasses[i] = static_cast<int>(fMinMaxResult[3][i]);
     }
 
-    // Create flags array (initialize to 0).
-    vector<char> attrRemoveFlags(hyper_blocks.size() * FIELD_LENGTH, 0);
-
     // Prepare the dataset.
-    vector<float> dataset = fDataResult[0];
-    int numPoints = static_cast<int>(dataset.size() / FIELD_LENGTH);
-    vector<float> transposedData(dataset.size(), 0.0f);
+    int numPoints = static_cast<int>(fDataResult[0].size() / FIELD_LENGTH);
+    vector<float> transposedData(fDataResult[0].size(), 0.0f);
 
     vector<int> classBorder(fDataResult[1].size());
     for (size_t i = 0; i < fDataResult[1].size(); i++) {
@@ -168,7 +162,7 @@ void Simplifications::removeUselessAttrNoDisjunction(vector<HyperBlock>& hyper_b
     int cols = FIELD_LENGTH;
     for(int i = 0; i < rows; i++) {
         for(int j = 0; j < cols; j++) {
-            transposedData[j*rows+i] = dataset[i * cols + j];
+            transposedData[j*rows+i] = fDataResult[0][i * cols + j];
         }
     }
 
@@ -176,7 +170,6 @@ void Simplifications::removeUselessAttrNoDisjunction(vector<HyperBlock>& hyper_b
     float* d_mins = nullptr;
     float* d_maxes = nullptr;
     int* d_blockClasses = nullptr;
-    char* d_attrRemoveFlags = nullptr;
     float* d_dataset = nullptr;
     int* d_classBorder = nullptr;
     int* d_attributeOrderingsFlattened = nullptr;
@@ -185,7 +178,6 @@ void Simplifications::removeUselessAttrNoDisjunction(vector<HyperBlock>& hyper_b
     cudaMalloc((void**)&d_mins, mins.size() * sizeof(float));
     cudaMalloc((void**)&d_maxes, maxes.size() * sizeof(float));
     cudaMalloc((void**)&d_blockClasses, blockClasses.size() * sizeof(int));
-    cudaMalloc((void**)&d_attrRemoveFlags, attrRemoveFlags.size() * sizeof(char));
     cudaMalloc((void**)&d_dataset, transposedData.size() * sizeof(float));
     cudaMalloc((void**)&d_classBorder, classBorder.size() * sizeof(int));
     cudaMalloc((void**)&d_attributeOrderingsFlattened, attributeOrderingsFlattened.size() * sizeof(int));
@@ -194,7 +186,6 @@ void Simplifications::removeUselessAttrNoDisjunction(vector<HyperBlock>& hyper_b
     cudaMemcpy(d_mins, mins.data(), mins.size() * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_maxes, maxes.data(), maxes.size() * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_blockClasses, blockClasses.data(), blockClasses.size() * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_attrRemoveFlags, attrRemoveFlags.data(), attrRemoveFlags.size() * sizeof(char), cudaMemcpyHostToDevice);
     cudaMemcpy(d_dataset, transposedData.data(), transposedData.size() * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_classBorder, classBorder.data(), classBorder.size() * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_attributeOrderingsFlattened, attributeOrderingsFlattened.data(), attributeOrderingsFlattened.size() * sizeof(int), cudaMemcpyHostToDevice);
@@ -212,7 +203,7 @@ void Simplifications::removeUselessAttrNoDisjunction(vector<HyperBlock>& hyper_b
 
     cudaDeviceSynchronize();
 
-    // Copy results from device (flags) back to host.
+    // Copy results from device  back to host.
     cudaMemcpy(mins.data(), d_mins, mins.size() * sizeof(float), cudaMemcpyDeviceToHost);
     cudaMemcpy(maxes.data(), d_maxes, maxes.size() * sizeof(float), cudaMemcpyDeviceToHost);
 
@@ -220,7 +211,6 @@ void Simplifications::removeUselessAttrNoDisjunction(vector<HyperBlock>& hyper_b
     cudaFree(d_mins);
     cudaFree(d_maxes);
     cudaFree(d_blockClasses);
-    cudaFree(d_attrRemoveFlags);
     cudaFree(d_dataset);
     cudaFree(d_classBorder);
     cudaFree(d_attributeOrderingsFlattened);
@@ -337,7 +327,7 @@ void Simplifications::removeUselessAttr(std::vector<HyperBlock>& hyper_blocks, s
     gridSize = (numBlocks + blockSize - 1) / blockSize;
 
     // Launch the kernel.
-    removeUselessAttributesWrapper(d_mins, d_maxes, d_intervalCounts, minMaxLen, d_blockEdges, numBlocks, d_blockClasses, d_attrRemoveFlags, FIELD_LENGTH, d_dataset, numPoints, d_classBorder, numClasses, d_attributeOrderingsFlattened, gridSize, blockSize);
+    removeUselessAttributes<<<gridSize, blockSize>>>(d_mins, d_maxes, d_intervalCounts, minMaxLen, d_blockEdges, numBlocks, d_blockClasses, d_attrRemoveFlags, FIELD_LENGTH, d_dataset, numPoints, d_classBorder, numClasses, d_attributeOrderingsFlattened);
     cudaDeviceSynchronize();
 
     // Copy results from device (flags) back to host.

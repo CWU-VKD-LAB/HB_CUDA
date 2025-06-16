@@ -27,7 +27,7 @@ __global__ void mergerHyperBlocks(
     const int numPoints, 
     const float *opposingPoints,
     float *hyperBlockMins, 
-    float *hyperBlockMaxes, 
+    float *hyperBlockMaxes,
     int *deleteFlags, 
     int *mergable
 ) 
@@ -495,6 +495,7 @@ __global__ void removeUselessAttributes(float* mins, float* maxes, const int* in
     }
 }
 
+
 // same as above version, but this one assumes that the HBs are only one rule per attribute. so we can use a lot more efficient methods.
 // makes changes to block bounds directly in the kernel, no need for the dumb flags.
 __global__ void removeUselessAttributesNoDisjunctions(
@@ -603,7 +604,6 @@ __global__ void removeUselessAttributesNoDisjunctions(
         __syncthreads();
     }
 }
-
 
 
 void mergerHyperBlocksWrapper(const int seedIndex, int *readSeedQueue, const int numBlocks, const int numAttributes, const int numPoints, const float *opposingPoints,float *hyperBlockMins, float *hyperBlockMaxes, int *deleteFlags, int *mergable, int gridSize, int blockSize, int sharedMemSize){

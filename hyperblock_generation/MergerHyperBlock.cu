@@ -495,6 +495,117 @@ __global__ void removeUselessAttributes(float* mins, float* maxes, const int* in
     }
 }
 
+// same as above version, but this one assumes that the HBs are only one rule per attribute. so we can use a lot more efficient methods.
+// makes changes to block bounds directly in the kernel, no need for the dumb flags.
+__global__ void removeUselessAttributesNoDisjunctions(
+    float *mins,
+    float *maxes,
+    const int numBlocks,
+    const int FIELD_LENGTH,
+    const int *blockClasses,
+    const float *__restrict__ dataset,
+    const int numPoints,
+    const int *classBorder,
+    const int *attributeOrder)
+{
+    int blockID  = blockIdx.x;
+    int threadID = threadIdx.x;
+
+    // set up our pointers to our shared memory
+    extern __shared__ float hyperBlockBounds[];
+    float *blockMins  = hyperBlockBounds;
+    float *blockMaxes = hyperBlockBounds + FIELD_LENGTH;
+
+    // shared scalars
+    __shared__ int classNum, classStart, classEnd;
+    __shared__ int attributeToRemove;               // current candidate
+    volatile __shared__ int attrRemovableWarp;      // 1 = still removable (volatile so every load hits shared mem)
+
+    //-------------------------------------------------------------------
+    // Handle the blocks assigned to this thread-block
+    //-------------------------------------------------------------------
+    for (int b = blockID; b < numBlocks; b += gridDim.x) {
+
+        /* Load bounds for this HB into shared memory ------------------ */
+        for (int i = threadID; i < FIELD_LENGTH; i += blockDim.x) {
+            blockMins [i] = mins [b * FIELD_LENGTH + i];
+            blockMaxes[i] = maxes[b * FIELD_LENGTH + i];
+        }
+
+        // initialize our flags and whatnot
+        if (threadID == 0) {
+            classNum   = blockClasses[b];
+            classStart = classBorder[classNum];
+            classEnd   = classBorder[classNum + 1];
+        }
+        __syncthreads();
+
+        /* Test every attribute for removability ----------------------- */
+        for (int attrIdx = 0; attrIdx < FIELD_LENGTH; ++attrIdx) {
+
+            // thread 0 resets stuff.
+            if (threadID == 0) {
+                attributeToRemove = attributeOrder[classNum * FIELD_LENGTH + attrIdx];
+                attrRemovableWarp = 1;               // reset block-wide flag
+            }
+            __syncthreads();
+
+            //---------------------------- point loop (warp-early-exit) --
+            int lane = threadID & 31; // warp lane ID
+
+            for (int p = threadID; p < numPoints; p += blockDim.x) {
+
+                // Skip own-class rows
+                if (p >= classStart && p < classEnd) continue;
+
+                // bail out early if another thread already vetoed removal
+                if (attrRemovableWarp == 0) break;
+
+                bool inBounds = true;
+                for (int a = 0; a < FIELD_LENGTH; ++a) {
+                    // skip the attribute we are “removing”
+                    if (a == attributeToRemove) continue;
+
+                    float v = dataset[a * numPoints + p];
+                    if (v < blockMins[a] || v > blockMaxes[a]) {
+                        inBounds = false;
+                        break;
+                    }
+                }
+
+                // Found a foreign-class point inside means that our attribute NOT removable
+                if (inBounds) {
+                    attrRemovableWarp = 0;
+                    break; // other lanes in this warp will see it soon
+                }
+            }
+
+            // warp-level ballot: if any lane in the warp has attrRemovableWarp == 0
+            // thread 0 of the warp writes 0; otherwise leaves it as-is.
+            unsigned int vote = __ballot_sync(0xFFFFFFFF, attrRemovableWarp);
+            if ((lane == 0) && (vote != 0xFFFFFFFF)) attrRemovableWarp = 0;
+
+            __syncthreads();
+
+            //-------------------------- apply the change ---------------
+            if (threadID == 0 && attrRemovableWarp) {
+                blockMins [attributeToRemove] = 0.0f;
+                blockMaxes[attributeToRemove] = 1.0f;
+            }
+            __syncthreads();
+        }
+
+        // now we just copy our bounds back into global memory from shared. 
+        for (int i = threadID; i < FIELD_LENGTH; i += blockDim.x) {
+            mins [b * FIELD_LENGTH + i] = blockMins [i];
+            maxes[b * FIELD_LENGTH + i] = blockMaxes[i];
+        }
+        __syncthreads();
+    }
+}
+
+
+
 void mergerHyperBlocksWrapper(const int seedIndex, int *readSeedQueue, const int numBlocks, const int numAttributes, const int numPoints, const float *opposingPoints,float *hyperBlockMins, float *hyperBlockMaxes, int *deleteFlags, int *mergable, int gridSize, int blockSize, int sharedMemSize){
 	mergerHyperBlocks<<<gridSize, blockSize, sharedMemSize>>>(
             seedIndex,

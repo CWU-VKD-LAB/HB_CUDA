@@ -1128,7 +1128,7 @@ void runInteractive() {
                 // testing for time and to determine if they are doing the same.
                 auto start = chrono::high_resolution_clock::now();
                 vector<HyperBlock> simpleVersionBlocks = hyperBlocks;
-                removeUselessAttrNoDisjunction(simpleVersionBlocks, trainingData, bestVectorsIndexes);
+                Simplifications::removeUselessAttrNoDisjunction(simpleVersionBlocks, trainingData, bestVectorsIndexes);
                 auto end = chrono::high_resolution_clock::now();
                 chrono::duration<double> diff = end - start;
                 cout << "Time taken (new version): " << diff.count() << " seconds" << endl;

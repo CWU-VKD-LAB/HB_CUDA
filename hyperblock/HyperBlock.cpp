@@ -104,7 +104,7 @@ float HyperBlock::distance_to_HB_Edge(int numAttributes, const float* point) con
  * @param summaries Point summaries from validation run (blockId -> PointSummary mapping)
  * @param NUM_CLASSES Total number of classes in the problem
  * @param blockIdx The unique index id of this HyperBlock
- * @param useVotedResult If this is true, the algorithm should use the final prediction to not penalize blocks that were wrong but didn't result in bad classificatrion.
+ * @param useVotedResult If this is true, the algorithm should use the final prediction to not penalize blocks that were wrong but didn't result in bad classification.
  * @return The precision of this HyperBlock (TP / (TP + FP))
  */
 void HyperBlock::setHBPrecisions(map<pair<int, int>, PointSummary> summaries, int NUM_CLASSES, bool useVotedResult) {

@@ -198,7 +198,7 @@ void Simplifications::removeUselessAttrNoDisjunction(vector<HyperBlock>& hyper_b
     gridSize = (numBlocks + blockSize - 1) / blockSize;
 
     // Launch the kernel.
-    removeUselessAttributesNoDisjunctions<<<gridSize, blockSize>>>(d_mins, d_maxes, numBlocks, FIELD_LENGTH, d_blockClasses, d_dataset, numPoints, d_classBorder, numClasses, d_attributeOrderingsFlattened);
+    removeUselessAttributesNoDisjunctionsWrapper(d_mins, d_maxes, numBlocks, FIELD_LENGTH, d_blockClasses, d_dataset, numPoints, d_classBorder, numClasses, d_attributeOrderingsFlattened, gridSize, blockSize);
     //removeUselessAttributesNoDisjunctions(float *mins, float *maxes, const int numBlocks, const int FIELD_LENGTH, const int *blockClasses, const float *dataset, const int numPoints, const int *classBorder, const int numClasses, const int *attributeOrder){
 
     cudaDeviceSynchronize();

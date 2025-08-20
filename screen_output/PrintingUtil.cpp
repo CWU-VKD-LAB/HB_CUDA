@@ -55,9 +55,9 @@ void PrintingUtil::displayMainMenu() {
 
     cout << "16. Find Best Parameters (Grid Search).\n";
     cout << "17. Generate Next Level HBs.\n";
-    cout << "18. K-Fold validation with Level N HBs.\n\n" << endl;
-    cout << "19. Generate and Test Precision Weighted HBs. (Experimental)";
-    cout << "20. Quit\n\n";
+    cout << "18. K-Fold validation with Level N HBs.\n";
+    cout << "19. Generate and Test Precision Weighted HBs. (Experimental)\n";
+    cout << "20. Quit\n\n" << endl;
 }
 
 
